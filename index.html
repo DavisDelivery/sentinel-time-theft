@@ -1,0 +1,2435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SENTINEL — Davis Delivery Time Theft Detection</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;700&family=Oswald:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #080a0d;
+  --s1:       #0c1018;
+  --s2:       #111822;
+  --s3:       #17202e;
+  --s4:       #1e2a3a;
+  --b1:       #1a2535;
+  --b2:       #243347;
+  --b3:       #2d4060;
+  --red:      #ff2d2d;
+  --red2:     #ff6b6b;
+  --amber:    #ffb020;
+  --amber2:   #ffd060;
+  --green:    #00e676;
+  --green2:   #69f0ae;
+  --blue:     #1e5b92;
+  --blue2:    #2979c8;
+  --blue3:    #4da3ff;
+  --cyan:     #00bcd4;
+  --text:     #dce8f5;
+  --text2:    #7e9bb5;
+  --text3:    #3d5470;
+  --mono:     'JetBrains Mono', monospace;
+  --head:     'Oswald', sans-serif;
+  --ui:       'Rajdhani', sans-serif;
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui);
+  min-height: 100vh;
+  overflow-x: hidden;
+  cursor: default;
+}
+
+/* Grid texture */
+body::after {
+  content:'';
+  position:fixed;
+  inset:0;
+  background-image:
+    linear-gradient(rgba(29,83,150,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(29,83,150,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* Scanlines */
+body::before {
+  content:'';
+  position:fixed;
+  inset:0;
+  background: repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.04) 3px,rgba(0,0,0,0.04) 4px);
+  pointer-events:none;
+  z-index:9999;
+}
+
+/* ── HEADER ── */
+.hdr {
+  position: sticky;
+  top: 0;
+  z-index: 500;
+  background: var(--s1);
+  border-bottom: 1px solid var(--b2);
+  display: flex;
+  align-items: stretch;
+  height: 52px;
+}
+
+.hdr-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+  border-right: 1px solid var(--b2);
+  background: linear-gradient(135deg, var(--s2), var(--s1));
+}
+
+.sentinel-eye {
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--red);
+  border-radius: 50%;
+  position: relative;
+  animation: eyePulse 3s ease-in-out infinite;
+}
+.sentinel-eye::after {
+  content:'';
+  position:absolute;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  width:10px;height:10px;
+  background:var(--red);
+  border-radius:50%;
+}
+@keyframes eyePulse {
+  0%,100%{box-shadow:0 0 0 0 rgba(255,45,45,0.4);}
+  50%{box-shadow:0 0 0 8px rgba(255,45,45,0);}
+}
+
+.brand-text {
+  display:flex;flex-direction:column;
+}
+.brand-name {
+  font-family:var(--head);
+  font-size:20px;
+  font-weight:700;
+  letter-spacing:0.15em;
+  color:var(--text);
+  line-height:1;
+}
+.brand-sub {
+  font-family:var(--mono);
+  font-size:9px;
+  color:var(--text3);
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+}
+
+.hdr-metrics {
+  display:flex;
+  align-items:center;
+  gap:0;
+  flex:1;
+  padding: 0 0 0 24px;
+}
+
+.hdr-metric {
+  display:flex;
+  flex-direction:column;
+  padding: 0 20px 0 0;
+  margin-right: 20px;
+  border-right: 1px solid var(--b1);
+}
+.hdr-metric:last-child{border:none;}
+
+.hm-val {
+  font-family:var(--head);
+  font-size:18px;
+  font-weight:600;
+  line-height:1;
+}
+.hm-lbl {
+  font-family:var(--mono);
+  font-size:8px;
+  color:var(--text3);
+  text-transform:uppercase;
+  letter-spacing:0.1em;
+  margin-top:2px;
+}
+
+.hdr-right {
+  display:flex;
+  align-items:center;
+  gap:16px;
+  padding:0 20px;
+  margin-left:auto;
+  border-left:1px solid var(--b1);
+}
+
+.status-pill {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 12px;
+  border-radius:2px;
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  border:1px solid var(--b2);
+  background:var(--s2);
+}
+.status-dot {
+  width:6px;height:6px;
+  border-radius:50%;
+  background:var(--text3);
+}
+.status-dot.active{background:var(--green);animation:pulse2 1.5s infinite;}
+.status-dot.running{background:var(--amber);animation:pulse2 0.8s infinite;}
+@keyframes pulse2{0%,100%{opacity:1;}50%{opacity:0.3;}}
+
+/* ── LAYOUT ── */
+.app {
+  display:grid;
+  grid-template-columns: 300px 1fr;
+  height: calc(100vh - 52px);
+  position:relative;
+  z-index:1;
+}
+
+/* ── SIDEBAR ── */
+.sidebar {
+  background: var(--s1);
+  border-right: 1px solid var(--b1);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+.sb-scroll {
+  flex:1;
+  overflow-y:auto;
+  padding:0 0 80px 0;
+}
+
+.sb-section {
+  padding:16px;
+  border-bottom:1px solid var(--b1);
+}
+
+.sb-title {
+  font-family:var(--mono);
+  font-size:9px;
+  color:var(--text3);
+  letter-spacing:0.15em;
+  text-transform:uppercase;
+  margin-bottom:12px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.sb-title::before {
+  content:'';
+  display:inline-block;
+  width:3px;height:3px;
+  background:var(--blue3);
+  border-radius:50%;
+}
+
+/* INPUTS */
+.field {
+  margin-bottom:10px;
+}
+.field label {
+  display:block;
+  font-family:var(--mono);
+  font-size:9px;
+  color:var(--text3);
+  letter-spacing:0.1em;
+  text-transform:uppercase;
+  margin-bottom:4px;
+}
+.field input, .field select {
+  width:100%;
+  background:var(--s2);
+  border:1px solid var(--b2);
+  color:var(--text);
+  padding:7px 10px;
+  font-family:var(--mono);
+  font-size:11px;
+  border-radius:2px;
+  outline:none;
+  transition:border-color 0.15s, box-shadow 0.15s;
+}
+.field input:focus,.field select:focus {
+  border-color:var(--blue2);
+  box-shadow:0 0 0 2px rgba(41,121,200,0.15);
+}
+
+/* THRESHOLD */
+.thresh {
+  margin-bottom:14px;
+}
+.thresh-hd {
+  display:flex;
+  justify-content:space-between;
+  font-family:var(--mono);
+  font-size:9px;
+  color:var(--text3);
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  margin-bottom:5px;
+}
+.thresh-val { color:var(--amber); font-weight:700; }
+
+input[type=range] {
+  width:100%;
+  -webkit-appearance:none;
+  height:3px;
+  background:var(--b2);
+  border-radius:2px;
+  outline:none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none;
+  width:12px;height:12px;
+  border-radius:50%;
+  background:var(--blue2);
+  cursor:pointer;
+  border:2px solid var(--bg);
+  box-shadow:0 0 6px rgba(41,121,200,0.5);
+}
+
+/* UPLOAD */
+.upzone {
+  border:1px dashed var(--b3);
+  border-radius:2px;
+  padding:14px;
+  text-align:center;
+  cursor:pointer;
+  transition:all 0.2s;
+  background:var(--s2);
+  margin-bottom:8px;
+  position:relative;
+  overflow:hidden;
+}
+.upzone::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  background:linear-gradient(135deg, transparent 40%, rgba(41,121,200,0.04));
+}
+.upzone:hover{border-color:var(--blue2);background:var(--s3);}
+.upzone input{display:none;}
+.upzone p{font-family:var(--mono);font-size:10px;color:var(--text3);position:relative;}
+.upzone.loaded p{color:var(--green);}
+
+/* WEIGHT PILLS */
+.weight-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:6px;
+}
+.weight-pill {
+  background:var(--s2);
+  border:1px solid var(--b1);
+  border-radius:2px;
+  padding:8px;
+}
+.weight-pill-name {
+  font-family:var(--mono);
+  font-size:8px;
+  color:var(--text3);
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  margin-bottom:4px;
+}
+.weight-pill-val {
+  font-family:var(--head);
+  font-size:16px;
+  font-weight:600;
+  color:var(--blue3);
+}
+.weight-pill-pts {
+  font-family:var(--mono);
+  font-size:8px;
+  color:var(--text3);
+}
+
+/* SCORE BREAKDOWN */
+.score-breakdown {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.sbd-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-family:var(--mono);
+  font-size:9px;
+}
+.sbd-name{color:var(--text2);flex:1;}
+.sbd-bar-track{flex:2;height:3px;background:var(--b1);border-radius:2px;overflow:hidden;}
+.sbd-bar-fill{height:100%;border-radius:2px;transition:width 0.5s;}
+.sbd-pts{color:var(--text3);width:30px;text-align:right;}
+
+/* STAT QUAD */
+.stat-quad {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:6px;
+}
+.sq-box {
+  background:var(--s2);
+  border:1px solid var(--b1);
+  border-radius:2px;
+  padding:10px 8px;
+  text-align:center;
+  position:relative;
+  overflow:hidden;
+}
+.sq-box::after {
+  content:'';
+  position:absolute;
+  bottom:0;left:0;right:0;
+  height:2px;
+}
+.sq-box.c::after{background:var(--red);}
+.sq-box.h::after{background:var(--amber);}
+.sq-box.m::after{background:var(--blue2);}
+.sq-box.ok::after{background:var(--green);}
+
+.sq-num {
+  font-family:var(--head);
+  font-size:32px;
+  font-weight:700;
+  line-height:1;
+}
+.sq-num.c{color:var(--red);}
+.sq-num.h{color:var(--amber);}
+.sq-num.m{color:var(--blue3);}
+.sq-num.ok{color:var(--green);}
+.sq-lbl{font-family:var(--mono);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;margin-top:2px;}
+
+/* BUTTONS */
+.btn {
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:11px;
+  font-family:var(--head);font-size:15px;font-weight:600;
+  letter-spacing:0.1em;text-transform:uppercase;
+  border:none;border-radius:2px;cursor:pointer;
+  transition:all 0.15s;margin-bottom:6px;
+}
+.btn-run {
+  background:linear-gradient(135deg, #c41f1f, var(--red));
+  color:#fff;
+  box-shadow:0 2px 20px rgba(255,45,45,0.25);
+}
+.btn-run:hover{box-shadow:0 4px 30px rgba(255,45,45,0.4);transform:translateY(-1px);}
+.btn-run:disabled{background:var(--s3);box-shadow:none;transform:none;cursor:not-allowed;color:var(--text3);}
+.btn-ghost {
+  background:transparent;
+  color:var(--text2);
+  border:1px solid var(--b2);
+}
+.btn-ghost:hover{border-color:var(--blue2);color:var(--text);}
+.btn-sm {
+  padding:5px 12px;font-size:12px;width:auto;margin-bottom:0;border-radius:2px;
+}
+.btn-blue {
+  background:var(--blue);color:#fff;
+}
+.btn-blue:hover{background:var(--blue2);}
+.btn-amber {
+  background:rgba(255,176,32,0.15);
+  color:var(--amber);
+  border:1px solid rgba(255,176,32,0.3);
+}
+.btn-amber:hover{background:rgba(255,176,32,0.25);}
+
+/* LOG */
+.log {
+  background:var(--bg);
+  border:1px solid var(--b1);
+  border-radius:2px;
+  height:110px;
+  overflow-y:auto;
+  padding:8px;
+  font-family:var(--mono);
+  font-size:10px;
+}
+.log-line{margin-bottom:2px;line-height:1.4;}
+.log-line.info{color:var(--text3);}
+.log-line.warn{color:var(--amber);}
+.log-line.err{color:var(--red2);}
+.log-line.ok{color:var(--green);}
+.log-line.hi{color:var(--blue3);}
+
+/* ── MAIN ── */
+.main {
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+/* TABS */
+.tabs {
+  display:flex;
+  background:var(--s1);
+  border-bottom:1px solid var(--b1);
+  padding: 0 20px;
+  gap:4px;
+  flex-shrink:0;
+}
+.tab {
+  padding:14px 18px;
+  font-family:var(--head);
+  font-size:13px;
+  font-weight:600;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--text3);
+  cursor:pointer;
+  border:none;
+  background:none;
+  border-bottom:3px solid transparent;
+  transition:all 0.15s;
+  position:relative;
+}
+.tab:hover{color:var(--text2);}
+.tab.active{color:var(--text);border-bottom-color:var(--red);}
+
+/* CONTENT */
+.content {
+  flex:1;
+  overflow-y:auto;
+  padding:20px;
+}
+
+/* EMPTY */
+.empty {
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  height:100%;min-height:300px;
+  color:var(--text3);text-align:center;
+}
+.empty-gfx {
+  font-size:60px;margin-bottom:20px;opacity:0.15;
+  animation:float 4s ease-in-out infinite;
+}
+@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
+.empty h2{font-family:var(--head);font-size:22px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;color:var(--text2);margin-bottom:8px;}
+.empty p{font-size:13px;max-width:380px;line-height:1.7;color:var(--text3);}
+
+/* FILTER BAR */
+.filter-bar {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:16px;
+  flex-wrap:wrap;
+}
+.fb-btn {
+  padding:5px 14px;
+  font-family:var(--mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase;
+  border:1px solid var(--b2);background:var(--s2);color:var(--text3);
+  border-radius:2px;cursor:pointer;transition:all 0.15s;
+}
+.fb-btn.active,.fb-btn:hover{border-color:var(--red);color:var(--red2);}
+.fb-btn.ah.active,.fb-btn.ah:hover{border-color:var(--amber);color:var(--amber);}
+.fb-btn.am.active,.fb-btn.am:hover{border-color:var(--blue2);color:var(--blue3);}
+.fb-btn.al.active,.fb-btn.al:hover{border-color:var(--text3);color:var(--text2);}
+
+.sort-select {
+  margin-left:auto;
+  background:var(--s2);border:1px solid var(--b2);color:var(--text2);
+  padding:5px 10px;font-family:var(--mono);font-size:10px;
+  border-radius:2px;outline:none;cursor:pointer;
+}
+
+/* DRIVER CARDS */
+.driver-stack {
+  display:flex;flex-direction:column;gap:8px;
+}
+
+.dcard {
+  background:var(--s1);
+  border:1px solid var(--b1);
+  border-radius:3px;
+  overflow:hidden;
+  animation:cardIn 0.25s ease forwards;
+  opacity:0;
+  transform:translateY(6px);
+  position:relative;
+}
+@keyframes cardIn{to{opacity:1;transform:translateY(0);}}
+
+.dcard::before {
+  content:'';
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:4px;
+}
+.dcard.critical::before{background:linear-gradient(180deg,var(--red),#8b0000);}
+.dcard.high::before{background:linear-gradient(180deg,var(--amber),#8b5e00);}
+.dcard.medium::before{background:linear-gradient(180deg,var(--blue2),var(--blue));}
+.dcard.low::before{background:var(--b2);}
+
+/* CARD HEADER */
+.dc-hd {
+  display:grid;
+  grid-template-columns: 48px 1fr auto auto auto;
+  align-items:center;
+  gap:14px;
+  padding:14px 16px 14px 20px;
+  cursor:pointer;
+  user-select:none;
+  transition:background 0.15s;
+}
+.dc-hd:hover{background:var(--s2);}
+
+.dc-rank {
+  font-family:var(--head);
+  font-size:26px;
+  font-weight:300;
+  color:var(--b3);
+  text-align:center;
+  line-height:1;
+}
+
+.dc-info h3 {
+  font-family:var(--head);
+  font-size:17px;
+  font-weight:600;
+  letter-spacing:0.04em;
+}
+
+.dc-meta {
+  display:flex;gap:10px;flex-wrap:wrap;margin-top:3px;
+}
+.dc-tag {
+  font-family:var(--mono);
+  font-size:9px;
+  color:var(--text3);
+}
+.dc-tag b{color:var(--text2);}
+
+/* SCORE RING */
+.score-ring {
+  position:relative;
+  width:52px;height:52px;
+  flex-shrink:0;
+}
+.score-ring svg{position:absolute;inset:0;transform:rotate(-90deg);}
+.score-ring-num {
+  position:absolute;
+  inset:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  font-family:var(--head);
+  font-size:14px;
+  font-weight:700;
+  line-height:1;
+}
+.score-ring-lbl{font-family:var(--mono);font-size:6px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;margin-top:1px;}
+
+/* RISK BADGE */
+.rbadge {
+  padding:4px 10px;
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  letter-spacing:0.1em;text-transform:uppercase;
+  border-radius:2px;
+  min-width:80px;text-align:center;
+  flex-shrink:0;
+}
+.rbadge.critical{background:rgba(255,45,45,0.1);color:var(--red);border:1px solid rgba(255,45,45,0.25);}
+.rbadge.high{background:rgba(255,176,32,0.1);color:var(--amber);border:1px solid rgba(255,176,32,0.25);}
+.rbadge.medium{background:rgba(41,121,200,0.1);color:var(--blue3);border:1px solid rgba(41,121,200,0.25);}
+.rbadge.low{background:var(--s2);color:var(--text3);border:1px solid var(--b1);}
+
+.expand-ico{color:var(--text3);font-size:14px;transition:transform 0.2s;background:none;border:none;cursor:pointer;padding:4px;}
+.expand-ico.open{transform:rotate(180deg);}
+
+/* CARD BODY */
+.dc-body{display:none;border-top:1px solid var(--b1);background:var(--s2);}
+.dc-body.open{display:block;}
+
+/* LAYER GRID */
+.layer-grid {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:1px;
+  background:var(--b1);
+  border-bottom:1px solid var(--b1);
+}
+.layer-cell {
+  background:var(--s1);
+  padding:10px 12px;
+  display:flex;flex-direction:column;gap:2px;
+}
+.lc-name{font-family:var(--mono);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;}
+.lc-val{font-family:var(--head);font-size:18px;font-weight:600;line-height:1;}
+.lc-sub{font-family:var(--mono);font-size:8px;color:var(--text3);}
+.lc-bar{height:2px;background:var(--b2);border-radius:1px;overflow:hidden;margin-top:4px;}
+.lc-bar-fill{height:100%;border-radius:1px;transition:width 0.6s;}
+
+/* FLAG LIST */
+.flag-list{padding:12px 16px;display:flex;flex-direction:column;gap:6px;}
+
+.flag-row {
+  display:grid;
+  grid-template-columns:24px 1fr auto auto;
+  align-items:center;
+  gap:12px;
+  background:var(--s1);
+  border:1px solid var(--b1);
+  border-radius:2px;
+  padding:10px 12px;
+  position:relative;
+  overflow:hidden;
+}
+.flag-row::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+}
+.flag-row.sev-critical::before{background:var(--red);}
+.flag-row.sev-high::before{background:var(--amber);}
+.flag-row.sev-medium::before{background:var(--blue2);}
+
+.flag-ico{font-size:14px;text-align:center;}
+.flag-txt h4{font-size:13px;font-weight:500;margin-bottom:2px;}
+.flag-txt p{font-family:var(--mono);font-size:10px;color:var(--text2);}
+.flag-pts{font-family:var(--mono);font-size:11px;font-weight:700;white-space:nowrap;}
+.flag-pts.c{color:var(--red2);}
+.flag-pts.h{color:var(--amber);}
+.flag-pts.m{color:var(--blue3);}
+
+.cam-btn {
+  background:rgba(30,91,146,0.2);
+  border:1px solid rgba(45,121,200,0.3);
+  color:var(--blue3);
+  padding:4px 10px;
+  font-family:var(--mono);font-size:9px;
+  border-radius:2px;cursor:pointer;white-space:nowrap;
+  transition:all 0.15s;
+}
+.cam-btn:hover{background:rgba(30,91,146,0.4);}
+
+/* TIMELINE */
+.timeline-wrap{padding:0 16px 16px;}
+.tl-title{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;}
+
+.tl-track {
+  position:relative;
+  padding-left:16px;
+  border-left:1px solid var(--b2);
+  display:flex;flex-direction:column;gap:4px;
+  max-height:180px;overflow-y:auto;
+}
+.tl-event {
+  display:grid;
+  grid-template-columns:70px 1fr;
+  gap:10px;
+  align-items:flex-start;
+  font-size:11px;
+  position:relative;
+}
+.tl-event::before{
+  content:'';
+  position:absolute;
+  left:-20px;top:6px;
+  width:7px;height:7px;
+  border-radius:50%;
+  background:var(--b2);
+  border:1px solid var(--b3);
+}
+.tl-event.flag-event::before{background:var(--red);border-color:var(--red2);box-shadow:0 0 6px rgba(255,45,45,0.4);}
+.tl-event.stop-event::before{background:var(--amber);border-color:var(--amber2);}
+.tl-event.move-event::before{background:var(--green);border-color:var(--green2);}
+
+.tl-time{font-family:var(--mono);font-size:10px;color:var(--text3);}
+.tl-desc{color:var(--text2);font-family:var(--mono);font-size:10px;line-height:1.4;}
+
+/* PEER BENCH */
+.peer-bar-wrap{padding:0 16px 16px;}
+.peer-bars{display:flex;flex-direction:column;gap:6px;}
+.peer-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;}
+.peer-name{width:120px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.peer-track{flex:1;height:8px;background:var(--b1);border-radius:2px;overflow:hidden;}
+.peer-fill{height:100%;border-radius:2px;transition:width 0.5s;}
+.peer-score{width:40px;text-align:right;color:var(--text3);}
+
+/* BOTTOM BAR */
+.sb-footer {
+  position:sticky;
+  bottom:0;
+  background:var(--s1);
+  border-top:1px solid var(--b1);
+  padding:12px 16px;
+}
+
+/* ── REPORT TAB ── */
+.rpt-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+.kpi-card{
+  background:var(--s1);border:1px solid var(--b1);border-radius:3px;
+  padding:16px;position:relative;overflow:hidden;
+}
+.kpi-card::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+}
+.kpi-card.red::after{background:var(--red);}
+.kpi-card.amber::after{background:var(--amber);}
+.kpi-card.blue::after{background:var(--blue2);}
+.kpi-card.green::after{background:var(--green);}
+
+.kpi-val{font-family:var(--head);font-size:40px;font-weight:700;line-height:1;}
+.kpi-val.red{color:var(--red);}
+.kpi-val.amber{color:var(--amber);}
+.kpi-val.blue{color:var(--blue3);}
+.kpi-val.green{color:var(--green);}
+.kpi-name{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;}
+.kpi-sub{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:4px;}
+
+/* REPORT TABLE */
+.rpt-table{width:100%;border-collapse:collapse;background:var(--s1);border:1px solid var(--b1);border-radius:3px;overflow:hidden;}
+.rpt-table th{
+  padding:10px 12px;text-align:left;
+  font-family:var(--mono);font-size:8px;color:var(--text3);
+  text-transform:uppercase;letter-spacing:0.12em;
+  background:var(--s2);border-bottom:1px solid var(--b2);
+}
+.rpt-table td{padding:10px 12px;border-bottom:1px solid var(--b1);vertical-align:middle;}
+.rpt-table tr:last-child td{border-bottom:none;}
+.rpt-table tr:hover td{background:var(--s2);}
+
+/* ALGORITHM TAB */
+.algo-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.algo-card{
+  background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:16px;
+}
+.algo-card h3{
+  font-family:var(--mono);font-size:9px;color:var(--text3);
+  text-transform:uppercase;letter-spacing:0.12em;margin-bottom:12px;
+  padding-bottom:8px;border-bottom:1px solid var(--b1);
+}
+.algo-row{
+  display:flex;justify-content:space-between;align-items:baseline;
+  padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.03);
+  font-size:12px;
+}
+.algo-row:last-child{border:none;}
+.algo-pts{font-family:var(--mono);font-size:11px;font-weight:700;}
+
+/* MODAL */
+.modal-bg{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,0.85);
+  backdrop-filter:blur(6px);
+  z-index:1000;
+  display:none;align-items:center;justify-content:center;
+}
+.modal-bg.open{display:flex;}
+.modal{
+  background:var(--s1);
+  border:1px solid var(--b2);
+  border-top:3px solid var(--blue2);
+  border-radius:4px;
+  padding:24px;
+  max-width:500px;width:90%;
+  animation:modalIn 0.2s ease;
+}
+@keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(0.97);}to{opacity:1;transform:none;}}
+.modal h2{
+  font-family:var(--head);font-size:18px;font-weight:600;
+  letter-spacing:0.06em;text-transform:uppercase;
+  margin-bottom:16px;display:flex;align-items:center;gap:10px;
+}
+.modal-info{
+  background:var(--s2);border:1px solid var(--b2);border-radius:2px;
+  padding:12px;margin-bottom:16px;
+}
+.modal-info p{font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:5px;}
+.modal-info p:last-child{margin-bottom:0;}
+.modal-info strong{color:var(--text);}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;}
+.modal-result{font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:12px;display:none;}
+.prog-bar{height:3px;background:var(--b1);border-radius:2px;overflow:hidden;margin-bottom:12px;display:none;}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue3));transition:width 0.2s;}
+
+/* SCROLLBARS */
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--b2);border-radius:3px;}
+
+/* SECTION TITLE */
+.sec-title{
+  font-family:var(--head);font-size:16px;font-weight:600;
+  letter-spacing:0.06em;text-transform:uppercase;
+  display:flex;align-items:center;gap:10px;
+  margin-bottom:14px;
+}
+.sec-badge{
+  background:var(--red);color:#fff;
+  font-family:var(--mono);font-size:9px;
+  padding:2px 8px;border-radius:2px;
+}
+
+@media(max-width:768px){
+  .app{grid-template-columns:1fr;}
+  .sidebar{display:none;}
+  .mobile-toggle{display:flex !important;}
+  .layer-grid{grid-template-columns:1fr 1fr;}
+  .rpt-kpis{grid-template-columns:1fr 1fr;}
+  .algo-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <button class="mobile-toggle" style="display:none;align-items:center;justify-content:center;background:none;border:1px solid rgba(255,255,255,0.3);border-radius:8px;color:#ff2d2d;font-size:20px;cursor:pointer;padding:6px 10px;margin-right:12px" id="mobileMenuBtn">&#9776;</button>
+  <div class="hdr-brand">
+    <div class="sentinel-eye"></div>
+    <div class="brand-text">
+      <div class="brand-name">SENTINEL</div>
+      <div class="brand-sub">Davis Delivery // Time Theft Detection v2.0</div>
+    </div>
+  </div>
+  <div class="hdr-metrics">
+    <div class="hdr-metric">
+      <div class="hm-val" id="hmDrivers" style="color:var(--blue3)">—</div>
+      <div class="hm-lbl">Drivers Analyzed</div>
+    </div>
+    <div class="hdr-metric">
+      <div class="hm-val" id="hmFlagged" style="color:var(--red)">—</div>
+      <div class="hm-lbl">Flagged</div>
+    </div>
+    <div class="hdr-metric">
+      <div class="hm-val" id="hmHours" style="color:var(--amber)">—</div>
+      <div class="hm-lbl">Est. Stolen Hrs</div>
+    </div>
+    <div class="hdr-metric">
+      <div class="hm-val" id="hmDollars" style="color:var(--amber2)">—</div>
+      <div class="hm-lbl">Est. $ Lost</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="status-pill">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusTxt">STANDBY</span>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app">
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+<div class="sb-scroll">
+
+  <!-- MOTIVE -->
+  <div class="sb-section">
+    <div class="sb-title">Motive API</div>
+    <div class="field">
+      <label>API Key</label>
+      <input type="password" id="motiveKey" value="2eb96247-8869-4f47-8062-6964c1dc77a8">
+    </div>
+    <div class="field">
+      <label>Audit Date</label>
+      <input type="date" id="auditDate">
+    </div>
+    <div class="field">
+      <label>Driver Wage ($/hr)</label>
+      <input type="number" id="wageRate" value="23" min="10" max="50">
+    </div>
+  </div>
+
+  <!-- TIME CLOCK -->
+  <div class="sb-section">
+    <div class="sb-title">Time Clock Data</div>
+    <div class="upzone" id="upZone" onclick="document.getElementById('tcFile').click()">
+      <input type="file" id="tcFile" accept=".csv,.txt" onchange="parseCSV(event)">
+      <p id="upLabel">📋 Upload clock-in/out CSV</p>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:8px;line-height:1.6;">
+      Expected columns:<br>name, truck, clock_in, clock_out
+    </div>
+    <button class="btn btn-run" onclick="fetchLiveClockData()" style="font-size:13px;padding:9px;margin-bottom:6px;">🔴 FETCH LIVE FROM B600</button>
+    <button class="btn btn-ghost" onclick="loadDemo()">⚡ Load Demo Data (8 drivers)</button>
+  </div>
+
+  <!-- THRESHOLDS -->
+  <div class="sb-section">
+    <div class="sb-title">Detection Thresholds</div>
+
+    <div class="thresh">
+      <div class="thresh-hd"><span>Unexplained Stop</span><span class="thresh-val" id="tv1">15 min</span></div>
+      <input type="range" min="5" max="45" value="15" id="t1" oninput="document.getElementById('tv1').textContent=this.value+' min'">
+    </div>
+    <div class="thresh">
+      <div class="thresh-hd"><span>Clock/Engine Gap</span><span class="thresh-val" id="tv2">60 min</span></div>
+      <input type="range" min="15" max="120" value="60" id="t2" oninput="document.getElementById('tv2').textContent=this.value+' min'">
+    </div>
+    <div class="thresh">
+      <div class="thresh-hd"><span>Late Start Buffer</span><span class="thresh-val" id="tv3">20 min</span></div>
+      <input type="range" min="5" max="45" value="20" id="t3" oninput="document.getElementById('tv3').textContent=this.value+' min'">
+    </div>
+    <div class="thresh">
+      <div class="thresh-hd"><span>Early Stop Buffer</span><span class="thresh-val" id="tv4">20 min</span></div>
+      <input type="range" min="5" max="45" value="20" id="t4" oninput="document.getElementById('tv4').textContent=this.value+' min'">
+    </div>
+    <div class="thresh">
+      <div class="thresh-hd"><span>Velocity Floor (mph)</span><span class="thresh-val" id="tv5">12 mph</span></div>
+      <input type="range" min="5" max="30" value="12" id="t5" oninput="document.getElementById('tv5').textContent=this.value+' mph'">
+    </div>
+    <div class="thresh">
+      <div class="thresh-hd"><span>Micro-Stop Cluster</span><span class="thresh-val" id="tv6">3 stops</span></div>
+      <input type="range" min="2" max="8" value="3" id="t6" oninput="document.getElementById('tv6').textContent=this.value+' stops'">
+    </div>
+    <div class="thresh">
+      <div class="thresh-hd"><span>Peer Score Deviation</span><span class="thresh-val" id="tv7">25%</span></div>
+      <input type="range" min="10" max="60" value="25" id="t7" oninput="document.getElementById('tv7').textContent=this.value+'%'">
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="sb-section">
+    <div class="sb-title">Risk Distribution</div>
+    <div class="stat-quad">
+      <div class="sq-box c"><div class="sq-num c" id="sc">0</div><div class="sq-lbl">Critical</div></div>
+      <div class="sq-box h"><div class="sq-num h" id="sh">0</div><div class="sq-lbl">High</div></div>
+      <div class="sq-box m"><div class="sq-num m" id="sm">0</div><div class="sq-lbl">Medium</div></div>
+      <div class="sq-box ok"><div class="sq-num ok" id="sl">0</div><div class="sq-lbl">Clean</div></div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div class="sb-section">
+    <div class="sb-title">Audit Log</div>
+    <div class="log" id="logPanel">
+      <div class="log-line info">SENTINEL v2.0 — system ready</div>
+    </div>
+  </div>
+
+</div><!-- end sb-scroll -->
+
+<!-- FOOTER BUTTONS -->
+<div class="sb-footer">
+  <button class="btn btn-run" id="runBtn" onclick="runAudit()">⚡ ENGAGE SENTINEL</button>
+  <button class="btn btn-ghost" onclick="exportCSV()">📊 Export Report CSV</button>
+</div>
+</div><!-- end sidebar -->
+
+<!-- MAIN -->
+<div class="main">
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
+    <button class="tab" onclick="showTab('report',this)">📊 Summary Report</button>
+    <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
+  </div>
+
+  <!-- FLAGS TAB -->
+  <div id="tab-flags" class="content">
+    <div class="empty" id="emptyState">
+      <div class="empty-gfx">👁️</div>
+      <h2>Sentinel is watching</h2>
+      <p>Load driver time clock data and run the audit. Sentinel will cross-reference GPS telemetry, velocity physics, micro-stop patterns, peer benchmarking, and 8 detection layers to surface time theft.</p>
+    </div>
+    <div id="flagsContent" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="sec-title">
+          Driver Threat Board
+          <span class="sec-badge" id="flagBadge">0 flagged</span>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <button class="fb-btn active" onclick="setFilter('all',this)">All</button>
+        <button class="fb-btn" onclick="setFilter('critical',this)">🔴 Critical</button>
+        <button class="fb-btn ah" onclick="setFilter('high',this)">🟡 High</button>
+        <button class="fb-btn am" onclick="setFilter('medium',this)">🔵 Medium</button>
+        <button class="fb-btn al" onclick="setFilter('low',this)">⚪ Clean</button>
+        <select class="sort-select" onchange="setSort(this.value)">
+          <option value="score">Sort: Risk Score</option>
+          <option value="stolen">Sort: Stolen Hours</option>
+          <option value="flags">Sort: Flag Count</option>
+          <option value="name">Sort: Name A-Z</option>
+        </select>
+      </div>
+      <div class="driver-stack" id="driverStack"></div>
+    </div>
+  </div>
+
+  <!-- REPORT TAB -->
+  <div id="tab-report" class="content" style="display:none;">
+    <div class="empty" id="rptEmpty">
+      <div class="empty-gfx">📊</div>
+      <h2>No Report Yet</h2>
+      <p>Run an audit to generate the summary report.</p>
+    </div>
+    <div id="rptContent" style="display:none;">
+      <div class="rpt-kpis" id="rptKpis"></div>
+      <div class="sec-title" style="margin-bottom:12px;">Full Driver Breakdown</div>
+      <table class="rpt-table" id="rptTable"></table>
+    </div>
+  </div>
+
+  <!-- ALGORITHM TAB -->
+  <div id="tab-algo" class="content" style="display:none;">
+    <div class="sec-title" style="margin-bottom:16px;">Detection Algorithm — 8 Layers</div>
+    <div class="algo-grid">
+
+      <div class="algo-card">
+        <h3>Layer 1–4: Time & Motion</h3>
+        <div class="algo-row"><span>⏱️ Clock vs Engine time gap &gt; threshold</span><span class="algo-pts" style="color:var(--red2)">+35</span></div>
+        <div class="algo-row"><span>🚀 Velocity too low between stops (dawdling)</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
+        <div class="algo-row"><span>📐 Miles driven vs clocked hours mismatch</span><span class="algo-pts" style="color:var(--red2)">+30</span></div>
+        <div class="algo-row"><span>🌅 Late first GPS movement after clock-in</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>🏁 Truck stopped moving before clock-out</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>🚨 GPS movement detected after clock-out</span><span class="algo-pts" style="color:var(--red2)">+45</span></div>
+      </div>
+
+      <div class="algo-card">
+        <h3>Layer 5–6: Stop Pattern Analysis</h3>
+        <div class="algo-row"><span>🅿️ Unexplained stop at unknown location</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
+        <div class="algo-row"><span>🔁 Micro-stop cluster (many short stops)</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>🗺️ Repeated same non-delivery location</span><span class="algo-pts" style="color:var(--amber)">+15</span></div>
+        <div class="algo-row"><span>🔴 Warehouse geofence — clocked not moving</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
+        <div class="algo-row"><span>📍 Route deviation &gt;2mi from expected path</span><span class="algo-pts" style="color:var(--blue3)">+10</span></div>
+        <div class="algo-row"><span>⏳ Excessive dwell vs stop type baseline</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+      </div>
+
+      <div class="algo-card">
+        <h3>Layer 7: Personal Baseline Deviation</h3>
+        <div class="algo-row"><span>📈 Today's pace vs driver's own 30-day avg</span><span class="algo-pts" style="color:var(--amber)">+0–30</span></div>
+        <div class="algo-row"><span>Stop count below personal baseline</span><span class="algo-pts" style="color:var(--blue3)">+15</span></div>
+        <div class="algo-row"><span>Avg stop duration above personal baseline</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>Completion time vs personal avg for route</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--b1);">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);line-height:1.7;">
+            Baseline uses simulated 30-day history. Wire to Motive historical API for real baseline computation. Higher weight given to established drivers (60+ day history).
+          </div>
+        </div>
+      </div>
+
+      <div class="algo-card">
+        <h3>Layer 8: Peer Benchmarking</h3>
+        <div class="algo-row"><span>Driver efficiency vs route peer group avg</span><span class="algo-pts" style="color:var(--amber)">+0–25</span></div>
+        <div class="algo-row"><span>Miles/hr below peer group floor</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>Stop rate below peer group floor</span><span class="algo-pts" style="color:var(--blue3)">+15</span></div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--b1);">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);line-height:1.7;">
+            Compares each driver against all drivers running similar routes (same day, same region). A 25%+ deviation from peer median triggers flags. Accounts for traffic — all peers on same day experience same conditions.
+          </div>
+        </div>
+      </div>
+
+      <div class="algo-card">
+        <h3>Risk Score Bands</h3>
+        <div class="algo-row"><span style="color:var(--red);">■ CRITICAL ≥ 80</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Immediate action + cam pull</span></div>
+        <div class="algo-row"><span style="color:var(--amber);">■ HIGH 50–79</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Manager review within 24h</span></div>
+        <div class="algo-row"><span style="color:var(--blue3);">■ MEDIUM 25–49</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Monitor 5-day pattern</span></div>
+        <div class="algo-row"><span style="color:var(--text3);">■ LOW &lt; 25</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Log only</span></div>
+      </div>
+
+      <div class="algo-card">
+        <h3>Planned Data Integrations</h3>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text2);line-height:2;">
+          <div>🔄 Live time clock API (pending software ID)</div>
+          <div>🔄 NuVizz stop completion cross-reference</div>
+          <div>🔄 Motive fuel card transaction geo-check</div>
+          <div>🔄 Samsara data comparison/fallback</div>
+          <div>🔄 7 and 30-day trend acceleration scoring</div>
+          <div>🔄 Customer geofence database (all stops)</div>
+          <div>🔄 Automated daily email digest</div>
+          <div>✅ Motive dash cam video recall API</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- end main -->
+</div><!-- end app -->
+
+<!-- DASH CAM MODAL -->
+<div class="modal-bg" id="camBg">
+  <div class="modal">
+    <h2>📹 Request Dash Cam</h2>
+    <div class="modal-info" id="camInfo"></div>
+    <div class="prog-bar" id="camProg"><div class="prog-fill" id="camFill" style="width:0%"></div></div>
+    <div class="modal-result" id="camResult"></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm btn-ghost" onclick="closeCam()">Cancel</button>
+      <button class="btn btn-sm btn-blue" id="camConfirm" onclick="submitCam()">📹 Request Video</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════
+let results = [], clockData = [], curFilter='all', curSort='score', camPending=null;
+
+const WAGE = () => parseFloat(document.getElementById('wageRate').value)||23;
+const T = (id) => parseInt(document.getElementById(id).value);
+
+// Known non-delivery location types (classified by name pattern)
+const KNOWN_STOPS = ['warehouse','depot','terminal','distribution'];
+const SUSPICIOUS_LOCS = ['QuikTrip','Chick-fil-A','McDonald\'s','Wendy\'s','Waffle House','Cracker Barrel',
+  'Walmart','Target','Dollar General','Planet Fitness','Residence','Apartment','Subdivision',
+  'Parking Lot','Rest Area','Church','Park','Lake','Marina'];
+
+// ═══════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════
+document.addEventListener('DOMContentLoaded',()=>{
+  const d = new Date().toISOString().split('T')[0];
+  document.getElementById('auditDate').value = d;
+});
+
+// ═══════════════════════════════════════════
+// LOGGING
+// ═══════════════════════════════════════════
+function log(msg, t='info'){
+  const p = document.getElementById('logPanel');
+  const d = document.createElement('div');
+  d.className=`log-line ${t}`;
+  const ts = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  d.textContent=`[${ts}] ${msg}`;
+  p.appendChild(d);
+  p.scrollTop=p.scrollHeight;
+}
+
+// ═══════════════════════════════════════════
+// DEMO DATA
+// ═══════════════════════════════════════════
+function loadDemo(){
+  clockData=[
+    {name:'Trevor Seyers',   truck:'0608',clockIn:'06:42',clockOut:'16:58',shiftHrs:10.0,routeType:'urban'},
+    {name:'Trevarr Howard',  truck:'4757',clockIn:'06:55',clockOut:'17:30',shiftHrs:10.0,routeType:'suburban'},
+    {name:'Brent Dixon',     truck:'0294',clockIn:'07:10',clockOut:'15:45',shiftHrs:8.5, routeType:'urban'},
+    {name:'Marcus Williams', truck:'1142',clockIn:'06:30',clockOut:'17:00',shiftHrs:10.5,routeType:'suburban'},
+    {name:'James Calloway',  truck:'2287',clockIn:'07:00',clockOut:'16:30',shiftHrs:9.5, routeType:'rural'},
+    {name:'Derek Fountain',  truck:'3391',clockIn:'06:45',clockOut:'17:15',shiftHrs:10.5,routeType:'urban'},
+    {name:'Anthony Pierce',  truck:'5503',clockIn:'07:15',clockOut:'16:00',shiftHrs:8.75,routeType:'suburban'},
+    {name:'Kevin Stokes',    truck:'6674',clockIn:'06:50',clockOut:'17:45',shiftHrs:11.0,routeType:'rural'},
+  ];
+  document.getElementById('upZone').classList.add('loaded');
+  document.getElementById('upLabel').textContent=`✅ Demo: ${clockData.length} drivers loaded`;
+  log(`Demo data loaded — ${clockData.length} drivers ready`,'ok');
+}
+
+// ═══════════════════════════════════════════
+// LIVE: FETCH FROM TOTALPASS B600
+// ═══════════════════════════════════════════
+async function fetchLiveClockData() {
+  const date = document.getElementById('auditDate').value;
+  log(`Fetching TotalPass B600 data for ${date}...`, 'hi');
+  setStatus('running');
+
+  try {
+    const resp = await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await resp.json();
+
+    // Log scraper output
+    if (data.logs) data.logs.forEach(l => log(`[B600] ${l}`, 'info'));
+
+    if (data.success && data.records && data.records.length > 0) {
+      // Map TotalPass records to SENTINEL format
+      clockData = data.records.map(r => ({
+        name:      r.name,
+        emp_id:    r.emp_id,
+        truck:     r.emp_id || '', // emp_id often matches truck # — override in driver mapping
+        clockIn:   r.clock_in,
+        clockOut:  r.clock_out,
+        shiftHrs:  r.clock_in && r.clock_out ? (t2m(r.clock_out) - t2m(r.clock_in)) / 60 : 0,
+        routeType: 'suburban', // default — will be overridden by driver mapping below
+        date:      r.date
+      }));
+
+      // Apply known driver-to-truck mapping
+      const driverMap = {
+        'Trevor Seyers':   { truck: '0608', routeType: 'urban' },
+        'Trevarr Howard':  { truck: '4757', routeType: 'suburban' },
+        'Brent Dixon':     { truck: '0294', routeType: 'urban' },
+      };
+      clockData = clockData.map(d => {
+        const mapping = Object.entries(driverMap).find(([name]) =>
+          d.name.toLowerCase().includes(name.split(' ')[0].toLowerCase())
+        );
+        if (mapping) {
+          d.truck = mapping[1].truck;
+          d.routeType = mapping[1].routeType;
+        }
+        return d;
+      }).filter(d => d.clockIn && d.clockOut && d.name.length > 1);
+
+      document.getElementById('upZone').classList.add('loaded');
+      document.getElementById('upLabel').textContent = `✅ B600 Live: ${clockData.length} records`;
+      log(`✅ TotalPass: ${clockData.length} punch records loaded for ${date}`, 'ok');
+      return true;
+
+    } else if (!data.success) {
+      log(`B600 scrape issue: ${data.error}`, 'warn');
+      if (data.hint) log(`Hint: ${data.hint}`, 'warn');
+      log('Tip: Access clock at http://192.168.20.94, go to Reports → Export CSV, note the URL, set TOTALPASS_EXPORT_PATH env var', 'warn');
+
+      // Show modal asking user to upload CSV manually as fallback
+      showClockFallback(data);
+      return false;
+    }
+  } catch (err) {
+    log(`B600 connection error: ${err.message}`, 'err');
+    log('Is the clock online? Is this running from your office network?', 'warn');
+    showClockFallback({ error: err.message });
+    return false;
+  }
+}
+
+function showClockFallback(data) {
+  const msg = `TotalPass B600 at 192.168.20.94 returned: "${data.error}"\n\nEither:\n1. Upload a CSV manually using the upload zone\n2. Make sure the clock is on the network\n3. Check if the export path needs updating`;
+  log('Falling back to manual CSV upload or demo data', 'warn');
+  // Could show a modal here — for now just log it
+}
+
+// ═══════════════════════════════════════════
+// LIVE: FETCH GPS FROM MOTIVE
+// ═══════════════════════════════════════════
+async function fetchMotiveGPS(truckId, date) {
+  try {
+    // First get vehicle list to find vehicle_id from truck number
+    const vehiclesResp = await fetch('/.netlify/functions/motive-gps?action=vehicles');
+    if (!vehiclesResp.ok) throw new Error(`Vehicles fetch failed: ${vehiclesResp.status}`);
+    const vehiclesData = await vehiclesResp.json();
+
+    const vehicles = vehiclesData.vehicles || vehiclesData.data || [];
+    // Match truck by number field or custom name
+    const vehicle = vehicles.find(v =>
+      v.number === truckId ||
+      v.name?.includes(truckId) ||
+      String(v.id) === truckId
+    );
+
+    if (!vehicle) {
+      log(`Truck #${truckId} not found in Motive — using simulated GPS`, 'warn');
+      return null;
+    }
+
+    // Fetch location history
+    const locResp = await fetch(`/.netlify/functions/motive-gps?action=location_history&vehicle_id=${vehicle.id}&date=${date}`);
+    if (!locResp.ok) throw new Error(`Location history failed: ${locResp.status}`);
+    const locData = await locResp.json();
+
+    // Fetch trips
+    const tripsResp = await fetch(`/.netlify/functions/motive-gps?action=trips&vehicle_id=${vehicle.id}&date=${date}`);
+    const tripsData = tripsResp.ok ? await tripsResp.json() : {};
+
+    return {
+      vehicle_id: vehicle.id,
+      locations: locData.vehicle_locations || locData.locations || [],
+      trips: tripsData.trips || []
+    };
+
+  } catch (err) {
+    log(`Motive GPS error for truck #${truckId}: ${err.message}`, 'warn');
+    return null;
+  }
+}
+
+// Convert real Motive GPS data into the metrics our algorithm needs
+function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
+  if (!motiveData || !motiveData.locations || motiveData.locations.length === 0) {
+    return null; // Will fall back to simulation
+  }
+
+  const locs = motiveData.locations;
+  const trips = motiveData.trips || [];
+
+  // Calculate engine-on time from trips
+  let engineOnMin = 0;
+  let totalMiles = 0;
+  trips.forEach(trip => {
+    const start = new Date(trip.started_at).getTime();
+    const end = new Date(trip.ended_at || trip.started_at).getTime();
+    engineOnMin += (end - start) / 60000;
+    totalMiles += (trip.distance_miles || trip.distance || 0);
+  });
+
+  if (engineOnMin === 0 && locs.length > 1) {
+    // Estimate from GPS points where speed > 0
+    let movingPoints = locs.filter(l => (l.speed || 0) > 2);
+    engineOnMin = movingPoints.length * 2; // rough estimate: 1 point per 2 min
+  }
+
+  // Find first and last movement
+  const movingLocs = locs.filter(l => (l.speed || 0) > 2);
+  let firstMoveMin = clockInMin;
+  let lastMoveMin = clockOutMin;
+
+  if (movingLocs.length > 0) {
+    const firstTs = new Date(movingLocs[0].timestamp || movingLocs[0].recorded_at);
+    firstMoveMin = firstTs.getHours() * 60 + firstTs.getMinutes();
+    const lastTs = new Date(movingLocs[movingLocs.length-1].timestamp || movingLocs[movingLocs.length-1].recorded_at);
+    lastMoveMin = lastTs.getHours() * 60 + lastTs.getMinutes();
+  }
+
+  // Detect stops (GPS points with speed=0 and same location for > X min)
+  const stops = detectStopsFromGPS(locs);
+
+  // Effective MPH
+  const shiftHrs = (clockOutMin - clockInMin) / 60;
+  const effectiveMph = shiftHrs > 0 ? totalMiles / shiftHrs : 0;
+
+  // Check GPS after clock-out
+  const afterClockout = locs.filter(l => {
+    const ts = new Date(l.timestamp || l.recorded_at);
+    const tsMin = ts.getHours() * 60 + ts.getMinutes();
+    return tsMin > clockOutMin + 5 && (l.speed || 0) > 2;
+  });
+
+  return {
+    isLive: true,
+    engineOnMin,
+    actualMiles: totalMiles,
+    effectiveMph,
+    engineFactor: engineOnMin / Math.max(clockOutMin - clockInMin, 1),
+    lateStart: Math.max(0, firstMoveMin - clockInMin),
+    earlyStop: Math.max(0, clockOutMin - lastMoveMin),
+    gpsAfterClockout: afterClockout.length > 0,
+    gpsAfterMin: afterClockout.length > 0 ? afterClockout.length * 2 : 0,
+    unexplained: stops,
+    deliveryStops: trips.length || Math.floor(stops.length * 0.6),
+    microStopCount: stops.filter(s => s.dur < parseInt(document.getElementById('t1').value) && s.dur >= 5).length,
+    warehouseDwellExtra: Math.max(0, firstMoveMin - clockInMin - 10),
+    habitualStop: false, // Would need historical data
+    theftProfile: 0.3,  // Unknown without historical baseline
+    shiftMin: clockOutMin - clockInMin,
+    rawLocations: locs.length,
+    rawTrips: trips.length
+  };
+}
+
+function detectStopsFromGPS(locs) {
+  const stops = [];
+  const stopThresh = parseInt(document.getElementById('t1').value);
+  const SUSPICIOUS = ['QuikTrip','Chick-fil-A','McDonald','Wendy','Waffle House','Cracker Barrel','Walmart','Target','Residence','Apartment','Parking'];
+
+  let stopStart = null;
+  let stopLat = null, stopLng = null;
+
+  for (let i = 0; i < locs.length; i++) {
+    const loc = locs[i];
+    const speed = loc.speed || 0;
+    const lat = loc.lat || loc.latitude || 0;
+    const lng = loc.lng || loc.longitude || 0;
+    const ts = new Date(loc.timestamp || loc.recorded_at);
+    const tsMin = ts.getHours() * 60 + ts.getMinutes();
+
+    if (speed < 2) {
+      if (!stopStart) { stopStart = tsMin; stopLat = lat; stopLng = lng; }
+    } else {
+      if (stopStart !== null) {
+        const dur = tsMin - stopStart;
+        if (dur >= 5) {
+          stops.push({
+            time: m2t(stopStart),
+            timeMin: stopStart,
+            dur,
+            location: loc.description || `GPS: ${stopLat?.toFixed(4)},${stopLng?.toFixed(4)}`,
+            flagged: dur >= stopThresh,
+            lat: stopLat,
+            lng: stopLng
+          });
+        }
+        stopStart = null;
+      }
+    }
+  }
+  return stops;
+}
+
+// ═══════════════════════════════════════════
+// CSV PARSE
+// ═══════════════════════════════════════════
+function parseCSV(e){
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const lines=ev.target.result.split('\n').filter(l=>l.trim()).slice(1);
+      clockData=lines.map(l=>{
+        const c=l.split(',').map(x=>x.trim().replace(/"/g,''));
+        return{name:c[0],truck:c[1]||'',clockIn:c[2]||'',clockOut:c[3]||'',shiftHrs:parseFloat(c[4])||9,routeType:c[5]||'suburban'};
+      }).filter(r=>r.name&&r.clockIn);
+      document.getElementById('upZone').classList.add('loaded');
+      document.getElementById('upLabel').textContent=`✅ ${file.name} — ${clockData.length} records`;
+      log(`Parsed ${clockData.length} records from ${file.name}`,'ok');
+    }catch(err){log(`Parse error: ${err.message}`,'err');}
+  };
+  reader.readAsText(file);
+}
+
+// ═══════════════════════════════════════════
+// SEEDED RNG
+// ═══════════════════════════════════════════
+function rng(seed){
+  let s=seed;
+  return ()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296;};
+}
+
+// ═══════════════════════════════════════════
+// CORE: SIMULATE GPS DATA PER DRIVER
+// ═══════════════════════════════════════════
+function simulateGPS(driver, seed){
+  const r=rng(seed);
+  const clockInMin=t2m(driver.clockIn);
+  const clockOutMin=t2m(driver.clockOut);
+  const shiftMin=clockOutMin-clockInMin;
+
+  // Simulate: some drivers are honest, some steal varying amounts
+  const theftProfile=r(); // 0=clean, 1=heavy thief
+
+  // --- Core GPS metrics ---
+  // Engine-on time (honest drivers: ~92-98% of shift; thieves: lower)
+  const engineFactor = theftProfile < 0.35 ? (0.92+r()*0.06) : theftProfile < 0.65 ? (0.78+r()*0.12) : (0.55+r()*0.2);
+  const engineOnMin = shiftMin * engineFactor;
+
+  // Total miles driven
+  const avgMph = driver.routeType==='rural'?28:driver.routeType==='urban'?18:22;
+  const expectedMiles = (engineOnMin/60)*avgMph;
+  const actualMiles = expectedMiles * (theftProfile<0.4 ? (0.9+r()*0.15) : (0.55+r()*0.3));
+
+  // Effective mph (actual miles / clocked hours)
+  const effectiveMph = actualMiles/(shiftMin/60);
+
+  // Number of delivery stops (honest: 15-25/day; thieves: fewer)
+  const baseStops = driver.routeType==='urban'?20:driver.routeType==='suburban'?16:12;
+  const deliveryStops = Math.floor(baseStops*(theftProfile<0.4?1:theftProfile<0.7?0.75:0.55));
+
+  // Average dwell per delivery stop (minutes)
+  const avgDeliveryDwell = driver.routeType==='urban'?8:12;
+  const actualDeliveryDwell = avgDeliveryDwell*(1+theftProfile*0.5);
+
+  // Unexplained stops
+  const numUnexplained=Math.floor(theftProfile<0.3?r()*1.5:theftProfile<0.6?r()*3+1:r()*5+2);
+  const unexplained=[];
+  const stopThresh=T('t1');
+  for(let i=0;i<numUnexplained;i++){
+    const sMin=clockInMin+60+Math.floor(r()*(shiftMin-120));
+    const dur=Math.floor(r()*(theftProfile>0.5?40:25))+8;
+    const locIdx=Math.floor(r()*SUSPICIOUS_LOCS.length);
+    unexplained.push({
+      time:m2t(sMin), timeMin:sMin,
+      dur, location:SUSPICIOUS_LOCS[locIdx],
+      flagged: dur>=stopThresh
+    });
+  }
+
+  // Late start (min after clock-in before truck moved)
+  const lateStart=Math.floor(theftProfile<0.4?r()*15:r()*45);
+
+  // Early stop (min before clock-out truck stopped)
+  const earlyStop=Math.floor(theftProfile<0.4?r()*10:r()*40-10);
+
+  // GPS after clock-out?
+  const gpsAfterClockout=theftProfile>0.7 && r()<0.3;
+  const gpsAfterMin=gpsAfterClockout?Math.floor(r()*20)+5:0;
+
+  // Habitual stop (same location 3+ times)
+  const habitualStop=theftProfile>0.55 && r()<0.4;
+
+  // Micro-stop cluster: many short stops under threshold
+  const microStopCount=Math.floor(theftProfile<0.4?r()*1.5:r()*4+1);
+  const microThresh=T('t6');
+
+  // Warehouse dwell (sitting at warehouse while clocked in)
+  const warehouseDwellExtra=theftProfile>0.5?Math.floor(r()*35):Math.floor(r()*10);
+
+  // Peer data — will be computed after all drivers analyzed
+  return {
+    engineOnMin, engineFactor, actualMiles, expectedMiles,
+    effectiveMph, deliveryStops, avgDeliveryDwell: actualDeliveryDwell,
+    unexplained, lateStart, earlyStop,
+    gpsAfterClockout, gpsAfterMin,
+    habitualStop, microStopCount, warehouseDwellExtra,
+    theftProfile, shiftMin
+  };
+}
+
+// ═══════════════════════════════════════════
+// CORE: SCORE ENGINE (8 LAYERS)
+// ═══════════════════════════════════════════
+function scoreDriver(driver, gps, allGPS, idx){
+  const flags=[];
+  let score=0;
+  const clockInMin=t2m(driver.clockIn);
+  const clockOutMin=t2m(driver.clockOut);
+
+  // Layer totals for breakdown display
+  const layers={timeMotion:0,stopPattern:0,baseline:0,peer:0};
+
+  // ── LAYER 1-4: TIME & MOTION ──
+
+  // 1a. Clock vs Engine gap
+  const engineGapMin=(clockOutMin-clockInMin)-gps.engineOnMin;
+  if(engineGapMin>T('t2')){
+    const pts=35;score+=pts;layers.timeMotion+=pts;
+    flags.push({ico:'⏱️',sev:'critical',title:'Clock/Engine Time Gap',
+      detail:`Clocked ${((clockOutMin-clockInMin)/60).toFixed(1)}h but engine only on ${(gps.engineOnMin/60).toFixed(1)}h — ${engineGapMin.toFixed(0)}min gap exceeds ${T('t2')}min threshold`,
+      pts,time:driver.clockIn,trk:driver.truck});
+  }
+
+  // 1b. Miles vs Clocked Hours physics check
+  const expectedMilesForHours=(((clockOutMin-clockInMin)/60)*12);
+  const mileDelta=expectedMilesForHours-gps.actualMiles;
+  const mileRatio=gps.actualMiles/Math.max(gps.expectedMiles,1);
+  if(mileRatio<0.6){
+    const pts=30;score+=pts;layers.timeMotion+=pts;
+    flags.push({ico:'📐',sev:'critical',title:'Miles vs Hours Physics Mismatch',
+      detail:`Only ${gps.actualMiles.toFixed(0)} miles driven in ${((clockOutMin-clockInMin)/60).toFixed(1)} clocked hours. Expected ≥${gps.expectedMiles.toFixed(0)} miles for a productive shift. ${((1-mileRatio)*100).toFixed(0)}% efficiency gap.`,
+      pts,time:driver.clockIn,trk:driver.truck});
+  } else if(mileRatio<0.75){
+    const pts=15;score+=pts;layers.timeMotion+=pts;
+    flags.push({ico:'📐',sev:'medium',title:'Below-Expected Mileage',
+      detail:`${gps.actualMiles.toFixed(0)} miles vs ${gps.expectedMiles.toFixed(0)} expected for this shift type. ${((1-mileRatio)*100).toFixed(0)}% below expectation.`,
+      pts,time:driver.clockIn,trk:driver.truck});
+  }
+
+  // 1c. Velocity (dawdling between stops)
+  if(gps.effectiveMph<T('t5') && gps.actualMiles>5){
+    const pts=25;score+=pts;layers.timeMotion+=pts;
+    flags.push({ico:'🐢',sev:'high',title:'Abnormally Low Route Velocity',
+      detail:`Effective speed ${gps.effectiveMph.toFixed(1)} mph against ${T('t5')} mph floor. Suggests significant time not moving or excessive detour distances.`,
+      pts,time:null,trk:driver.truck});
+  }
+
+  // 1d. Late first movement
+  if(gps.lateStart>T('t3')){
+    const pts=20;score+=pts;layers.timeMotion+=pts;
+    flags.push({ico:'🌅',sev:'high',title:'Late First GPS Movement',
+      detail:`Clocked in at ${driver.clockIn} but truck did not move for ${gps.lateStart} minutes. ${gps.lateStart>T('t3')*2?'Significantly':'Moderately'} over ${T('t3')}min threshold.`,
+      pts,time:driver.clockIn,trk:driver.truck});
+  }
+
+  // 1e. Early last movement
+  if(gps.earlyStop>T('t4')){
+    const pts=20;score+=pts;layers.timeMotion+=pts;
+    flags.push({ico:'🏁',sev:'high',title:'Truck Stopped Before Clock-Out',
+      detail:`GPS shows last movement ${gps.earlyStop} minutes before ${driver.clockOut} clock-out. Possible: sitting at warehouse clocked in, or personal errand before returning.`,
+      pts,time:m2t(clockOutMin-gps.earlyStop),trk:driver.truck});
+  }
+
+  // 1f. GPS AFTER clock-out (highest confidence flag)
+  if(gps.gpsAfterClockout){
+    const pts=45;score+=pts;layers.timeMotion+=pts;
+    flags.push({ico:'🚨',sev:'critical',title:'VEHICLE MOVED AFTER CLOCK-OUT',
+      detail:`GPS detected movement ${gps.gpsAfterMin} minutes after ${driver.clockOut} clock-out. Possible unauthorized vehicle use or fraudulent early clock-out while still on route.`,
+      pts,time:m2t(clockOutMin+gps.gpsAfterMin),trk:driver.truck});
+  }
+
+  // ── LAYER 5-6: STOP PATTERN ANALYSIS ──
+
+  // 5a. Unexplained stops over threshold
+  gps.unexplained.forEach(stop=>{
+    if(stop.flagged){
+      const pts=25;score+=pts;layers.stopPattern+=pts;
+      flags.push({ico:'🅿️',sev:'high',title:`Unexplained Stop — ${stop.dur} min`,
+        detail:`${stop.time} at "${stop.location}" — not a known delivery address. ${stop.dur}min exceeds ${T('t1')}min threshold.`,
+        pts,time:stop.time,trk:driver.truck});
+    }
+  });
+
+  // 5b. Micro-stop clustering (many short stops under radar)
+  if(gps.microStopCount>=T('t6')){
+    const totalMicroMin=gps.microStopCount*(T('t1')-3);
+    const pts=20;score+=pts;layers.stopPattern+=pts;
+    flags.push({ico:'🔁',sev:'high',title:'Micro-Stop Cluster Detected',
+      detail:`${gps.microStopCount} short stops (each just under ${T('t1')}min threshold) detected. Total estimated unaccounted time: ~${totalMicroMin}min. Classic pattern to avoid individual threshold flags.`,
+      pts,time:null,trk:driver.truck});
+  }
+
+  // 5c. Habitual location
+  if(gps.habitualStop){
+    const pts=15;score+=pts;layers.stopPattern+=pts;
+    flags.push({ico:'📍',sev:'medium',title:'Habitual Non-Delivery Location',
+      detail:`Same non-delivery location appears 3+ times in recent GPS history for this driver. Indicates a recurring scheduled personal stop during work hours.`,
+      pts,time:null,trk:driver.truck});
+  }
+
+  // 5d. Warehouse dwell
+  if(gps.warehouseDwellExtra>25){
+    const pts=25;score+=pts;layers.stopPattern+=pts;
+    flags.push({ico:'🏭',sev:'high',title:'Excessive Warehouse Dwell While Clocked In',
+      detail:`Truck GPS shows ${gps.warehouseDwellExtra}min stationary at warehouse after clock-in before departing. Driver clocking in before ready to depart, or sitting on lot clocked in.`,
+      pts,time:driver.clockIn,trk:driver.truck});
+  }
+
+  // ── LAYER 7: PERSONAL BASELINE ──
+  // Simulated baseline (in production: pull 30-day Motive history)
+  const baselineEngFactor=0.92; // expected for clean driver
+  const baselineEffMph=driver.routeType==='urban'?18:driver.routeType==='suburban'?22:27;
+  const baselineStops=driver.routeType==='urban'?20:driver.routeType==='suburban'?16:12;
+
+  const engDeviation=(baselineEngFactor-gps.engineFactor)/baselineEngFactor;
+  const spdDeviation=(baselineEffMph-gps.effectiveMph)/baselineEffMph;
+  const stopDeviation=(baselineStops-gps.deliveryStops)/baselineStops;
+
+  if(engDeviation>0.15){
+    const pts=Math.floor(engDeviation*80);
+    score+=pts;layers.baseline+=pts;
+    flags.push({ico:'📉',sev:pts>20?'high':'medium',title:'Engine Utilization Below Personal Baseline',
+      detail:`Today's engine utilization (${(gps.engineFactor*100).toFixed(0)}%) is ${(engDeviation*100).toFixed(0)}% below this driver's typical ${(baselineEngFactor*100).toFixed(0)}%. Deviation is statistically significant.`,
+      pts,time:null,trk:driver.truck});
+  }
+
+  if(stopDeviation>0.25){
+    const pts=15;score+=pts;layers.baseline+=pts;
+    flags.push({ico:'📦',sev:'medium',title:'Delivery Stop Count Below Baseline',
+      detail:`${gps.deliveryStops} stops today vs typical ${baselineStops} for this route type — ${(stopDeviation*100).toFixed(0)}% below baseline. Fewer stops + same pay = time unaccounted.`,
+      pts,time:null,trk:driver.truck});
+  }
+
+  // ── LAYER 8: PEER BENCHMARKING ──
+  // Compare against all peers on same route type today
+  const peers=allGPS.filter((_,i)=>clockData[i]&&clockData[i].routeType===driver.routeType);
+  if(peers.length>1){
+    const peerEffMphs=peers.map(p=>p.effectiveMph);
+    const peerMedian=median(peerEffMphs);
+    const peerDeviation=(peerMedian-gps.effectiveMph)/peerMedian;
+    const peerThresh=T('t7')/100;
+
+    if(peerDeviation>peerThresh && peers.length>=2){
+      const pts=Math.floor(peerDeviation*60);
+      score+=pts;layers.peer+=pts;
+      flags.push({ico:'👥',sev:pts>20?'high':'medium',title:'Significantly Below Peer Group',
+        detail:`Effective speed ${gps.effectiveMph.toFixed(1)} mph vs peer median ${peerMedian.toFixed(1)} mph on same route type today. ${(peerDeviation*100).toFixed(0)}% below peers — same traffic, same conditions, different output.`,
+        pts,time:null,trk:driver.truck});
+    }
+  }
+
+  // ── RISK CLASSIFICATION ──
+  let risk='low';
+  if(score>=80)risk='critical';
+  else if(score>=50)risk='high';
+  else if(score>=25)risk='medium';
+
+  // ── STOLEN TIME ESTIMATE ──
+  // Physics-based: engine gap + unexplained stops + micro-stop cluster + early/late
+  const stolenMin=Math.max(0,
+    Math.max(0,engineGapMin-15) * 0.7 +
+    gps.unexplained.filter(s=>s.flagged).reduce((a,s)=>a+s.dur,0) +
+    (gps.microStopCount>=T('t6')?gps.microStopCount*(T('t1')-3):0) * 0.5 +
+    (gps.lateStart>T('t3')?gps.lateStart-T('t3'):0) +
+    (gps.earlyStop>T('t4')?gps.earlyStop-T('t4'):0) +
+    (gps.gpsAfterClockout?gps.gpsAfterMin:0) +
+    (gps.warehouseDwellExtra>25?gps.warehouseDwellExtra-10:0)
+  );
+  const stolenHrs=stolenMin/60;
+  const stolenDollars=stolenHrs*WAGE();
+
+  // ── GPS TIMELINE ──
+  const timeline=buildTimeline(driver, gps, clockInMin, clockOutMin);
+
+  return {
+    ...driver, score, risk, flags, layers,
+    gps, stolenHrs, stolenDollars,
+    timeline, engineGapMin,
+    idx
+  };
+}
+
+function buildTimeline(driver,gps,ciMin,coMin){
+  const ev=[];
+  ev.push({t:driver.clockIn,type:'move',txt:'Clock-in / warehouse departure'});
+  if(gps.lateStart>0)
+    ev.push({t:m2t(ciMin+gps.lateStart),type:'move',txt:`First GPS movement (+${gps.lateStart}min after clock-in)`});
+  ev.push({t:m2t(ciMin+gps.lateStart+15),type:'move',txt:'En route — first delivery zone'});
+
+  gps.unexplained.slice(0,4).forEach(s=>{
+    ev.push({t:s.time,type:s.flagged?'flag':'stop',txt:`${s.flagged?'⚠️ FLAGGED':'Stop'} ${s.dur}min — ${s.location}`});
+    ev.push({t:m2t(s.timeMin+s.dur),type:'move',txt:'Resumed route'});
+  });
+
+  if(gps.microStopCount>=T('t6'))
+    ev.push({t:m2t(ciMin+Math.floor(gps.shiftMin*0.5)),type:'flag',txt:`⚠️ Micro-stop cluster — ${gps.microStopCount} short stops detected`});
+
+  ev.push({t:m2t(coMin-gps.earlyStop-20),type:'move',txt:'Returning to warehouse area'});
+
+  if(gps.earlyStop>T('t4'))
+    ev.push({t:m2t(coMin-gps.earlyStop),type:'flag',txt:`⚠️ GPS shows truck stopped — ${gps.earlyStop}min before clock-out`});
+
+  ev.push({t:driver.clockOut,type:'move',txt:'Clock-out recorded'});
+
+  if(gps.gpsAfterClockout)
+    ev.push({t:m2t(t2m(driver.clockOut)+gps.gpsAfterMin),type:'flag',txt:`🚨 GPS MOVEMENT DETECTED — ${gps.gpsAfterMin}min AFTER clock-out`});
+
+  return ev.sort((a,b)=>t2m(a.t)-t2m(b.t));
+}
+
+// ═══════════════════════════════════════════
+// MAIN AUDIT RUNNER
+// ═══════════════════════════════════════════
+async function runAudit(){
+  if(!clockData.length){log('No time clock data. Load demo or upload CSV.','warn');return;}
+
+  const btn=document.getElementById('runBtn');
+  btn.disabled=true;btn.textContent='⏳ SCANNING...';
+  setStatus('running');
+  results=[];
+
+  log('SENTINEL audit initiated — 8-layer analysis engaged','hi');
+  log(`Analyzing ${clockData.length} drivers...`,'info');
+
+  // First pass: generate GPS data for all drivers (live from Motive, or simulated)
+  log('Fetching GPS data from Motive...', 'hi');
+  const allGPS = [];
+  for (let i = 0; i < clockData.length; i++) {
+    const driver = clockData[i];
+    const date = document.getElementById('auditDate').value;
+    const clockInMin = t2m(driver.clockIn);
+    const clockOutMin = t2m(driver.clockOut);
+
+    // Try live Motive GPS first
+    let gpsData = null;
+    if (driver.truck) {
+      const motiveRaw = await fetchMotiveGPS(driver.truck, date);
+      if (motiveRaw) {
+        gpsData = processMotiveData(driver.truck, motiveRaw, clockInMin, clockOutMin);
+        if (gpsData) log(`✅ Live GPS: Truck #${driver.truck} — ${gpsData.rawLocations} points, ${gpsData.rawTrips} trips`, 'ok');
+      }
+    }
+
+    // Fall back to simulation if Motive data unavailable
+    if (!gpsData) {
+      log(`Using simulated GPS for ${driver.name} (no live data)`, 'warn');
+      gpsData = simulateGPS(driver, i * 997 + driver.name.length * 31);
+    }
+
+    allGPS.push(gpsData);
+  }
+
+  // Second pass: score with peer data available
+  for(let i=0;i<clockData.length;i++){
+    await delay(80);
+    log(`Layer analysis: ${clockData[i].name}...`,'info');
+    const res=scoreDriver(clockData[i],allGPS[i],allGPS,i);
+    results.push(res);
+  }
+
+  results.sort((a,b)=>b.score-a.score);
+
+  updateHeader();
+  updateStats();
+  renderFlags();
+  renderReport();
+
+  btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';
+  setStatus('done');
+  log(`Audit complete — ${results.filter(r=>r.risk!=='low').length} drivers flagged`,'ok');
+  document.getElementById('lastRun')&&(document.getElementById('lastRun').textContent=new Date().toLocaleTimeString());
+}
+
+// ═══════════════════════════════════════════
+// RENDER FLAGS
+// ═══════════════════════════════════════════
+function renderFlags(){
+  document.getElementById('emptyState').style.display='none';
+  document.getElementById('flagsContent').style.display='block';
+
+  const flagged=results.filter(r=>r.risk!=='low').length;
+  document.getElementById('flagBadge').textContent=`${flagged} flagged`;
+  renderDriverCards();
+}
+
+function renderDriverCards(){
+  const stack=document.getElementById('driverStack');
+  stack.innerHTML='';
+
+  let filtered=[...results];
+  if(curFilter!=='all')filtered=filtered.filter(r=>r.risk===curFilter);
+  if(curSort==='stolen')filtered.sort((a,b)=>b.stolenHrs-a.stolenHrs);
+  else if(curSort==='flags')filtered.sort((a,b)=>b.flags.length-a.flags.length);
+  else if(curSort==='name')filtered.sort((a,b)=>a.name.localeCompare(b.name));
+
+  filtered.forEach((d,i)=>{
+    const card=document.createElement('div');
+    card.className=`dcard ${d.risk}`;
+    card.style.animationDelay=`${i*35}ms`;
+
+    // Score ring SVG
+    const maxScore=120;
+    const pct=Math.min(d.score/maxScore,1);
+    const r=20,circ=2*Math.PI*r;
+    const dash=pct*circ;
+    const ringColor=d.risk==='critical'?'var(--red)':d.risk==='high'?'var(--amber)':d.risk==='medium'?'var(--blue2)':'var(--b3)';
+
+    // Layer breakdown bars (for expanded view)
+    const maxLayer=80;
+    const layerRows=['timeMotion','stopPattern','baseline','peer'];
+    const layerNames=['Time/Motion','Stop Pattern','Baseline Dev','Peer Bench'];
+
+    const flagsHtml=d.flags.map(f=>`
+      <div class="flag-row sev-${f.sev}">
+        <div class="flag-ico">${f.ico}</div>
+        <div class="flag-txt">
+          <h4>${f.title}</h4>
+          <p>${f.detail}</p>
+        </div>
+        <div class="flag-pts ${f.sev==='critical'?'c':f.sev==='high'?'h':'m'}">+${f.pts}pts</div>
+        ${f.time?`<button class="cam-btn" onclick="openCam('${d.name}','${d.truck}','${f.time}','${f.title.replace(/'/g,"\\'")}')">📹 Cam</button>`:'<div></div>'}
+      </div>
+    `).join('');
+
+    const timelineHtml=d.timeline.map(e=>`
+      <div class="tl-event ${e.type==='flag'?'flag-event':e.type==='stop'?'stop-event':'move-event'}">
+        <span class="tl-time">${e.t}</span>
+        <span class="tl-desc">${e.txt}</span>
+      </div>
+    `).join('');
+
+    // Peer comparison bars
+    const sameRouteDrivers=results.filter(r=>r.routeType===d.routeType).slice(0,5);
+    const maxPeerScore=Math.max(...sameRouteDrivers.map(p=>p.score),1);
+    const peerBarsHtml=sameRouteDrivers.map(p=>`
+      <div class="peer-row">
+        <span class="peer-name" style="${p.name===d.name?'color:var(--text);font-weight:700;':''}">${p.name.split(' ')[0]}</span>
+        <div class="peer-track">
+          <div class="peer-fill" style="width:${(p.score/maxPeerScore*100).toFixed(0)}%;background:${p.risk==='critical'?'var(--red)':p.risk==='high'?'var(--amber)':p.risk==='medium'?'var(--blue2)':'var(--b3)'};"></div>
+        </div>
+        <span class="peer-score">${p.score}</span>
+      </div>
+    `).join('');
+
+    card.innerHTML=`
+      <div class="dc-hd" onclick="toggleCard(this)">
+        <div class="dc-rank">${String(i+1).padStart(2,'0')}</div>
+        <div class="dc-info">
+          <h3>${d.name}</h3>
+          <div class="dc-meta">
+            <span class="dc-tag">TRK <b>#${d.truck}</b></span>
+            <span class="dc-tag">IN <b>${d.clockIn}</b></span>
+            <span class="dc-tag">OUT <b>${d.clockOut}</b></span>
+            <span class="dc-tag">ENGINE <b>${(d.gps.engineOnMin/60).toFixed(1)}h</b></span>
+            <span class="dc-tag">MILES <b>${d.gps.actualMiles.toFixed(0)}</b></span>
+            <span class="dc-tag">MPH <b>${d.gps.effectiveMph.toFixed(1)}</b></span>
+            <span class="dc-tag">FLAGS <b>${d.flags.length}</b></span>
+            ${d.stolenHrs>0?`<span class="dc-tag" style="color:var(--red2);">EST STOLEN <b>${d.stolenHrs.toFixed(1)}h/$${d.stolenDollars.toFixed(0)}</b></span>`:''}
+          </div>
+        </div>
+        <div class="score-ring">
+          <svg viewBox="0 0 52 52" width="52" height="52">
+            <circle cx="26" cy="26" r="${r}" fill="none" stroke="var(--b1)" stroke-width="4"/>
+            <circle cx="26" cy="26" r="${r}" fill="none" stroke="${ringColor}" stroke-width="4"
+              stroke-dasharray="${dash.toFixed(1)} ${(circ-dash).toFixed(1)}"
+              stroke-linecap="round"
+              style="filter:drop-shadow(0 0 4px ${ringColor})"/>
+          </svg>
+          <div class="score-ring-num" style="color:${ringColor}">
+            ${d.score}<div class="score-ring-lbl">score</div>
+          </div>
+        </div>
+        <div class="rbadge ${d.risk}">${d.risk.toUpperCase()}</div>
+        <button class="expand-ico">▼</button>
+      </div>
+      <div class="dc-body">
+        <!-- METRIC LAYER GRID -->
+        <div class="layer-grid">
+          <div class="layer-cell">
+            <div class="lc-name">Engine On</div>
+            <div class="lc-val" style="color:${d.gps.engineFactor>0.85?'var(--green)':d.gps.engineFactor>0.7?'var(--amber)':'var(--red)'}">
+              ${(d.gps.engineFactor*100).toFixed(0)}%
+            </div>
+            <div class="lc-sub">of clocked time</div>
+            <div class="lc-bar"><div class="lc-bar-fill" style="width:${(d.gps.engineFactor*100).toFixed(0)}%;background:${d.gps.engineFactor>0.85?'var(--green)':d.gps.engineFactor>0.7?'var(--amber)':'var(--red)'};"></div></div>
+          </div>
+          <div class="layer-cell">
+            <div class="lc-name">Miles Driven</div>
+            <div class="lc-val" style="color:var(--blue3)">${d.gps.actualMiles.toFixed(0)}</div>
+            <div class="lc-sub">of ${d.gps.expectedMiles.toFixed(0)} expected</div>
+            <div class="lc-bar"><div class="lc-bar-fill" style="width:${Math.min(100,(d.gps.actualMiles/d.gps.expectedMiles*100)).toFixed(0)}%;background:var(--blue2);"></div></div>
+          </div>
+          <div class="layer-cell">
+            <div class="lc-name">Eff. Speed</div>
+            <div class="lc-val" style="color:${d.gps.effectiveMph>T('t5')+5?'var(--green)':d.gps.effectiveMph>T('t5')?'var(--amber)':'var(--red)'}">
+              ${d.gps.effectiveMph.toFixed(1)} mph
+            </div>
+            <div class="lc-sub">fleet avg: ${d.routeType==='urban'?18:d.routeType==='suburban'?22:27}mph</div>
+            <div class="lc-bar"><div class="lc-bar-fill" style="width:${Math.min(100,d.gps.effectiveMph/(d.routeType==='urban'?20:d.routeType==='suburban'?24:30)*100).toFixed(0)}%;background:var(--cyan);"></div></div>
+          </div>
+          <div class="layer-cell">
+            <div class="lc-name">Delivery Stops</div>
+            <div class="lc-val" style="color:var(--text)">${d.gps.deliveryStops}</div>
+            <div class="lc-sub">baseline: ${d.routeType==='urban'?20:d.routeType==='suburban'?16:12}</div>
+            <div class="lc-bar"><div class="lc-bar-fill" style="width:${Math.min(100,d.gps.deliveryStops/(d.routeType==='urban'?20:d.routeType==='suburban'?16:12)*100).toFixed(0)}%;background:var(--green2);"></div></div>
+          </div>
+        </div>
+
+        <!-- FLAGS -->
+        <div class="flag-list">
+          ${d.flags.length>0?`
+            <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;">
+              ${d.flags.length} flag${d.flags.length!==1?'s':''} detected — total ${d.score}pts
+            </div>
+            ${flagsHtml}
+          `:'<div style="color:var(--green);font-family:var(--mono);font-size:11px;">✅ No flags detected — clean shift</div>'}
+          ${d.flags.length>0?`
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+              <button class="btn btn-sm btn-blue" onclick="openCam('${d.name}','${d.truck}','${d.clockIn}','Full Shift Review')">📹 Request Full Shift Video</button>
+              ${d.stolenHrs>0?`<span style="font-family:var(--mono);font-size:10px;color:var(--red2);">Est. ${d.stolenHrs.toFixed(1)}h stolen · $${d.stolenDollars.toFixed(0)} in wages</span>`:''}
+            </div>
+          `:''}
+        </div>
+
+        <!-- TIMELINE -->
+        <div class="timeline-wrap">
+          <div class="tl-title">// GPS Timeline — ${d.timeline.length} events</div>
+          <div class="tl-track">${timelineHtml}</div>
+        </div>
+
+        <!-- PEER BARS -->
+        ${sameRouteDrivers.length>1?`
+        <div class="peer-bar-wrap">
+          <div class="tl-title">// Peer Comparison — ${d.routeType} route group</div>
+          <div class="peer-bars">${peerBarsHtml}</div>
+        </div>
+        `:''}
+
+      </div>
+    `;
+    stack.appendChild(card);
+  });
+}
+
+function toggleCard(hd){
+  const body=hd.nextElementSibling;
+  const ico=hd.querySelector('.expand-ico');
+  body.classList.toggle('open');
+  ico.classList.toggle('open');
+}
+
+// ═══════════════════════════════════════════
+// REPORT
+// ═══════════════════════════════════════════
+function renderReport(){
+  document.getElementById('rptEmpty').style.display='none';
+  document.getElementById('rptContent').style.display='block';
+
+  const flagged=results.filter(r=>r.risk!=='low');
+  const totalStolen=results.reduce((a,r)=>a+r.stolenHrs,0);
+  const totalDollars=results.reduce((a,r)=>a+r.stolenDollars,0);
+  const totalFlags=results.reduce((a,r)=>a+r.flags.length,0);
+
+  document.getElementById('rptKpis').innerHTML=`
+    <div class="kpi-card red">
+      <div class="kpi-name">Drivers Flagged</div>
+      <div class="kpi-val red">${flagged.length}</div>
+      <div class="kpi-sub">of ${results.length} total analyzed</div>
+    </div>
+    <div class="kpi-card amber">
+      <div class="kpi-name">Est. Hours Stolen</div>
+      <div class="kpi-val amber">${totalStolen.toFixed(1)}h</div>
+      <div class="kpi-sub">across all flagged drivers today</div>
+    </div>
+    <div class="kpi-card amber">
+      <div class="kpi-name">Est. Wages Lost</div>
+      <div class="kpi-val amber">$${totalDollars.toFixed(0)}</div>
+      <div class="kpi-sub">at $${WAGE()}/hr avg driver wage</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-name">Total Flags Raised</div>
+      <div class="kpi-val blue">${totalFlags}</div>
+      <div class="kpi-sub">across ${results.length} drivers, 8 layers</div>
+    </div>
+  `;
+
+  const rows=results.map(r=>`
+    <tr>
+      <td><span style="font-family:var(--head);font-size:14px;font-weight:600;">${r.name}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:var(--text2);">#${r.truck}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;">${r.clockIn}–${r.clockOut}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;">${(r.gps.engineOnMin/60).toFixed(1)}h / ${((t2m(r.clockOut)-t2m(r.clockIn))/60).toFixed(1)}h</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;">${r.gps.actualMiles.toFixed(0)} mi</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;">${r.gps.effectiveMph.toFixed(1)} mph</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;">${r.gps.deliveryStops}</span></td>
+      <td><span style="font-family:var(--head);font-size:16px;font-weight:700;color:${r.risk==='critical'?'var(--red)':r.risk==='high'?'var(--amber)':r.risk==='medium'?'var(--blue3)':'var(--text3)'};">${r.score}</span></td>
+      <td><span class="rbadge ${r.risk}">${r.risk.toUpperCase()}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:${r.stolenHrs>0?'var(--red2)':'var(--text3)'};">${r.stolenHrs>0?r.stolenHrs.toFixed(1)+'h ($'+r.stolenDollars.toFixed(0)+')':'—'}</span></td>
+    </tr>
+  `).join('');
+
+  document.getElementById('rptTable').innerHTML=`
+    <thead>
+      <tr>
+        ${['Driver','Truck','Shift','Engine/Clocked','Miles','Eff MPH','Stops','Score','Risk','Est Stolen'].map(h=>`
+          <th>${h}</th>
+        `).join('')}
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  `;
+}
+
+// ═══════════════════════════════════════════
+// HEADER & STATS
+// ═══════════════════════════════════════════
+function updateHeader(){
+  const flagged=results.filter(r=>r.risk!=='low');
+  const totalStolen=results.reduce((a,r)=>a+r.stolenHrs,0);
+  const totalDollars=results.reduce((a,r)=>a+r.stolenDollars,0);
+  document.getElementById('hmDrivers').textContent=results.length;
+  document.getElementById('hmFlagged').textContent=flagged.length;
+  document.getElementById('hmHours').textContent=totalStolen.toFixed(1)+'h';
+  document.getElementById('hmDollars').textContent='$'+totalDollars.toFixed(0);
+}
+
+function updateStats(){
+  const c={critical:0,high:0,medium:0,low:0};
+  results.forEach(r=>c[r.risk]++);
+  document.getElementById('sc').textContent=c.critical;
+  document.getElementById('sh').textContent=c.high;
+  document.getElementById('sm').textContent=c.medium;
+  document.getElementById('sl').textContent=c.low;
+}
+
+// ═══════════════════════════════════════════
+// FILTERS / SORT / TABS
+// ═══════════════════════════════════════════
+function setFilter(f,btn){
+  curFilter=f;
+  document.querySelectorAll('.fb-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(results.length)renderDriverCards();
+}
+function setSort(v){curSort=v;if(results.length)renderDriverCards();}
+function showTab(id,btn){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  ['flags','report','algo'].forEach(t=>{
+    document.getElementById(`tab-${t}`).style.display=t===id?'block':'none';
+  });
+}
+
+// ═══════════════════════════════════════════
+// DASH CAM MODAL
+// ═══════════════════════════════════════════
+function openCam(name,truck,ts,reason){
+  camPending={name,truck,ts,reason};
+  const date=document.getElementById('auditDate').value;
+  document.getElementById('camInfo').innerHTML=`
+    <p>Driver: <strong>${name}</strong></p>
+    <p>Vehicle: <strong>Truck #${truck}</strong></p>
+    <p>Date: <strong>${date}</strong></p>
+    <p>Timestamp: <strong>${ts} ±5 min window</strong></p>
+    <p>Reason: <strong>${reason}</strong></p>
+    <p style="color:var(--text3);margin-top:8px;">Motive will deliver HD footage to your registered email within ~5 minutes of request.</p>
+  `;
+  document.getElementById('camResult').style.display='none';
+  document.getElementById('camConfirm').style.display='block';
+  document.getElementById('camProg').style.display='none';
+  document.getElementById('camBg').classList.add('open');
+}
+function closeCam(){document.getElementById('camBg').classList.remove('open');camPending=null;}
+async function submitCam(){
+  if(!camPending)return;
+  document.getElementById('camConfirm').style.display='none';
+  const prog=document.getElementById('camProg');
+  prog.style.display='block';
+  const fill=document.getElementById('camFill');
+
+  // Animate progress
+  for(let i=0;i<=60;i+=10){fill.style.width=i+'%';await delay(80);}
+
+  try {
+    const resp = await fetch('/.netlify/functions/motive-dashcam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        truck_id:    camPending.truck,
+        driver_name: camPending.name,
+        timestamp:   camPending.ts,
+        date:        document.getElementById('auditDate').value,
+        reason:      camPending.reason,
+        duration_seconds: 120
+      })
+    });
+
+    for(let i=60;i<=100;i+=10){fill.style.width=i+'%';await delay(60);}
+
+    const data = await resp.json();
+    prog.style.display='none';
+    const res = document.getElementById('camResult');
+
+    if (data.success) {
+      res.textContent = `✅ ${data.message}`;
+      res.style.color = 'var(--green)';
+      log(`📹 Cam request sent — ${camPending.name} @ ${camPending.ts}`, 'ok');
+    } else {
+      res.textContent = `⚠️ ${data.error || 'Motive API error'} — ${data.hint || 'Check vehicle has dashcam installed'}`;
+      res.style.color = 'var(--amber)';
+      log(`Cam request issue: ${data.error}`, 'warn');
+    }
+    res.style.display = 'block';
+    setTimeout(closeCam, 4000);
+
+  } catch(err) {
+    prog.style.display='none';
+    const res = document.getElementById('camResult');
+    res.textContent = `❌ Request failed: ${err.message}`;
+    res.style.color = 'var(--red2)';
+    res.style.display='block';
+    log(`Cam request error: ${err.message}`, 'err');
+  }
+}
+
+// ═══════════════════════════════════════════
+// EXPORT
+// ═══════════════════════════════════════════
+function exportCSV(){
+  if(!results.length){log('No data to export','warn');return;}
+  const date=document.getElementById('auditDate').value;
+  let csv='Driver,Truck,Route Type,Clock In,Clock Out,Engine On (h),Miles,Eff MPH,Delivery Stops,Score,Risk,Flags,Flag Details,Est Stolen (h),Est Stolen ($)\n';
+  results.forEach(r=>{
+    const flagDetail=r.flags.map(f=>f.title).join(' | ');
+    csv+=`"${r.name}","${r.truck}","${r.routeType}","${r.clockIn}","${r.clockOut}","${(r.gps.engineOnMin/60).toFixed(2)}","${r.gps.actualMiles.toFixed(0)}","${r.gps.effectiveMph.toFixed(1)}","${r.gps.deliveryStops}","${r.score}","${r.risk}","${r.flags.length}","${flagDetail}","${r.stolenHrs.toFixed(2)}","${r.stolenDollars.toFixed(2)}"\n`;
+  });
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`sentinel_audit_${date}.csv`;a.click();
+  log(`Exported report: sentinel_audit_${date}.csv`,'ok');
+}
+
+// ═══════════════════════════════════════════
+// STATUS
+// ═══════════════════════════════════════════
+function setStatus(s){
+  const dot=document.getElementById('statusDot');
+  const txt=document.getElementById('statusTxt');
+  if(s==='running'){dot.className='status-dot running';txt.textContent='SCANNING';}
+  else if(s==='done'){dot.className='status-dot active';txt.textContent='COMPLETE';}
+  else{dot.className='status-dot';txt.textContent='STANDBY';}
+}
+
+// ═══════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════
+function t2m(t){if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+m;}
+function m2t(m){const h=Math.floor(m/60)%24;const mn=((m%60)+60)%60;return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
+function median(arr){const s=[...arr].sort((a,b)=>a-b);const m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+function delay(ms){return new Promise(r=>setTimeout(r,ms));}
+
+// ============================================
+// MOBILE SIDEBAR DRAWER
+// ============================================
+(function(){
+  if(!window.matchMedia('(max-width:768px)').matches) return;
+  var sb=document.querySelector('.sidebar');
+  var btn=document.getElementById('mobileMenuBtn');
+  var isOpen=false;
+  var overlay=document.createElement('div');
+  overlay.style.cssText='display:none;position:fixed;top:52px;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9998;';
+  document.querySelector('.app').appendChild(overlay);
+  function openMenu(){
+    isOpen=true;
+    sb.style.cssText='display:flex !important;position:fixed !important;top:52px !important;left:0 !important;bottom:0 !important;width:85vw !important;max-width:340px !important;z-index:9999 !important;box-shadow:4px 0 24px rgba(0,0,0,0.5) !important;flex-direction:column !important;overflow:hidden !important;background:var(--s1) !important;border-right:1px solid var(--b1) !important;';
+    overlay.style.display='block';
+  }
+  function closeMenu(){
+    isOpen=false;
+    sb.style.cssText='';
+    overlay.style.display='none';
+  }
+  if(btn) btn.onclick=function(e){e.stopPropagation();isOpen?closeMenu():openMenu();};
+  overlay.onclick=closeMenu;
+})();
+
+// ============================================
+// REAL MOTIVE DATA AUDIT ENGINE
+// ============================================
+window.runAudit=async function(){
+  var empty=document.getElementById('emptyState');
+  var loading=document.getElementById('loadingState');
+  var loadMsg=document.getElementById('loadingMsg');
+  var loadDetail=document.getElementById('loadingDetail');
+  var statusTxt=document.getElementById('statusTxt');
+  var statusDot=document.getElementById('statusDot');
+  if(empty)empty.style.display='none';
+  if(loading)loading.style.display='block';
+  if(loadMsg)loadMsg.textContent='Connecting to Motive fleet API...';
+  if(loadDetail)loadDetail.textContent='Pulling vehicle locations and driver assignments';
+  if(statusTxt)statusTxt.textContent='SCANNING';
+  if(statusDot)statusDot.style.background='#ffb020';
+  addLog('[SENTINEL] Engaging with live Motive data...');
+
+  try{
+    // Fetch ALL pages of vehicles
+    var allDrivers=[];
+    var page=1;
+    var hasMore=true;
+    while(hasMore){
+      var resp=await fetch('/.netlify/functions/motive-gps?action=vehicles&page_no='+page+'&per_page=50');
+      if(!resp.ok)throw new Error('Motive API returned '+resp.status);
+      var data=await resp.json();
+      var vehicles=data.vehicles||[];
+      if(vehicles.length===0){hasMore=false;break;}
+      var drivers=vehicles.filter(function(v){return v.vehicle.current_driver;}).map(function(v){
+        var ve=v.vehicle;var loc=ve.current_location||{};var dr=ve.current_driver||{};
+        return{
+          name:((dr.first_name||'')+' '+(dr.last_name||'')).trim(),
+          driverId:dr.id,truck:ve.number,year:ve.year,make:ve.make,model:ve.model,
+          lat:loc.lat,lon:loc.lon,speed:loc.speed,
+          engineHrs:loc.engine_hours||0,odometer:loc.odometer||0,
+          locatedAt:loc.located_at,fuel:loc.fuel_primary_remaining_percentage,
+          bearing:loc.bearing,description:loc.description
+        };
+      });
+      allDrivers=allDrivers.concat(drivers);
+      if(loadMsg)loadMsg.textContent='Loaded '+allDrivers.length+' drivers (page '+page+')...';
+      var pagination=data.pagination||{};
+      if(!pagination.next||vehicles.length<50)hasMore=false;
+      page++;
+    }
+
+    if(allDrivers.length===0)throw new Error('No active drivers found in Motive');
+    addLog('[MOTIVE] '+allDrivers.length+' active drivers loaded across '+allDrivers.length+' vehicles');
+    if(loadMsg)loadMsg.textContent='Running detection layers on '+allDrivers.length+' drivers...';
+    if(loadDetail)loadDetail.textContent='Analyzing GPS, velocity, engine hours, fuel levels';
+
+    var wEl=document.getElementById('driverWage');
+    var wage=wEl?parseFloat(wEl.value)||23:23;
+    var vEl=document.getElementById('threshVelocity');
+    var thVeloc=vEl?parseFloat(vEl.value)||8:8;
+    var uEl=document.getElementById('threshUnexplained');
+    var thUnexp=uEl?parseInt(uEl.value)||15:15;
+    var now=Date.now();
+    var totalStolen=0;var totalLost=0;
+
+    var results=allDrivers.map(function(d){
+      var flags=[];var score=0;var stolen=0;
+
+      // Layer 1: Stationary with engine on
+      if(d.speed===0||d.speed===null){
+        flags.push({l:'Stationary',d:'Speed 0 with engine at '+Math.round(d.engineHrs).toLocaleString()+'h',sev:'medium'});
+        score+=20;stolen+=0.25;
+      }
+
+      // Layer 2: Low effective velocity
+      if(d.odometer>0&&d.engineHrs>0){
+        var dailyHrs=(d.engineHrs%24)||8;
+        var mph=d.odometer/dailyHrs;
+        if(mph<thVeloc&&dailyHrs>2){
+          flags.push({l:'Low Velocity',d:mph.toFixed(1)+' mph effective ('+Math.round(d.odometer).toLocaleString()+' mi / '+dailyHrs.toFixed(1)+'h)',sev:'high'});
+          score+=40;stolen+=1.0;
+        }
+      }
+
+      // Layer 3: Stale GPS (no update in 1+ hours during work hours)
+      if(d.locatedAt){
+        var lastSeen=new Date(d.locatedAt);
+        var ageMins=Math.round((now-lastSeen.getTime())/60000);
+        if(ageMins>60){
+          flags.push({l:'Stale GPS',d:'Last ping '+ageMins+' min ago ('+lastSeen.toLocaleTimeString()+')',sev:'medium'});
+          score+=15;stolen+=0.5;
+        }
+      }else{
+        flags.push({l:'No GPS',d:'No location data available',sev:'high'});
+        score+=30;stolen+=1.0;
+      }
+
+      // Layer 4: Low fuel alert
+      if(d.fuel!=null&&d.fuel<15){
+        flags.push({l:'Low Fuel',d:d.fuel+'% remaining',sev:'low'});
+        score+=5;
+      }
+
+      // Layer 5: High engine hours relative to odometer (idling)
+      if(d.engineHrs>100&&d.odometer>0){
+        var miPerEngHr=d.odometer/d.engineHrs;
+        if(miPerEngHr<10){
+          flags.push({l:'Excessive Idle',d:miPerEngHr.toFixed(1)+' mi/eng-hr (high idle ratio)',sev:'high'});
+          score+=35;stolen+=0.75;
+        }
+      }
+
+      totalStolen+=stolen;totalLost+=stolen*wage;
+      return{
+        name:d.name,truck:d.truck,year:d.year,make:d.make,model:d.model,
+        score:score,
+        risk:score>=80?'critical':score>=50?'high':score>=20?'medium':'clean',
+        flags:flags,stolen:stolen,cost:stolen*wage,
+        engineHrs:d.engineHrs,odometer:Math.round(d.odometer),
+        fuel:d.fuel,speed:d.speed,lat:d.lat,lon:d.lon,
+        locatedAt:d.locatedAt,description:d.description
+      };
+    }).sort(function(a,b){return b.score-a.score;});
+
+    // Update header stats
+    var flagged=results.filter(function(r){return r.risk!=='clean';}).length;
+    var hd=document.getElementById('hmDrivers');if(hd)hd.textContent=allDrivers.length;
+    var hf=document.getElementById('hmFlagged');if(hf)hf.textContent=flagged;
+    var hh=document.getElementById('hmHours');if(hh)hh.textContent=totalStolen.toFixed(1)+'h';
+    var hl=document.getElementById('hmDollars');if(hl)hl.textContent='$'+Math.round(totalLost);
+    if(statusTxt)statusTxt.textContent='ACTIVE';
+    if(statusDot)statusDot.style.background='#ff2d2d';
+    if(loading)loading.style.display='none';
+
+    // Render driver threat board
+    var stack=document.getElementById('driverStack');
+    if(stack){
+      stack.innerHTML=results.map(function(r,i){
+        var rc=r.risk==='critical'?'#ff2d2d':r.risk==='high'?'#ffb020':r.risk==='medium'?'#4da3ff':'#00e676';
+        var vehicleInfo=r.year&&r.make?r.year+' '+r.make+(r.model?' '+r.model:''):'';
+        return '<div style="background:#111822;border:1px solid #243347;border-left:4px solid '+rc+';border-radius:10px;padding:16px 18px;margin-bottom:8px;display:flex;align-items:center;gap:16px">'+
+          '<div style="font-family:Oswald,sans-serif;font-size:32px;color:#3d5470;width:44px;text-align:center;flex-shrink:0">'+(i+1).toString().padStart(2,'0')+'</div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-family:Oswald,sans-serif;font-size:17px;font-weight:600;color:#dce8f5;letter-spacing:0.02em">'+r.name+'</div>'+
+            '<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:#7e9bb5;margin-top:4px">TRK #'+r.truck+(vehicleInfo?' | '+vehicleInfo:'')+' | '+r.odometer.toLocaleString()+' mi | '+Math.round(r.engineHrs).toLocaleString()+' eng hrs'+(r.fuel!=null?' | '+r.fuel+'% fuel':'')+'</div>'+
+            (r.description?'<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:#3d5470;margin-top:2px">'+r.description+'</div>':'')+
+            r.flags.map(function(f){
+              var fc=f.sev==='high'?'#ff6b6b':f.sev==='medium'?'#ffb020':'#7e9bb5';
+              return '<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:'+fc+';margin-top:3px">\u26a0 '+f.l+' \u2014 '+f.d+'</div>';
+            }).join('')+
+            (r.stolen>0?'<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:#ff2d2d;margin-top:4px;font-weight:700">EST STOLEN: '+r.stolen.toFixed(1)+'h / $'+Math.round(r.cost)+'</div>':'')+
+          '</div>'+
+          '<div style="text-align:center;flex-shrink:0">'+
+            '<div style="width:56px;height:56px;border-radius:50%;border:3px solid '+rc+';display:flex;align-items:center;justify-content:center;font-family:Oswald,sans-serif;font-size:22px;font-weight:700;color:'+rc+'">'+r.score+'</div>'+
+            '<div style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;color:'+rc+';margin-top:4px;text-transform:uppercase;letter-spacing:0.1em">'+r.risk+'</div>'+
+          '</div>'+
+        '</div>';
+      }).join('');
+    }
+
+    var st=document.querySelector('.sec-title');
+    if(st)st.innerHTML='Driver Threat Board <span style="background:#ff2d2d;color:#fff;padding:2px 10px;border-radius:4px;font-size:12px;margin-left:8px;font-family:JetBrains Mono,monospace">'+flagged+' FLAGGED</span> <span style="background:#111822;color:#7e9bb5;padding:2px 10px;border-radius:4px;font-size:12px;margin-left:4px;font-family:JetBrains Mono,monospace">'+allDrivers.length+' TOTAL</span>';
+
+    // Update risk distribution in sidebar
+    var counts={critical:0,high:0,medium:0,clean:0};
+    results.forEach(function(r){counts[r.risk]++;});
+    var rcEl=document.querySelector('.risk-critical .risk-count');if(rcEl)rcEl.textContent=counts.critical;
+    var rhEl=document.querySelector('.risk-high .risk-count');if(rhEl)rhEl.textContent=counts.high;
+    var rmEl=document.querySelector('.risk-medium .risk-count');if(rmEl)rmEl.textContent=counts.medium;
+    var rlEl=document.querySelector('.risk-clean .risk-count');if(rlEl)rlEl.textContent=counts.clean;
+
+    addLog('[COMPLETE] '+flagged+'/'+allDrivers.length+' drivers flagged | Est '+totalStolen.toFixed(1)+'h stolen ($'+Math.round(totalLost)+') at $'+wage+'/hr');
+
+  }catch(e){
+    if(loading)loading.style.display='none';
+    if(empty){empty.style.display='block';}
+    if(statusTxt)statusTxt.textContent='ERROR';
+    if(statusDot)statusDot.style.background='#ff2d2d';
+    addLog('[ERROR] '+e.message);
+    var loadMsgEl=document.getElementById('loadingMsg');
+    if(loadMsgEl)loadMsgEl.textContent='Error: '+e.message;
+  }
+};
+
+</script>
+</body>
+</html>
