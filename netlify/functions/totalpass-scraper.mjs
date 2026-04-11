@@ -11,9 +11,11 @@ export default async (req, context) => {
       r.headers.forEach((v, k) => { headers[k] = v; });
       return new Response(JSON.stringify({status: r.status, headers, body: (await r.text()).substring(0, 2000)}), {headers: {"Content-Type": "application/json"}});
     }
+    // Step 1: Get login page
     const loginPage = await fetch(B600 + "/", {redirect: "follow"});
     const loginHtml = await loginPage.text();
     const cookies = loginPage.headers.get("set-cookie") || "";
+    // Step 2: POST login
     const formBody = "username=" + encodeURIComponent(USER) + "&password=" + encodeURIComponent(PASS) + "&buttonClicked=4";
     const loginResp = await fetch(B600 + "/login.html", {
       method: "POST", redirect: "manual",
@@ -21,6 +23,7 @@ export default async (req, context) => {
       body: formBody
     });
     const allCookies = [cookies, loginResp.headers.get("set-cookie") || ""].filter(Boolean).join("; ");
+    // Step 3: Follow redirect and get authenticated page
     const location = loginResp.headers.get("location") || "/";
     const authResp = await fetch(B600 + location, {headers: {"Cookie": allCookies}, redirect: "follow"});
     const authHtml = await authResp.text();
