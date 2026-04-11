@@ -1094,7 +1094,50 @@ async function fetchMotiveHOS() {
 }
 
 async function runAudit(){
-  if(!clockData.length){log('No time clock data. Load demo, fetch from Motive, or upload CSV.','warn');return;}
+  // Auto-fetch from Motive if no clock data loaded
+  if(!clockData.length){
+    log('No clock data — auto-pulling drivers from Motive...','hi');
+    try {
+      let allVehicles = [];
+      let page = 1, hasMore = true;
+      while (hasMore) {
+        const resp = await fetch(`/.netlify/functions/motive-gps?action=vehicles&page_no=${page}&per_page=50`);
+        if (!resp.ok) throw new Error(`Motive API returned ${resp.status}`);
+        const data = await resp.json();
+        const vehicles = data.vehicles || [];
+        if (vehicles.length === 0) { hasMore = false; break; }
+        allVehicles = allVehicles.concat(vehicles);
+        const pagination = data.pagination || {};
+        if (!pagination.next || vehicles.length < 50) hasMore = false;
+        page++;
+      }
+      if (allVehicles.length === 0) { log('No vehicles found in Motive. Load demo data or upload CSV.','warn'); return; }
+
+      const dateStr = document.getElementById('auditDate').value || new Date().toISOString().split('T')[0];
+      clockData = allVehicles
+        .filter(v => (v.vehicle || v).current_driver)
+        .map(v => {
+          const ve = v.vehicle || v;
+          const dr = ve.current_driver || {};
+          const name = ((dr.first_name||'') + ' ' + (dr.last_name||'')).trim();
+          return { name, truck: ve.number || '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
+        });
+
+      // Apply known truck mappings
+      const knownMap = { 'trevor': {truck:'0608',rt:'urban'}, 'trevarr': {truck:'4757',rt:'suburban'}, 'brent': {truck:'0294',rt:'urban'} };
+      clockData.forEach(d => {
+        const first = d.name.split(' ')[0].toLowerCase();
+        if (knownMap[first]) { d.truck = knownMap[first].truck; d.routeType = knownMap[first].rt; }
+      });
+
+      log(`✅ Auto-loaded ${clockData.length} drivers from Motive fleet`, 'ok');
+      const upLabel = document.getElementById('upLabel');
+      if (upLabel) upLabel.textContent = `✅ Motive: ${clockData.length} drivers`;
+    } catch (err) {
+      log(`Motive auto-fetch failed: ${err.message}. Load demo or upload CSV.`, 'err');
+      return;
+    }
+  }
 
   const btn=document.getElementById('runBtn');
   btn.disabled=true;btn.textContent='⏳ SCANNING...';
@@ -1539,9 +1582,6 @@ function delay(ms){return new Promise(r=>setTimeout(r,ms));}
 // ============================================
 
 // Override removed — real audit engine handles everything
-
-
-</script>
 
 </script>
 </body>
