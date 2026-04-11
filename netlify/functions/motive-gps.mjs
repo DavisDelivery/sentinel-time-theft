@@ -15,7 +15,6 @@ export default async (req, context) => {
         ep = "vehicle_locations";
         break;
       case "vehicle_history": {
-        // Historical breadcrumbs: GET /v2/vehicle_locations/{vehicle_id}?start_date=&end_date=
         version = "v2";
         const vid = u.searchParams.get("vehicle_id");
         if (!vid) return new Response(JSON.stringify({error: true, message: "vehicle_id required for vehicle_history"}), {status: 400, headers: cors});
