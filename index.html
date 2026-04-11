@@ -438,7 +438,6 @@ input[type=range]::-webkit-slider-thumb {
   border:1px solid var(--b2);
 }
 .btn-ghost:hover{border-color:var(--blue2);color:var(--text);}
-.period-btn.active{background:var(--blue);border-color:var(--blue2);color:#fff;}
 .btn-sm {
   padding:5px 12px;font-size:12px;width:auto;margin-bottom:0;border-radius:2px;
 }
@@ -941,21 +940,16 @@ input[type=range]::-webkit-slider-thumb {
       <input type="password" id="motiveKey" value="2eb96247-8869-4f47-8062-6964c1dc77a8">
     </div>
     <div class="field">
-      <label>Audit Period</label>
-      <div style="display:flex;gap:4px;margin-bottom:8px;">
-        <button class="btn btn-ghost period-btn active" onclick="setPeriod('day',this)" style="flex:1;padding:6px 4px;font-size:11px;">Day</button>
-        <button class="btn btn-ghost period-btn" onclick="setPeriod('week',this)" style="flex:1;padding:6px 4px;font-size:11px;">Week</button>
-        <button class="btn btn-ghost period-btn" onclick="setPeriod('month',this)" style="flex:1;padding:6px 4px;font-size:11px;">Month</button>
-        <button class="btn btn-ghost period-btn" onclick="setPeriod('custom',this)" style="flex:1;padding:6px 4px;font-size:11px;">Custom</button>
-      </div>
-    </div>
-    <div class="field">
-      <label id="dateLabel">Audit Date</label>
+      <label>Audit Date</label>
       <input type="date" id="auditDate">
     </div>
-    <div class="field" id="endDateField" style="display:none;">
-      <label>End Date</label>
-      <input type="date" id="auditEndDate">
+    <div class="field">
+      <label style="margin-bottom:4px;">Period</label>
+      <div style="display:flex;gap:4px;margin-bottom:6px;">
+        <button class="btn btn-ghost" id="pDay" onclick="setPeriod('day')" style="flex:1;padding:5px 2px;font-size:11px;background:var(--blue);border-color:var(--blue2);color:#fff;">Day</button>
+        <button class="btn btn-ghost" id="pWeek" onclick="setPeriod('week')" style="flex:1;padding:5px 2px;font-size:11px;">Week</button>
+        <button class="btn btn-ghost" id="pMonth" onclick="setPeriod('month')" style="flex:1;padding:5px 2px;font-size:11px;">Month</button>
+      </div>
     </div>
     <div class="field">
       <label>Driver Wage ($/hr)</label>
@@ -974,7 +968,7 @@ input[type=range]::-webkit-slider-thumb {
       Expected columns:<br>name, truck, clock_in, clock_out
     </div>
     <button class="btn btn-run" onclick="fetchLiveClockData()" style="font-size:13px;padding:9px;margin-bottom:6px;">🔴 FETCH LIVE FROM B600</button>
-    <button class="btn btn-run" onclick="fetchMotiveHOS()" style="font-size:13px;padding:9px;margin-bottom:6px;background:linear-gradient(135deg,#1e5b92,#2979c8);">📡 FETCH CLOCK FROM MOTIVE HOS</button>
+    <button class="btn btn-run" onclick="fetchMotiveHOS()" style="font-size:13px;padding:9px;margin-bottom:6px;background:linear-gradient(135deg,#1e5b92,#2979c8);">📡 FETCH FROM MOTIVE HOS</button>
     <button class="btn btn-ghost" onclick="loadDemo()">⚡ Load Demo Data (8 drivers)</button>
   </div>
 
@@ -1206,8 +1200,6 @@ const SUSPICIOUS_LOCS = ['QuikTrip','Chick-fil-A','McDonald\'s','Wendy\'s','Waff
 document.addEventListener('DOMContentLoaded',()=>{
   const d = new Date().toISOString().split('T')[0];
   document.getElementById('auditDate').value = d;
-  const endEl = document.getElementById('auditEndDate');
-  if (endEl) endEl.value = d;
 });
 
 // ═══════════════════════════════════════════
@@ -1222,7 +1214,7 @@ function log(msg, t='info'){
   p.appendChild(d);
   p.scrollTop=p.scrollHeight;
 }
-const addLog = log; // alias for compatibility
+const addLog = log;
 
 // ═══════════════════════════════════════════
 // DEMO DATA
@@ -1247,42 +1239,31 @@ function loadDemo(){
 // LIVE: FETCH FROM TOTALPASS B600
 // ═══════════════════════════════════════════
 async function fetchLiveClockData() {
-  const dates = getAuditDates();
-  if (!dates.length) { log('Set an audit date first', 'warn'); return; }
-  log(`Fetching TotalPass B600 data for ${dates.length} day(s)...`, 'hi');
+  const date = document.getElementById('auditDate').value;
+  log(`Fetching TotalPass B600 data for ${date}...`, 'hi');
   setStatus('running');
 
-  let allRecords = [];
-  for (const date of dates) {
-    try {
-      const resp = await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await resp.json();
+  try {
+    const resp = await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await resp.json();
 
-      if (data.logs) data.logs.forEach(l => log(`[B600] ${l}`, 'info'));
+    // Log scraper output
+    if (data.logs) data.logs.forEach(l => log(`[B600] ${l}`, 'info'));
 
-      if (data.success && data.records && data.records.length > 0) {
-        allRecords = allRecords.concat(data.records.map(r => ({ ...r, date })));
-      } else if (!data.success) {
-        log(`B600 scrape issue for ${date}: ${data.error || 'unknown'}`, 'warn');
-      }
-    } catch (err) {
-      log(`B600 connection error for ${date}: ${err.message}`, 'err');
-    }
-  }
-
-  if (allRecords.length > 0) {
-    clockData = allRecords.map(r => ({
-      name:      r.name,
-      emp_id:    r.emp_id,
-      truck:     r.emp_id || '',
-      clockIn:   r.clock_in,
-      clockOut:  r.clock_out,
-      shiftHrs:  r.clock_in && r.clock_out ? (t2m(r.clock_out) - t2m(r.clock_in)) / 60 : 0,
-      routeType: 'suburban',
-      date:      r.date
-    }));
+    if (data.success && data.records && data.records.length > 0) {
+      // Map TotalPass records to SENTINEL format
+      clockData = data.records.map(r => ({
+        name:      r.name,
+        emp_id:    r.emp_id,
+        truck:     r.emp_id || '', // emp_id often matches truck # — override in driver mapping
+        clockIn:   r.clock_in,
+        clockOut:  r.clock_out,
+        shiftHrs:  r.clock_in && r.clock_out ? (t2m(r.clock_out) - t2m(r.clock_in)) / 60 : 0,
+        routeType: 'suburban', // default — will be overridden by driver mapping below
+        date:      r.date
+      }));
 
       // Apply known driver-to-truck mapping
       const driverMap = {
@@ -1302,16 +1283,23 @@ async function fetchLiveClockData() {
       }).filter(d => d.clockIn && d.clockOut && d.name.length > 1);
 
       document.getElementById('upZone').classList.add('loaded');
-      document.getElementById('upLabel').textContent = `✅ B600 Live: ${clockData.length} records (${dates.length} day${dates.length>1?'s':''})`;
-      log(`✅ TotalPass: ${clockData.length} punch records loaded`, 'ok');
-      setStatus('ready');
+      document.getElementById('upLabel').textContent = `✅ B600 Live: ${clockData.length} records`;
+      log(`✅ TotalPass: ${clockData.length} punch records loaded for ${date}`, 'ok');
       return true;
 
-  } else {
-    log('B600 returned no records. Try Motive HOS or upload CSV.', 'warn');
-    log('Tip: Access clock at http://192.168.20.94, go to Reports → Export CSV', 'warn');
-    showClockFallback({ error: 'No records returned' });
-    setStatus('ready');
+    } else if (!data.success) {
+      log(`B600 scrape issue: ${data.error}`, 'warn');
+      if (data.hint) log(`Hint: ${data.hint}`, 'warn');
+      log('Tip: Access clock at http://192.168.20.94, go to Reports → Export CSV, note the URL, set TOTALPASS_EXPORT_PATH env var', 'warn');
+
+      // Show modal asking user to upload CSV manually as fallback
+      showClockFallback(data);
+      return false;
+    }
+  } catch (err) {
+    log(`B600 connection error: ${err.message}`, 'err');
+    log('Is the clock online? Is this running from your office network?', 'warn');
+    showClockFallback({ error: err.message });
     return false;
   }
 }
@@ -1327,19 +1315,14 @@ function showClockFallback(data) {
 // ═══════════════════════════════════════════
 async function fetchMotiveGPS(truckId, date) {
   try {
-    // First get vehicle list to find vehicle_id from truck number
     const vehiclesResp = await fetch('/.netlify/functions/motive-gps?action=vehicles');
     if (!vehiclesResp.ok) throw new Error(`Vehicles fetch failed: ${vehiclesResp.status}`);
     const vehiclesData = await vehiclesResp.json();
 
     const vehicleList = vehiclesData.vehicles || vehiclesData.data || [];
-    // Motive wraps each entry as {vehicle: {...}}
     const vehicle = vehicleList.find(v => {
       const ve = v.vehicle || v;
-      return ve.number === truckId ||
-        String(ve.number) === String(truckId) ||
-        ve.name?.includes(truckId) ||
-        String(ve.id) === truckId;
+      return String(ve.number) === String(truckId) || ve.name?.includes(truckId) || String(ve.id) === truckId;
     });
 
     if (!vehicle) {
@@ -1351,66 +1334,42 @@ async function fetchMotiveGPS(truckId, date) {
     const vehicleId = ve.id;
     log(`Found Motive vehicle ID ${vehicleId} for truck #${truckId}`, 'info');
 
-    // Fetch historical location breadcrumbs via v2 endpoint
-    const locResp = await fetch(`/.netlify/functions/motive-gps?action=vehicle_history&vehicle_id=${vehicleId}&start_date=${date}&end_date=${date}`);
+    // Fetch historical location breadcrumbs via v2
     let locations = [];
+    const locResp = await fetch(`/.netlify/functions/motive-gps?action=vehicle_history&vehicle_id=${vehicleId}&start_date=${date}&end_date=${date}`);
     if (locResp.ok) {
       const locData = await locResp.json();
-      // v2 returns {vehicle_locations: [...]} or {locations: [...]}
-      locations = locData.vehicle_locations || locData.locations || locData.data || [];
-      // Flatten if wrapped: [{vehicle_location: {…}}]
-      locations = locations.map(l => l.vehicle_location || l);
+      locations = (locData.vehicle_locations || locData.locations || locData.data || []).map(l => l.vehicle_location || l);
       log(`GPS history: ${locations.length} breadcrumb points for ${date}`, 'info');
     } else {
       log(`v2 location history returned ${locResp.status} — trying driving_periods`, 'warn');
     }
 
-    // Fetch IFTA trips for distance/duration data
-    const tripsResp = await fetch(`/.netlify/functions/motive-gps?action=ifta_trips&vehicle_ids[]=${vehicleId}&start_date=${date}&end_date=${date}`);
+    // Fetch IFTA trips
     let trips = [];
+    const tripsResp = await fetch(`/.netlify/functions/motive-gps?action=ifta_trips&vehicle_ids[]=${vehicleId}&start_date=${date}&end_date=${date}`);
     if (tripsResp.ok) {
       const tripsData = await tripsResp.json();
       trips = tripsData.ifta_trips || tripsData.trips || tripsData.data || [];
       log(`IFTA trips: ${trips.length} trip segments for ${date}`, 'info');
     }
 
-    // If no v2 breadcrumbs, try driving_periods as a fallback
+    // Fallback: driving_periods if no v2 breadcrumbs
     if (locations.length === 0) {
       const dpResp = await fetch(`/.netlify/functions/motive-gps?action=driving_periods&vehicle_id=${vehicleId}&start_date=${date}&end_date=${date}`);
       if (dpResp.ok) {
         const dpData = await dpResp.json();
         const periods = dpData.driving_periods || dpData.data || [];
-        // Convert driving periods to pseudo-location points
         periods.forEach(p => {
           const dp = p.driving_period || p;
-          if (dp.start_location) {
-            locations.push({
-              lat: dp.start_location.lat, lng: dp.start_location.lon || dp.start_location.lng,
-              speed: dp.distance_miles && dp.duration ? (dp.distance_miles / (dp.duration / 3600)) : 30,
-              recorded_at: dp.start_time, description: dp.start_location.description || ''
-            });
-          }
-          if (dp.end_location) {
-            locations.push({
-              lat: dp.end_location.lat, lng: dp.end_location.lon || dp.end_location.lng,
-              speed: 0, recorded_at: dp.end_time, description: dp.end_location.description || ''
-            });
-          }
+          if (dp.start_location) locations.push({ lat: dp.start_location.lat, lng: dp.start_location.lon || dp.start_location.lng, speed: 30, recorded_at: dp.start_time, description: dp.start_location.description || '' });
+          if (dp.end_location) locations.push({ lat: dp.end_location.lat, lng: dp.end_location.lon || dp.end_location.lng, speed: 0, recorded_at: dp.end_time, description: dp.end_location.description || '' });
         });
         log(`Driving periods fallback: ${locations.length} points from ${periods.length} periods`, 'info');
       }
     }
 
-    // Also grab current location snapshot for this vehicle
-    const currentLoc = ve.current_location || {};
-
-    return {
-      vehicle_id: vehicleId,
-      locations: locations,
-      trips: trips,
-      currentLocation: currentLoc,
-      vehicleInfo: { number: ve.number, year: ve.year, make: ve.make, model: ve.model }
-    };
+    return { vehicle_id: vehicleId, locations, trips };
 
   } catch (err) {
     log(`Motive GPS error for truck #${truckId}: ${err.message}`, 'warn');
@@ -1420,80 +1379,53 @@ async function fetchMotiveGPS(truckId, date) {
 
 // Convert real Motive GPS data into the metrics our algorithm needs
 function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
-  if (!motiveData || !motiveData.locations || motiveData.locations.length === 0) {
-    // Even without location breadcrumbs, if we have IFTA trips, use those
-    if (!motiveData || !motiveData.trips || motiveData.trips.length === 0) {
-      return null; // Will fall back to simulation
-    }
-  }
-
+  if (!motiveData) return null;
   const locs = motiveData.locations || [];
   const trips = motiveData.trips || [];
+  if (locs.length === 0 && trips.length === 0) return null;
 
-  // Calculate engine-on time from IFTA trips
-  let engineOnMin = 0;
-  let totalMiles = 0;
+  let engineOnMin = 0, totalMiles = 0;
   trips.forEach(trip => {
     const t = trip.ifta_trip || trip;
     const start = new Date(t.started_at || t.start_time || t.start_date).getTime();
-    const end = new Date(t.ended_at || t.end_time || t.end_date || t.started_at || t.start_time).getTime();
-    engineOnMin += (end - start) / 60000;
+    const end = new Date(t.ended_at || t.end_time || t.end_date || t.started_at).getTime();
+    if (!isNaN(start) && !isNaN(end)) engineOnMin += (end - start) / 60000;
     totalMiles += (t.distance_miles || t.distance || t.total_miles || 0);
   });
 
   if (engineOnMin === 0 && locs.length > 1) {
-    // Estimate from GPS points where speed > 0
-    let movingPoints = locs.filter(l => (l.speed || 0) > 2);
-    engineOnMin = movingPoints.length * 2;
+    engineOnMin = locs.filter(l => (l.speed || 0) > 2).length * 2;
   }
 
-  // If we have trips but no location breadcrumbs, estimate miles from trips
-  if (totalMiles === 0 && trips.length > 0) {
-    trips.forEach(t => {
-      const trip = t.ifta_trip || t;
-      totalMiles += (trip.distance || trip.total_distance || trip.miles || 0);
-    });
-  }
-
-  // Find first and last movement
   const movingLocs = locs.filter(l => (l.speed || 0) > 2);
-  let firstMoveMin = clockInMin;
-  let lastMoveMin = clockOutMin;
+  let firstMoveMin = clockInMin, lastMoveMin = clockOutMin;
 
   if (movingLocs.length > 0) {
     const firstTs = new Date(movingLocs[0].located_at || movingLocs[0].timestamp || movingLocs[0].recorded_at);
-    firstMoveMin = firstTs.getHours() * 60 + firstTs.getMinutes();
+    if (!isNaN(firstTs)) firstMoveMin = firstTs.getHours() * 60 + firstTs.getMinutes();
     const lastTs = new Date(movingLocs[movingLocs.length-1].located_at || movingLocs[movingLocs.length-1].timestamp || movingLocs[movingLocs.length-1].recorded_at);
-    lastMoveMin = lastTs.getHours() * 60 + lastTs.getMinutes();
+    if (!isNaN(lastTs)) lastMoveMin = lastTs.getHours() * 60 + lastTs.getMinutes();
   } else if (trips.length > 0) {
-    // Use trip start/end times
-    const firstTrip = trips[0].ifta_trip || trips[0];
-    const lastTrip = trips[trips.length - 1].ifta_trip || trips[trips.length - 1];
-    const ft = new Date(firstTrip.started_at || firstTrip.start_time);
-    if (!isNaN(ft)) firstMoveMin = ft.getHours() * 60 + ft.getMinutes();
-    const lt = new Date(lastTrip.ended_at || lastTrip.end_time || lastTrip.started_at || lastTrip.start_time);
-    if (!isNaN(lt)) lastMoveMin = lt.getHours() * 60 + lt.getMinutes();
+    const ft = trips[0].ifta_trip || trips[0];
+    const lt = trips[trips.length-1].ifta_trip || trips[trips.length-1];
+    const fts = new Date(ft.started_at || ft.start_time);
+    if (!isNaN(fts)) firstMoveMin = fts.getHours() * 60 + fts.getMinutes();
+    const lts = new Date(lt.ended_at || lt.end_time || lt.started_at);
+    if (!isNaN(lts)) lastMoveMin = lts.getHours() * 60 + lts.getMinutes();
   }
 
-  // Detect stops from GPS breadcrumbs
   const stops = locs.length > 0 ? detectStopsFromGPS(locs) : [];
-
-  // Effective MPH
   const shiftHrs = (clockOutMin - clockInMin) / 60;
   const effectiveMph = shiftHrs > 0 ? totalMiles / shiftHrs : 0;
 
-  // Check GPS after clock-out
   const afterClockout = locs.filter(l => {
     const ts = new Date(l.located_at || l.timestamp || l.recorded_at);
-    const tsMin = ts.getHours() * 60 + ts.getMinutes();
-    return tsMin > clockOutMin + 5 && (l.speed || 0) > 2;
+    if (isNaN(ts)) return false;
+    return (ts.getHours() * 60 + ts.getMinutes()) > clockOutMin + 5 && (l.speed || 0) > 2;
   });
 
   return {
-    isLive: true,
-    engineOnMin,
-    actualMiles: totalMiles,
-    effectiveMph,
+    isLive: true, engineOnMin, actualMiles: totalMiles, effectiveMph,
     engineFactor: engineOnMin / Math.max(clockOutMin - clockInMin, 1),
     lateStart: Math.max(0, firstMoveMin - clockInMin),
     earlyStop: Math.max(0, clockOutMin - lastMoveMin),
@@ -1503,17 +1435,14 @@ function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
     deliveryStops: trips.length || Math.floor(stops.length * 0.6),
     microStopCount: stops.filter(s => s.dur < parseInt(document.getElementById('t1')?.value || 15) && s.dur >= 5).length,
     warehouseDwellExtra: Math.max(0, firstMoveMin - clockInMin - 10),
-    habitualStop: false,
-    theftProfile: 0.3,
-    shiftMin: clockOutMin - clockInMin,
-    rawLocations: locs.length,
-    rawTrips: trips.length
+    habitualStop: false, theftProfile: 0.3,
+    shiftMin: clockOutMin - clockInMin, rawLocations: locs.length, rawTrips: trips.length
   };
 }
 
 function detectStopsFromGPS(locs) {
   const stops = [];
-  const stopThresh = parseInt(document.getElementById('t1')?.value || 15);
+  const stopThresh = parseInt(document.getElementById('t1').value);
   const SUSPICIOUS = ['QuikTrip','Chick-fil-A','McDonald','Wendy','Waffle House','Cracker Barrel','Walmart','Target','Residence','Apartment','Parking'];
 
   let stopStart = null;
@@ -1523,7 +1452,7 @@ function detectStopsFromGPS(locs) {
     const loc = locs[i];
     const speed = loc.speed || 0;
     const lat = loc.lat || loc.latitude || 0;
-    const lng = loc.lng || loc.lon || loc.longitude || 0;
+    const lng = loc.lng || loc.longitude || 0;
     const ts = new Date(loc.located_at || loc.timestamp || loc.recorded_at);
     if (isNaN(ts)) continue;
     const tsMin = ts.getHours() * 60 + ts.getMinutes();
@@ -1876,208 +1805,101 @@ function buildTimeline(driver,gps,ciMin,coMin){
 // PERIOD SELECTOR
 // ═══════════════════════════════════════════
 let auditPeriod = 'day';
-function setPeriod(p, btn) {
+function setPeriod(p) {
   auditPeriod = p;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  const endField = document.getElementById('endDateField');
-  const dateLabel = document.getElementById('dateLabel');
-  if (p === 'custom') {
-    endField.style.display = 'block';
-    dateLabel.textContent = 'Start Date';
-  } else {
-    endField.style.display = 'none';
-    dateLabel.textContent = p === 'day' ? 'Audit Date' : `${p.charAt(0).toUpperCase()+p.slice(1)} Starting`;
-  }
+  ['pDay','pWeek','pMonth'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.background = ''; el.style.borderColor = ''; el.style.color = ''; }
+  });
+  const active = document.getElementById('p' + p.charAt(0).toUpperCase() + p.slice(1));
+  if (active) { active.style.background = 'var(--blue)'; active.style.borderColor = 'var(--blue2)'; active.style.color = '#fff'; }
 }
 
 function getAuditDates() {
   const baseDate = document.getElementById('auditDate').value;
-  if (!baseDate) return [];
+  if (!baseDate) return [new Date().toISOString().split('T')[0]];
   const start = new Date(baseDate + 'T12:00:00');
+  const numDays = auditPeriod === 'week' ? 7 : auditPeriod === 'month' ? 30 : 1;
   const dates = [];
-  let numDays = 1;
-  if (auditPeriod === 'week') numDays = 7;
-  else if (auditPeriod === 'month') numDays = 30;
-  else if (auditPeriod === 'custom') {
-    const endVal = document.getElementById('auditEndDate').value;
-    if (endVal) {
-      const end = new Date(endVal + 'T12:00:00');
-      numDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
-      if (numDays > 60) { log('Max 60 days — capping range', 'warn'); numDays = 60; }
-    }
-  }
   for (let i = 0; i < numDays; i++) {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
+    const d = new Date(start); d.setDate(d.getDate() + i);
     dates.push(d.toISOString().split('T')[0]);
   }
   return dates;
 }
 
 // ═══════════════════════════════════════════
-// FETCH CLOCK DATA FROM MOTIVE HOS/DRIVER LOGS
+// FETCH CLOCK DATA FROM MOTIVE HOS
 // ═══════════════════════════════════════════
 async function fetchMotiveHOS() {
   const dates = getAuditDates();
-  if (!dates.length) { log('Set an audit date first', 'warn'); return; }
-  log(`Fetching Motive HOS data for ${dates.length} day(s)...`, 'hi');
+  log(`Fetching Motive HOS/driver data for ${dates.length} day(s)...`, 'hi');
   setStatus('running');
 
   try {
-    // Get all drivers first
-    const usersResp = await fetch('/.netlify/functions/motive-gps?action=users&per_page=100&status=active');
-    if (!usersResp.ok) throw new Error(`Users fetch failed: ${usersResp.status}`);
-    const usersData = await usersResp.json();
-    const users = usersData.users || usersData.data || [];
+    // Get vehicles with current driver assignments
+    const vehResp = await fetch('/.netlify/functions/motive-gps?action=vehicles&per_page=100');
+    const vehData = vehResp.ok ? await vehResp.json() : { vehicles: [] };
+    const vehicles = vehData.vehicles || [];
 
-    // Fetch HOS logs for the date range
-    const startDate = dates[0];
-    const endDate = dates[dates.length - 1];
+    // Get HOS logs for date range
+    const startDate = dates[0], endDate = dates[dates.length - 1];
     const hosResp = await fetch(`/.netlify/functions/motive-gps?action=hos&start_date=${startDate}&end_date=${endDate}&per_page=100`);
     let hosRecords = [];
     if (hosResp.ok) {
       const hosData = await hosResp.json();
       hosRecords = hosData.hours_of_service || hosData.data || [];
+      log(`HOS: ${hosRecords.length} records returned`, 'info');
     }
 
-    // Also try driver_logs
-    const logsResp = await fetch(`/.netlify/functions/motive-gps?action=driver_logs&start_date=${startDate}&end_date=${endDate}&per_page=100`);
-    let logRecords = [];
-    if (logsResp.ok) {
-      const logsData = await logsResp.json();
-      logRecords = logsData.driver_logs || logsData.logs || logsData.data || [];
-    }
-
-    // Build clock data from HOS — find on_duty/driving start and off_duty end per driver per day
-    const driverMap = {};
-    const allRecords = [...hosRecords, ...logRecords];
-
-    // Also use vehicles endpoint to map drivers to trucks
-    const vehResp = await fetch('/.netlify/functions/motive-gps?action=vehicles&per_page=100');
-    const vehData = vehResp.ok ? await vehResp.json() : { vehicles: [] };
-    const vehicles = vehData.vehicles || [];
+    // Build driver-to-truck map from vehicles
     const truckByDriver = {};
     vehicles.forEach(v => {
       const ve = v.vehicle || v;
       if (ve.current_driver) {
-        const driverName = ((ve.current_driver.first_name || '') + ' ' + (ve.current_driver.last_name || '')).trim();
+        const name = ((ve.current_driver.first_name || '') + ' ' + (ve.current_driver.last_name || '')).trim();
+        truckByDriver[name.toLowerCase()] = ve.number;
         truckByDriver[ve.current_driver.id] = ve.number;
-        truckByDriver[driverName.toLowerCase()] = ve.number;
       }
     });
 
-    // Parse HOS entries into clock-in/out pairs
-    allRecords.forEach(rec => {
-      const entry = rec.hours_of_service || rec.driver_log || rec;
-      if (!entry.driver) return;
-      const driverName = ((entry.driver.first_name || '') + ' ' + (entry.driver.last_name || '')).trim();
-      const driverId = entry.driver.id;
-      const date = entry.date || (entry.start_time ? entry.start_time.split('T')[0] : startDate);
-
-      const key = `${driverName}|${date}`;
-      if (!driverMap[key]) {
-        driverMap[key] = {
-          name: driverName,
-          driverId: driverId,
-          truck: truckByDriver[driverId] || truckByDriver[driverName.toLowerCase()] || '',
-          date: date,
-          firstDuty: null,
-          lastDuty: null,
-          onDutyMin: 0,
-          drivingMin: 0
-        };
-      }
-
-      // Extract duty status changes
-      const statuses = entry.status_changes || entry.events || [];
-      if (Array.isArray(statuses)) {
-        statuses.forEach(s => {
-          const status = s.status || s.type || '';
-          const time = s.time || s.timestamp || s.start_time || '';
-          if (!time) return;
-          const ts = new Date(time);
-          const timeMin = ts.getHours() * 60 + ts.getMinutes();
-          const timeStr = m2t(timeMin);
-
-          if (status === 'on_duty' || status === 'driving' || status === 'on_duty_driving') {
-            if (!driverMap[key].firstDuty || timeMin < t2m(driverMap[key].firstDuty)) {
-              driverMap[key].firstDuty = timeStr;
-            }
-          }
-          if (status === 'off_duty' || status === 'sleeper') {
-            if (!driverMap[key].lastDuty || timeMin > t2m(driverMap[key].lastDuty)) {
-              driverMap[key].lastDuty = timeStr;
-            }
-          }
-        });
-      }
-
-      // Use summary hours if available
-      if (entry.on_duty_duration) driverMap[key].onDutyMin += (entry.on_duty_duration / 60) || 0;
-      if (entry.driving_duration) driverMap[key].drivingMin += (entry.driving_duration / 60) || 0;
-      if (entry.on_duty_seconds) driverMap[key].onDutyMin += (entry.on_duty_seconds / 60) || 0;
-      if (entry.driving_seconds) driverMap[key].drivingMin += (entry.driving_seconds / 60) || 0;
-    });
-
-    // Convert to clockData format
-    clockData = Object.values(driverMap)
-      .filter(d => d.name && (d.firstDuty || d.onDutyMin > 0))
-      .map(d => {
-        const clockIn = d.firstDuty || '06:30';
-        const clockOut = d.lastDuty || (d.onDutyMin > 0 ? m2t(t2m(clockIn) + d.onDutyMin + d.drivingMin) : '17:00');
+    // Build clock data from vehicles (most reliable source)
+    clockData = vehicles
+      .filter(v => (v.vehicle || v).current_driver)
+      .map(v => {
+        const ve = v.vehicle || v;
+        const dr = ve.current_driver || {};
+        const name = ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim();
         return {
-          name: d.name,
-          truck: d.truck,
-          clockIn: clockIn,
-          clockOut: clockOut,
-          shiftHrs: (t2m(clockOut) - t2m(clockIn)) / 60,
-          routeType: 'suburban',
-          date: d.date
+          name, truck: ve.number || '', clockIn: '06:30', clockOut: '17:00',
+          shiftHrs: 10.5, routeType: 'suburban', date: startDate
         };
-      })
-      .filter(d => d.shiftHrs > 0 && d.shiftHrs < 20);
-
-    if (clockData.length === 0) {
-      // Fallback: build from vehicles endpoint if HOS returns nothing
-      log('HOS returned no duty records — building driver list from Motive vehicles', 'warn');
-      clockData = vehicles
-        .filter(v => (v.vehicle || v).current_driver)
-        .map(v => {
-          const ve = v.vehicle || v;
-          const dr = ve.current_driver || {};
-          return {
-            name: ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim(),
-            truck: ve.number || '',
-            clockIn: '06:30',
-            clockOut: '17:00',
-            shiftHrs: 10.5,
-            routeType: 'suburban',
-            date: startDate
-          };
-        });
-    }
-
-    // Apply known driver-to-truck mapping
-    const knownMap = {
-      'trevor seyers': { truck: '0608', routeType: 'urban' },
-      'trevarr howard': { truck: '4757', routeType: 'suburban' },
-      'brent dixon': { truck: '0294', routeType: 'urban' },
-    };
-    clockData = clockData.map(d => {
-      const key = d.name.toLowerCase();
-      Object.entries(knownMap).forEach(([name, info]) => {
-        if (key.includes(name.split(' ')[0])) {
-          d.truck = info.truck;
-          d.routeType = info.routeType;
-        }
       });
-      return d;
+
+    // Override with HOS duty times where available
+    hosRecords.forEach(rec => {
+      const entry = rec.hours_of_service || rec;
+      if (!entry.driver) return;
+      const name = ((entry.driver.first_name || '') + ' ' + (entry.driver.last_name || '')).trim();
+      const match = clockData.find(d => d.name.toLowerCase() === name.toLowerCase());
+      if (match && entry.on_duty_duration) {
+        const totalHrs = ((entry.on_duty_duration || 0) + (entry.driving_duration || 0)) / 3600;
+        if (totalHrs > 0) match.shiftHrs = totalHrs;
+      }
     });
+
+    // Apply known truck mappings
+    const knownMap = { 'trevor': { truck: '0608', rt: 'urban' }, 'trevarr': { truck: '4757', rt: 'suburban' }, 'brent': { truck: '0294', rt: 'urban' } };
+    clockData.forEach(d => {
+      const first = d.name.split(' ')[0].toLowerCase();
+      if (knownMap[first]) { d.truck = knownMap[first].truck; d.routeType = knownMap[first].rt; }
+    });
+
+    clockData = clockData.filter(d => d.name.length > 1);
 
     document.getElementById('upZone').classList.add('loaded');
-    document.getElementById('upLabel').textContent = `✅ Motive HOS: ${clockData.length} records (${dates.length} day${dates.length>1?'s':''})`;
-    log(`✅ Motive HOS: ${clockData.length} driver records loaded`, 'ok');
+    document.getElementById('upLabel').textContent = `✅ Motive: ${clockData.length} drivers (${dates.length} day${dates.length>1?'s':''})`;
+    log(`✅ Motive: ${clockData.length} drivers loaded`, 'ok');
     setStatus('ready');
 
   } catch (err) {
@@ -2086,102 +1908,50 @@ async function fetchMotiveHOS() {
   }
 }
 
-// ═══════════════════════════════════════════
-// MULTI-DAY AUDIT ENGINE
-// ═══════════════════════════════════════════
 async function runAudit(){
-  if(!clockData.length){log('No time clock data. Load demo, fetch from Motive HOS, or upload CSV.','warn');return;}
+  if(!clockData.length){log('No time clock data. Load demo, fetch from Motive, or upload CSV.','warn');return;}
 
   const btn=document.getElementById('runBtn');
   btn.disabled=true;btn.textContent='⏳ SCANNING...';
   setStatus('running');
   results=[];
 
-  const dates = getAuditDates();
-  const numDays = dates.length;
-  log(`SENTINEL audit initiated — 8-layer analysis engaged (${numDays} day${numDays>1?'s':''})`,'hi');
-  log(`Analyzing ${clockData.length} driver records across ${numDays} day(s)...`,'info');
+  log('SENTINEL audit initiated — 8-layer analysis engaged','hi');
+  log(`Analyzing ${clockData.length} drivers...`,'info');
 
-  // Group clock data by driver (aggregate across days)
-  const driverGroups = {};
-  clockData.forEach(d => {
-    const key = d.name;
-    if (!driverGroups[key]) {
-      driverGroups[key] = { ...d, days: [], totalShiftMin: 0 };
-    }
-    driverGroups[key].days.push({ ...d, date: d.date || dates[0] });
-    driverGroups[key].totalShiftMin += t2m(d.clockOut) - t2m(d.clockIn);
-  });
-  const drivers = Object.values(driverGroups);
-
-  // First pass: generate GPS data for all drivers across all days
+  // First pass: generate GPS data for all drivers (live from Motive, or simulated)
   log('Fetching GPS data from Motive...', 'hi');
   const allGPS = [];
-  for (let i = 0; i < drivers.length; i++) {
-    const driver = drivers[i];
-    const driverDays = driver.days.length > 0 ? driver.days : [driver];
-    let aggregatedGPS = null;
+  for (let i = 0; i < clockData.length; i++) {
+    const driver = clockData[i];
+    const date = document.getElementById('auditDate').value;
+    const clockInMin = t2m(driver.clockIn);
+    const clockOutMin = t2m(driver.clockOut);
 
-    for (const dayData of driverDays) {
-      const date = dayData.date || dates[0];
-      const clockInMin = t2m(dayData.clockIn);
-      const clockOutMin = t2m(dayData.clockOut);
-
-      let gpsData = null;
-      if (driver.truck) {
-        const motiveRaw = await fetchMotiveGPS(driver.truck, date);
-        if (motiveRaw) {
-          gpsData = processMotiveData(driver.truck, motiveRaw, clockInMin, clockOutMin);
-          if (gpsData) log(`✅ Live GPS: Truck #${driver.truck} ${date} — ${gpsData.rawLocations} points, ${gpsData.rawTrips} trips`, 'ok');
-        }
-      }
-
-      if (!gpsData) {
-        log(`Using simulated GPS for ${driver.name} ${date} (no live data)`, 'warn');
-        gpsData = simulateGPS(dayData, i * 997 + driver.name.length * 31 + driverDays.indexOf(dayData) * 113);
-      }
-
-      // Aggregate GPS across days
-      if (!aggregatedGPS) {
-        aggregatedGPS = { ...gpsData, daysAnalyzed: 1 };
-      } else {
-        aggregatedGPS.daysAnalyzed++;
-        aggregatedGPS.engineOnMin += gpsData.engineOnMin;
-        aggregatedGPS.actualMiles += gpsData.actualMiles;
-        aggregatedGPS.lateStart = (aggregatedGPS.lateStart + gpsData.lateStart) / 2;
-        aggregatedGPS.earlyStop = (aggregatedGPS.earlyStop + gpsData.earlyStop) / 2;
-        aggregatedGPS.gpsAfterClockout = aggregatedGPS.gpsAfterClockout || gpsData.gpsAfterClockout;
-        aggregatedGPS.gpsAfterMin += gpsData.gpsAfterMin;
-        aggregatedGPS.unexplained = [...(aggregatedGPS.unexplained || []), ...(gpsData.unexplained || [])];
-        aggregatedGPS.deliveryStops += gpsData.deliveryStops;
-        aggregatedGPS.microStopCount += gpsData.microStopCount;
-        aggregatedGPS.warehouseDwellExtra += gpsData.warehouseDwellExtra;
-        aggregatedGPS.shiftMin += gpsData.shiftMin;
+    // Try live Motive GPS first
+    let gpsData = null;
+    if (driver.truck) {
+      const motiveRaw = await fetchMotiveGPS(driver.truck, date);
+      if (motiveRaw) {
+        gpsData = processMotiveData(driver.truck, motiveRaw, clockInMin, clockOutMin);
+        if (gpsData) log(`✅ Live GPS: Truck #${driver.truck} — ${gpsData.rawLocations} points, ${gpsData.rawTrips} trips`, 'ok');
       }
     }
 
-    // Average out per-day metrics for multi-day
-    if (aggregatedGPS && aggregatedGPS.daysAnalyzed > 1) {
-      const n = aggregatedGPS.daysAnalyzed;
-      aggregatedGPS.effectiveMph = aggregatedGPS.shiftMin > 0 ?
-        aggregatedGPS.actualMiles / (aggregatedGPS.shiftMin / 60) : 0;
-      aggregatedGPS.engineFactor = aggregatedGPS.engineOnMin / Math.max(aggregatedGPS.shiftMin, 1);
+    // Fall back to simulation if Motive data unavailable
+    if (!gpsData) {
+      log(`Using simulated GPS for ${driver.name} (no live data)`, 'warn');
+      gpsData = simulateGPS(driver, i * 997 + driver.name.length * 31);
     }
 
-    allGPS.push(aggregatedGPS);
+    allGPS.push(gpsData);
   }
 
   // Second pass: score with peer data available
-  for(let i=0;i<drivers.length;i++){
+  for(let i=0;i<clockData.length;i++){
     await delay(80);
-    log(`Layer analysis: ${drivers[i].name}...`,'info');
-    const res=scoreDriver(drivers[i],allGPS[i],allGPS,i);
-    // Scale stolen hours by number of days
-    if (numDays > 1 && allGPS[i] && allGPS[i].daysAnalyzed > 1) {
-      res.daysAnalyzed = allGPS[i].daysAnalyzed;
-      res.stolenPerDay = res.stolenHrs;
-      res.stolenHrs = res.stolenHrs * allGPS[i].daysAnalyzed;
-    }
+    log(`Layer analysis: ${clockData[i].name}...`,'info');
+    const res=scoreDriver(clockData[i],allGPS[i],allGPS,i);
     results.push(res);
   }
 
@@ -2194,7 +1964,7 @@ async function runAudit(){
 
   btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';
   setStatus('done');
-  log(`Audit complete — ${results.filter(r=>r.risk!=='low').length} drivers flagged across ${numDays} day(s)`,'ok');
+  log(`Audit complete — ${results.filter(r=>r.risk!=='low').length} drivers flagged`,'ok');
   document.getElementById('lastRun')&&(document.getElementById('lastRun').textContent=new Date().toLocaleTimeString());
 }
 
@@ -2282,7 +2052,6 @@ function renderDriverCards(){
             <span class="dc-tag">MILES <b>${d.gps.actualMiles.toFixed(0)}</b></span>
             <span class="dc-tag">MPH <b>${d.gps.effectiveMph.toFixed(1)}</b></span>
             <span class="dc-tag">FLAGS <b>${d.flags.length}</b></span>
-            ${d.periodDays>1?`<span class="dc-tag" style="color:var(--cyan);">${d.periodDays} DAYS <b>${d.periodLabel||''}</b></span>`:''}
             ${d.stolenHrs>0?`<span class="dc-tag" style="color:var(--red2);">EST STOLEN <b>${d.stolenHrs.toFixed(1)}h/$${d.stolenDollars.toFixed(0)}</b></span>`:''}
           </div>
         </div>
@@ -2389,9 +2158,6 @@ function renderReport(){
   const totalDollars=results.reduce((a,r)=>a+r.stolenDollars,0);
   const totalFlags=results.reduce((a,r)=>a+r.flags.length,0);
 
-  const periodDays = results[0]?.periodDays || 1;
-  const periodLabel = periodDays > 1 ? `across ${periodDays} workdays` : 'today';
-
   document.getElementById('rptKpis').innerHTML=`
     <div class="kpi-card red">
       <div class="kpi-name">Drivers Flagged</div>
@@ -2401,7 +2167,7 @@ function renderReport(){
     <div class="kpi-card amber">
       <div class="kpi-name">Est. Hours Stolen</div>
       <div class="kpi-val amber">${totalStolen.toFixed(1)}h</div>
-      <div class="kpi-sub">${periodLabel}</div>
+      <div class="kpi-sub">across all flagged drivers today</div>
     </div>
     <div class="kpi-card amber">
       <div class="kpi-name">Est. Wages Lost</div>
@@ -2411,7 +2177,7 @@ function renderReport(){
     <div class="kpi-card blue">
       <div class="kpi-name">Total Flags Raised</div>
       <div class="kpi-val blue">${totalFlags}</div>
-      <div class="kpi-sub">${results.length} drivers × ${periodDays} day(s), 8 layers</div>
+      <div class="kpi-sub">across ${results.length} drivers, 8 layers</div>
     </div>
   `;
 
@@ -2615,7 +2381,8 @@ function delay(ms){return new Promise(r=>setTimeout(r,ms));}
   overlay.onclick=closeMenu;
 })();
 
-// Second runAudit override removed — the real engine at line 1780 handles everything
+// Override removed — real audit engine handles everything
+
 
 </script>
 </body>
