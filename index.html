@@ -438,6 +438,7 @@ input[type=range]::-webkit-slider-thumb {
   border:1px solid var(--b2);
 }
 .btn-ghost:hover{border-color:var(--blue2);color:var(--text);}
+.period-btn.active{background:var(--blue);border-color:var(--blue2);color:#fff;}
 .btn-sm {
   padding:5px 12px;font-size:12px;width:auto;margin-bottom:0;border-radius:2px;
 }
@@ -940,8 +941,21 @@ input[type=range]::-webkit-slider-thumb {
       <input type="password" id="motiveKey" value="2eb96247-8869-4f47-8062-6964c1dc77a8">
     </div>
     <div class="field">
-      <label>Audit Date</label>
+      <label>Audit Period</label>
+      <div style="display:flex;gap:4px;margin-bottom:8px;">
+        <button class="btn btn-ghost period-btn active" onclick="setPeriod('day',this)" style="flex:1;padding:6px 4px;font-size:11px;">Day</button>
+        <button class="btn btn-ghost period-btn" onclick="setPeriod('week',this)" style="flex:1;padding:6px 4px;font-size:11px;">Week</button>
+        <button class="btn btn-ghost period-btn" onclick="setPeriod('month',this)" style="flex:1;padding:6px 4px;font-size:11px;">Month</button>
+        <button class="btn btn-ghost period-btn" onclick="setPeriod('custom',this)" style="flex:1;padding:6px 4px;font-size:11px;">Custom</button>
+      </div>
+    </div>
+    <div class="field">
+      <label id="dateLabel">Audit Date</label>
       <input type="date" id="auditDate">
+    </div>
+    <div class="field" id="endDateField" style="display:none;">
+      <label>End Date</label>
+      <input type="date" id="auditEndDate">
     </div>
     <div class="field">
       <label>Driver Wage ($/hr)</label>
@@ -960,6 +974,7 @@ input[type=range]::-webkit-slider-thumb {
       Expected columns:<br>name, truck, clock_in, clock_out
     </div>
     <button class="btn btn-run" onclick="fetchLiveClockData()" style="font-size:13px;padding:9px;margin-bottom:6px;">🔴 FETCH LIVE FROM B600</button>
+    <button class="btn btn-run" onclick="fetchMotiveHOS()" style="font-size:13px;padding:9px;margin-bottom:6px;background:linear-gradient(135deg,#1e5b92,#2979c8);">📡 FETCH CLOCK FROM MOTIVE HOS</button>
     <button class="btn btn-ghost" onclick="loadDemo()">⚡ Load Demo Data (8 drivers)</button>
   </div>
 
@@ -1191,6 +1206,8 @@ const SUSPICIOUS_LOCS = ['QuikTrip','Chick-fil-A','McDonald\'s','Wendy\'s','Waff
 document.addEventListener('DOMContentLoaded',()=>{
   const d = new Date().toISOString().split('T')[0];
   document.getElementById('auditDate').value = d;
+  const endEl = document.getElementById('auditEndDate');
+  if (endEl) endEl.value = d;
 });
 
 // ═══════════════════════════════════════════
@@ -1205,6 +1222,7 @@ function log(msg, t='info'){
   p.appendChild(d);
   p.scrollTop=p.scrollHeight;
 }
+const addLog = log; // alias for compatibility
 
 // ═══════════════════════════════════════════
 // DEMO DATA
@@ -1229,31 +1247,42 @@ function loadDemo(){
 // LIVE: FETCH FROM TOTALPASS B600
 // ═══════════════════════════════════════════
 async function fetchLiveClockData() {
-  const date = document.getElementById('auditDate').value;
-  log(`Fetching TotalPass B600 data for ${date}...`, 'hi');
+  const dates = getAuditDates();
+  if (!dates.length) { log('Set an audit date first', 'warn'); return; }
+  log(`Fetching TotalPass B600 data for ${dates.length} day(s)...`, 'hi');
   setStatus('running');
 
-  try {
-    const resp = await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await resp.json();
+  let allRecords = [];
+  for (const date of dates) {
+    try {
+      const resp = await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await resp.json();
 
-    // Log scraper output
-    if (data.logs) data.logs.forEach(l => log(`[B600] ${l}`, 'info'));
+      if (data.logs) data.logs.forEach(l => log(`[B600] ${l}`, 'info'));
 
-    if (data.success && data.records && data.records.length > 0) {
-      // Map TotalPass records to SENTINEL format
-      clockData = data.records.map(r => ({
-        name:      r.name,
-        emp_id:    r.emp_id,
-        truck:     r.emp_id || '', // emp_id often matches truck # — override in driver mapping
-        clockIn:   r.clock_in,
-        clockOut:  r.clock_out,
-        shiftHrs:  r.clock_in && r.clock_out ? (t2m(r.clock_out) - t2m(r.clock_in)) / 60 : 0,
-        routeType: 'suburban', // default — will be overridden by driver mapping below
-        date:      r.date
-      }));
+      if (data.success && data.records && data.records.length > 0) {
+        allRecords = allRecords.concat(data.records.map(r => ({ ...r, date })));
+      } else if (!data.success) {
+        log(`B600 scrape issue for ${date}: ${data.error || 'unknown'}`, 'warn');
+      }
+    } catch (err) {
+      log(`B600 connection error for ${date}: ${err.message}`, 'err');
+    }
+  }
+
+  if (allRecords.length > 0) {
+    clockData = allRecords.map(r => ({
+      name:      r.name,
+      emp_id:    r.emp_id,
+      truck:     r.emp_id || '',
+      clockIn:   r.clock_in,
+      clockOut:  r.clock_out,
+      shiftHrs:  r.clock_in && r.clock_out ? (t2m(r.clock_out) - t2m(r.clock_in)) / 60 : 0,
+      routeType: 'suburban',
+      date:      r.date
+    }));
 
       // Apply known driver-to-truck mapping
       const driverMap = {
@@ -1273,23 +1302,16 @@ async function fetchLiveClockData() {
       }).filter(d => d.clockIn && d.clockOut && d.name.length > 1);
 
       document.getElementById('upZone').classList.add('loaded');
-      document.getElementById('upLabel').textContent = `✅ B600 Live: ${clockData.length} records`;
-      log(`✅ TotalPass: ${clockData.length} punch records loaded for ${date}`, 'ok');
+      document.getElementById('upLabel').textContent = `✅ B600 Live: ${clockData.length} records (${dates.length} day${dates.length>1?'s':''})`;
+      log(`✅ TotalPass: ${clockData.length} punch records loaded`, 'ok');
+      setStatus('ready');
       return true;
 
-    } else if (!data.success) {
-      log(`B600 scrape issue: ${data.error}`, 'warn');
-      if (data.hint) log(`Hint: ${data.hint}`, 'warn');
-      log('Tip: Access clock at http://192.168.20.94, go to Reports → Export CSV, note the URL, set TOTALPASS_EXPORT_PATH env var', 'warn');
-
-      // Show modal asking user to upload CSV manually as fallback
-      showClockFallback(data);
-      return false;
-    }
-  } catch (err) {
-    log(`B600 connection error: ${err.message}`, 'err');
-    log('Is the clock online? Is this running from your office network?', 'warn');
-    showClockFallback({ error: err.message });
+  } else {
+    log('B600 returned no records. Try Motive HOS or upload CSV.', 'warn');
+    log('Tip: Access clock at http://192.168.20.94, go to Reports → Export CSV', 'warn');
+    showClockFallback({ error: 'No records returned' });
+    setStatus('ready');
     return false;
   }
 }
@@ -1310,32 +1332,84 @@ async function fetchMotiveGPS(truckId, date) {
     if (!vehiclesResp.ok) throw new Error(`Vehicles fetch failed: ${vehiclesResp.status}`);
     const vehiclesData = await vehiclesResp.json();
 
-    const vehicles = vehiclesData.vehicles || vehiclesData.data || [];
-    // Match truck by number field or custom name
-    const vehicle = vehicles.find(v =>
-      v.number === truckId ||
-      v.name?.includes(truckId) ||
-      String(v.id) === truckId
-    );
+    const vehicleList = vehiclesData.vehicles || vehiclesData.data || [];
+    // Motive wraps each entry as {vehicle: {...}}
+    const vehicle = vehicleList.find(v => {
+      const ve = v.vehicle || v;
+      return ve.number === truckId ||
+        String(ve.number) === String(truckId) ||
+        ve.name?.includes(truckId) ||
+        String(ve.id) === truckId;
+    });
 
     if (!vehicle) {
       log(`Truck #${truckId} not found in Motive — using simulated GPS`, 'warn');
       return null;
     }
 
-    // Fetch location history
-    const locResp = await fetch(`/.netlify/functions/motive-gps?action=location_history&vehicle_id=${vehicle.id}&date=${date}`);
-    if (!locResp.ok) throw new Error(`Location history failed: ${locResp.status}`);
-    const locData = await locResp.json();
+    const ve = vehicle.vehicle || vehicle;
+    const vehicleId = ve.id;
+    log(`Found Motive vehicle ID ${vehicleId} for truck #${truckId}`, 'info');
 
-    // Fetch trips
-    const tripsResp = await fetch(`/.netlify/functions/motive-gps?action=trips&vehicle_id=${vehicle.id}&date=${date}`);
-    const tripsData = tripsResp.ok ? await tripsResp.json() : {};
+    // Fetch historical location breadcrumbs via v2 endpoint
+    const locResp = await fetch(`/.netlify/functions/motive-gps?action=vehicle_history&vehicle_id=${vehicleId}&start_date=${date}&end_date=${date}`);
+    let locations = [];
+    if (locResp.ok) {
+      const locData = await locResp.json();
+      // v2 returns {vehicle_locations: [...]} or {locations: [...]}
+      locations = locData.vehicle_locations || locData.locations || locData.data || [];
+      // Flatten if wrapped: [{vehicle_location: {…}}]
+      locations = locations.map(l => l.vehicle_location || l);
+      log(`GPS history: ${locations.length} breadcrumb points for ${date}`, 'info');
+    } else {
+      log(`v2 location history returned ${locResp.status} — trying driving_periods`, 'warn');
+    }
+
+    // Fetch IFTA trips for distance/duration data
+    const tripsResp = await fetch(`/.netlify/functions/motive-gps?action=ifta_trips&vehicle_ids[]=${vehicleId}&start_date=${date}&end_date=${date}`);
+    let trips = [];
+    if (tripsResp.ok) {
+      const tripsData = await tripsResp.json();
+      trips = tripsData.ifta_trips || tripsData.trips || tripsData.data || [];
+      log(`IFTA trips: ${trips.length} trip segments for ${date}`, 'info');
+    }
+
+    // If no v2 breadcrumbs, try driving_periods as a fallback
+    if (locations.length === 0) {
+      const dpResp = await fetch(`/.netlify/functions/motive-gps?action=driving_periods&vehicle_id=${vehicleId}&start_date=${date}&end_date=${date}`);
+      if (dpResp.ok) {
+        const dpData = await dpResp.json();
+        const periods = dpData.driving_periods || dpData.data || [];
+        // Convert driving periods to pseudo-location points
+        periods.forEach(p => {
+          const dp = p.driving_period || p;
+          if (dp.start_location) {
+            locations.push({
+              lat: dp.start_location.lat, lng: dp.start_location.lon || dp.start_location.lng,
+              speed: dp.distance_miles && dp.duration ? (dp.distance_miles / (dp.duration / 3600)) : 30,
+              recorded_at: dp.start_time, description: dp.start_location.description || ''
+            });
+          }
+          if (dp.end_location) {
+            locations.push({
+              lat: dp.end_location.lat, lng: dp.end_location.lon || dp.end_location.lng,
+              speed: 0, recorded_at: dp.end_time, description: dp.end_location.description || ''
+            });
+          }
+        });
+        log(`Driving periods fallback: ${locations.length} points from ${periods.length} periods`, 'info');
+      }
+    }
+
+    // Also grab current location snapshot for this vehicle
+    const currentLoc = ve.current_location || {};
 
     return {
-      vehicle_id: vehicle.id,
-      locations: locData.vehicle_locations || locData.locations || [],
-      trips: tripsData.trips || []
+      vehicle_id: vehicleId,
+      locations: locations,
+      trips: trips,
+      currentLocation: currentLoc,
+      vehicleInfo: { number: ve.number, year: ve.year, make: ve.make, model: ve.model }
     };
 
   } catch (err) {
@@ -1347,26 +1421,38 @@ async function fetchMotiveGPS(truckId, date) {
 // Convert real Motive GPS data into the metrics our algorithm needs
 function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
   if (!motiveData || !motiveData.locations || motiveData.locations.length === 0) {
-    return null; // Will fall back to simulation
+    // Even without location breadcrumbs, if we have IFTA trips, use those
+    if (!motiveData || !motiveData.trips || motiveData.trips.length === 0) {
+      return null; // Will fall back to simulation
+    }
   }
 
-  const locs = motiveData.locations;
+  const locs = motiveData.locations || [];
   const trips = motiveData.trips || [];
 
-  // Calculate engine-on time from trips
+  // Calculate engine-on time from IFTA trips
   let engineOnMin = 0;
   let totalMiles = 0;
   trips.forEach(trip => {
-    const start = new Date(trip.started_at).getTime();
-    const end = new Date(trip.ended_at || trip.started_at).getTime();
+    const t = trip.ifta_trip || trip;
+    const start = new Date(t.started_at || t.start_time || t.start_date).getTime();
+    const end = new Date(t.ended_at || t.end_time || t.end_date || t.started_at || t.start_time).getTime();
     engineOnMin += (end - start) / 60000;
-    totalMiles += (trip.distance_miles || trip.distance || 0);
+    totalMiles += (t.distance_miles || t.distance || t.total_miles || 0);
   });
 
   if (engineOnMin === 0 && locs.length > 1) {
     // Estimate from GPS points where speed > 0
     let movingPoints = locs.filter(l => (l.speed || 0) > 2);
-    engineOnMin = movingPoints.length * 2; // rough estimate: 1 point per 2 min
+    engineOnMin = movingPoints.length * 2;
+  }
+
+  // If we have trips but no location breadcrumbs, estimate miles from trips
+  if (totalMiles === 0 && trips.length > 0) {
+    trips.forEach(t => {
+      const trip = t.ifta_trip || t;
+      totalMiles += (trip.distance || trip.total_distance || trip.miles || 0);
+    });
   }
 
   // Find first and last movement
@@ -1375,14 +1461,22 @@ function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
   let lastMoveMin = clockOutMin;
 
   if (movingLocs.length > 0) {
-    const firstTs = new Date(movingLocs[0].timestamp || movingLocs[0].recorded_at);
+    const firstTs = new Date(movingLocs[0].located_at || movingLocs[0].timestamp || movingLocs[0].recorded_at);
     firstMoveMin = firstTs.getHours() * 60 + firstTs.getMinutes();
-    const lastTs = new Date(movingLocs[movingLocs.length-1].timestamp || movingLocs[movingLocs.length-1].recorded_at);
+    const lastTs = new Date(movingLocs[movingLocs.length-1].located_at || movingLocs[movingLocs.length-1].timestamp || movingLocs[movingLocs.length-1].recorded_at);
     lastMoveMin = lastTs.getHours() * 60 + lastTs.getMinutes();
+  } else if (trips.length > 0) {
+    // Use trip start/end times
+    const firstTrip = trips[0].ifta_trip || trips[0];
+    const lastTrip = trips[trips.length - 1].ifta_trip || trips[trips.length - 1];
+    const ft = new Date(firstTrip.started_at || firstTrip.start_time);
+    if (!isNaN(ft)) firstMoveMin = ft.getHours() * 60 + ft.getMinutes();
+    const lt = new Date(lastTrip.ended_at || lastTrip.end_time || lastTrip.started_at || lastTrip.start_time);
+    if (!isNaN(lt)) lastMoveMin = lt.getHours() * 60 + lt.getMinutes();
   }
 
-  // Detect stops (GPS points with speed=0 and same location for > X min)
-  const stops = detectStopsFromGPS(locs);
+  // Detect stops from GPS breadcrumbs
+  const stops = locs.length > 0 ? detectStopsFromGPS(locs) : [];
 
   // Effective MPH
   const shiftHrs = (clockOutMin - clockInMin) / 60;
@@ -1390,7 +1484,7 @@ function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
 
   // Check GPS after clock-out
   const afterClockout = locs.filter(l => {
-    const ts = new Date(l.timestamp || l.recorded_at);
+    const ts = new Date(l.located_at || l.timestamp || l.recorded_at);
     const tsMin = ts.getHours() * 60 + ts.getMinutes();
     return tsMin > clockOutMin + 5 && (l.speed || 0) > 2;
   });
@@ -1407,10 +1501,10 @@ function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
     gpsAfterMin: afterClockout.length > 0 ? afterClockout.length * 2 : 0,
     unexplained: stops,
     deliveryStops: trips.length || Math.floor(stops.length * 0.6),
-    microStopCount: stops.filter(s => s.dur < parseInt(document.getElementById('t1').value) && s.dur >= 5).length,
+    microStopCount: stops.filter(s => s.dur < parseInt(document.getElementById('t1')?.value || 15) && s.dur >= 5).length,
     warehouseDwellExtra: Math.max(0, firstMoveMin - clockInMin - 10),
-    habitualStop: false, // Would need historical data
-    theftProfile: 0.3,  // Unknown without historical baseline
+    habitualStop: false,
+    theftProfile: 0.3,
     shiftMin: clockOutMin - clockInMin,
     rawLocations: locs.length,
     rawTrips: trips.length
@@ -1419,7 +1513,7 @@ function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
 
 function detectStopsFromGPS(locs) {
   const stops = [];
-  const stopThresh = parseInt(document.getElementById('t1').value);
+  const stopThresh = parseInt(document.getElementById('t1')?.value || 15);
   const SUSPICIOUS = ['QuikTrip','Chick-fil-A','McDonald','Wendy','Waffle House','Cracker Barrel','Walmart','Target','Residence','Apartment','Parking'];
 
   let stopStart = null;
@@ -1429,8 +1523,9 @@ function detectStopsFromGPS(locs) {
     const loc = locs[i];
     const speed = loc.speed || 0;
     const lat = loc.lat || loc.latitude || 0;
-    const lng = loc.lng || loc.longitude || 0;
-    const ts = new Date(loc.timestamp || loc.recorded_at);
+    const lng = loc.lng || loc.lon || loc.longitude || 0;
+    const ts = new Date(loc.located_at || loc.timestamp || loc.recorded_at);
+    if (isNaN(ts)) continue;
     const tsMin = ts.getHours() * 60 + ts.getMinutes();
 
     if (speed < 2) {
@@ -1777,50 +1872,316 @@ function buildTimeline(driver,gps,ciMin,coMin){
 // ═══════════════════════════════════════════
 // MAIN AUDIT RUNNER
 // ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
+// PERIOD SELECTOR
+// ═══════════════════════════════════════════
+let auditPeriod = 'day';
+function setPeriod(p, btn) {
+  auditPeriod = p;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const endField = document.getElementById('endDateField');
+  const dateLabel = document.getElementById('dateLabel');
+  if (p === 'custom') {
+    endField.style.display = 'block';
+    dateLabel.textContent = 'Start Date';
+  } else {
+    endField.style.display = 'none';
+    dateLabel.textContent = p === 'day' ? 'Audit Date' : `${p.charAt(0).toUpperCase()+p.slice(1)} Starting`;
+  }
+}
+
+function getAuditDates() {
+  const baseDate = document.getElementById('auditDate').value;
+  if (!baseDate) return [];
+  const start = new Date(baseDate + 'T12:00:00');
+  const dates = [];
+  let numDays = 1;
+  if (auditPeriod === 'week') numDays = 7;
+  else if (auditPeriod === 'month') numDays = 30;
+  else if (auditPeriod === 'custom') {
+    const endVal = document.getElementById('auditEndDate').value;
+    if (endVal) {
+      const end = new Date(endVal + 'T12:00:00');
+      numDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
+      if (numDays > 60) { log('Max 60 days — capping range', 'warn'); numDays = 60; }
+    }
+  }
+  for (let i = 0; i < numDays; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    dates.push(d.toISOString().split('T')[0]);
+  }
+  return dates;
+}
+
+// ═══════════════════════════════════════════
+// FETCH CLOCK DATA FROM MOTIVE HOS/DRIVER LOGS
+// ═══════════════════════════════════════════
+async function fetchMotiveHOS() {
+  const dates = getAuditDates();
+  if (!dates.length) { log('Set an audit date first', 'warn'); return; }
+  log(`Fetching Motive HOS data for ${dates.length} day(s)...`, 'hi');
+  setStatus('running');
+
+  try {
+    // Get all drivers first
+    const usersResp = await fetch('/.netlify/functions/motive-gps?action=users&per_page=100&status=active');
+    if (!usersResp.ok) throw new Error(`Users fetch failed: ${usersResp.status}`);
+    const usersData = await usersResp.json();
+    const users = usersData.users || usersData.data || [];
+
+    // Fetch HOS logs for the date range
+    const startDate = dates[0];
+    const endDate = dates[dates.length - 1];
+    const hosResp = await fetch(`/.netlify/functions/motive-gps?action=hos&start_date=${startDate}&end_date=${endDate}&per_page=100`);
+    let hosRecords = [];
+    if (hosResp.ok) {
+      const hosData = await hosResp.json();
+      hosRecords = hosData.hours_of_service || hosData.data || [];
+    }
+
+    // Also try driver_logs
+    const logsResp = await fetch(`/.netlify/functions/motive-gps?action=driver_logs&start_date=${startDate}&end_date=${endDate}&per_page=100`);
+    let logRecords = [];
+    if (logsResp.ok) {
+      const logsData = await logsResp.json();
+      logRecords = logsData.driver_logs || logsData.logs || logsData.data || [];
+    }
+
+    // Build clock data from HOS — find on_duty/driving start and off_duty end per driver per day
+    const driverMap = {};
+    const allRecords = [...hosRecords, ...logRecords];
+
+    // Also use vehicles endpoint to map drivers to trucks
+    const vehResp = await fetch('/.netlify/functions/motive-gps?action=vehicles&per_page=100');
+    const vehData = vehResp.ok ? await vehResp.json() : { vehicles: [] };
+    const vehicles = vehData.vehicles || [];
+    const truckByDriver = {};
+    vehicles.forEach(v => {
+      const ve = v.vehicle || v;
+      if (ve.current_driver) {
+        const driverName = ((ve.current_driver.first_name || '') + ' ' + (ve.current_driver.last_name || '')).trim();
+        truckByDriver[ve.current_driver.id] = ve.number;
+        truckByDriver[driverName.toLowerCase()] = ve.number;
+      }
+    });
+
+    // Parse HOS entries into clock-in/out pairs
+    allRecords.forEach(rec => {
+      const entry = rec.hours_of_service || rec.driver_log || rec;
+      if (!entry.driver) return;
+      const driverName = ((entry.driver.first_name || '') + ' ' + (entry.driver.last_name || '')).trim();
+      const driverId = entry.driver.id;
+      const date = entry.date || (entry.start_time ? entry.start_time.split('T')[0] : startDate);
+
+      const key = `${driverName}|${date}`;
+      if (!driverMap[key]) {
+        driverMap[key] = {
+          name: driverName,
+          driverId: driverId,
+          truck: truckByDriver[driverId] || truckByDriver[driverName.toLowerCase()] || '',
+          date: date,
+          firstDuty: null,
+          lastDuty: null,
+          onDutyMin: 0,
+          drivingMin: 0
+        };
+      }
+
+      // Extract duty status changes
+      const statuses = entry.status_changes || entry.events || [];
+      if (Array.isArray(statuses)) {
+        statuses.forEach(s => {
+          const status = s.status || s.type || '';
+          const time = s.time || s.timestamp || s.start_time || '';
+          if (!time) return;
+          const ts = new Date(time);
+          const timeMin = ts.getHours() * 60 + ts.getMinutes();
+          const timeStr = m2t(timeMin);
+
+          if (status === 'on_duty' || status === 'driving' || status === 'on_duty_driving') {
+            if (!driverMap[key].firstDuty || timeMin < t2m(driverMap[key].firstDuty)) {
+              driverMap[key].firstDuty = timeStr;
+            }
+          }
+          if (status === 'off_duty' || status === 'sleeper') {
+            if (!driverMap[key].lastDuty || timeMin > t2m(driverMap[key].lastDuty)) {
+              driverMap[key].lastDuty = timeStr;
+            }
+          }
+        });
+      }
+
+      // Use summary hours if available
+      if (entry.on_duty_duration) driverMap[key].onDutyMin += (entry.on_duty_duration / 60) || 0;
+      if (entry.driving_duration) driverMap[key].drivingMin += (entry.driving_duration / 60) || 0;
+      if (entry.on_duty_seconds) driverMap[key].onDutyMin += (entry.on_duty_seconds / 60) || 0;
+      if (entry.driving_seconds) driverMap[key].drivingMin += (entry.driving_seconds / 60) || 0;
+    });
+
+    // Convert to clockData format
+    clockData = Object.values(driverMap)
+      .filter(d => d.name && (d.firstDuty || d.onDutyMin > 0))
+      .map(d => {
+        const clockIn = d.firstDuty || '06:30';
+        const clockOut = d.lastDuty || (d.onDutyMin > 0 ? m2t(t2m(clockIn) + d.onDutyMin + d.drivingMin) : '17:00');
+        return {
+          name: d.name,
+          truck: d.truck,
+          clockIn: clockIn,
+          clockOut: clockOut,
+          shiftHrs: (t2m(clockOut) - t2m(clockIn)) / 60,
+          routeType: 'suburban',
+          date: d.date
+        };
+      })
+      .filter(d => d.shiftHrs > 0 && d.shiftHrs < 20);
+
+    if (clockData.length === 0) {
+      // Fallback: build from vehicles endpoint if HOS returns nothing
+      log('HOS returned no duty records — building driver list from Motive vehicles', 'warn');
+      clockData = vehicles
+        .filter(v => (v.vehicle || v).current_driver)
+        .map(v => {
+          const ve = v.vehicle || v;
+          const dr = ve.current_driver || {};
+          return {
+            name: ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim(),
+            truck: ve.number || '',
+            clockIn: '06:30',
+            clockOut: '17:00',
+            shiftHrs: 10.5,
+            routeType: 'suburban',
+            date: startDate
+          };
+        });
+    }
+
+    // Apply known driver-to-truck mapping
+    const knownMap = {
+      'trevor seyers': { truck: '0608', routeType: 'urban' },
+      'trevarr howard': { truck: '4757', routeType: 'suburban' },
+      'brent dixon': { truck: '0294', routeType: 'urban' },
+    };
+    clockData = clockData.map(d => {
+      const key = d.name.toLowerCase();
+      Object.entries(knownMap).forEach(([name, info]) => {
+        if (key.includes(name.split(' ')[0])) {
+          d.truck = info.truck;
+          d.routeType = info.routeType;
+        }
+      });
+      return d;
+    });
+
+    document.getElementById('upZone').classList.add('loaded');
+    document.getElementById('upLabel').textContent = `✅ Motive HOS: ${clockData.length} records (${dates.length} day${dates.length>1?'s':''})`;
+    log(`✅ Motive HOS: ${clockData.length} driver records loaded`, 'ok');
+    setStatus('ready');
+
+  } catch (err) {
+    log(`Motive HOS error: ${err.message}`, 'err');
+    setStatus('error');
+  }
+}
+
+// ═══════════════════════════════════════════
+// MULTI-DAY AUDIT ENGINE
+// ═══════════════════════════════════════════
 async function runAudit(){
-  if(!clockData.length){log('No time clock data. Load demo or upload CSV.','warn');return;}
+  if(!clockData.length){log('No time clock data. Load demo, fetch from Motive HOS, or upload CSV.','warn');return;}
 
   const btn=document.getElementById('runBtn');
   btn.disabled=true;btn.textContent='⏳ SCANNING...';
   setStatus('running');
   results=[];
 
-  log('SENTINEL audit initiated — 8-layer analysis engaged','hi');
-  log(`Analyzing ${clockData.length} drivers...`,'info');
+  const dates = getAuditDates();
+  const numDays = dates.length;
+  log(`SENTINEL audit initiated — 8-layer analysis engaged (${numDays} day${numDays>1?'s':''})`,'hi');
+  log(`Analyzing ${clockData.length} driver records across ${numDays} day(s)...`,'info');
 
-  // First pass: generate GPS data for all drivers (live from Motive, or simulated)
+  // Group clock data by driver (aggregate across days)
+  const driverGroups = {};
+  clockData.forEach(d => {
+    const key = d.name;
+    if (!driverGroups[key]) {
+      driverGroups[key] = { ...d, days: [], totalShiftMin: 0 };
+    }
+    driverGroups[key].days.push({ ...d, date: d.date || dates[0] });
+    driverGroups[key].totalShiftMin += t2m(d.clockOut) - t2m(d.clockIn);
+  });
+  const drivers = Object.values(driverGroups);
+
+  // First pass: generate GPS data for all drivers across all days
   log('Fetching GPS data from Motive...', 'hi');
   const allGPS = [];
-  for (let i = 0; i < clockData.length; i++) {
-    const driver = clockData[i];
-    const date = document.getElementById('auditDate').value;
-    const clockInMin = t2m(driver.clockIn);
-    const clockOutMin = t2m(driver.clockOut);
+  for (let i = 0; i < drivers.length; i++) {
+    const driver = drivers[i];
+    const driverDays = driver.days.length > 0 ? driver.days : [driver];
+    let aggregatedGPS = null;
 
-    // Try live Motive GPS first
-    let gpsData = null;
-    if (driver.truck) {
-      const motiveRaw = await fetchMotiveGPS(driver.truck, date);
-      if (motiveRaw) {
-        gpsData = processMotiveData(driver.truck, motiveRaw, clockInMin, clockOutMin);
-        if (gpsData) log(`✅ Live GPS: Truck #${driver.truck} — ${gpsData.rawLocations} points, ${gpsData.rawTrips} trips`, 'ok');
+    for (const dayData of driverDays) {
+      const date = dayData.date || dates[0];
+      const clockInMin = t2m(dayData.clockIn);
+      const clockOutMin = t2m(dayData.clockOut);
+
+      let gpsData = null;
+      if (driver.truck) {
+        const motiveRaw = await fetchMotiveGPS(driver.truck, date);
+        if (motiveRaw) {
+          gpsData = processMotiveData(driver.truck, motiveRaw, clockInMin, clockOutMin);
+          if (gpsData) log(`✅ Live GPS: Truck #${driver.truck} ${date} — ${gpsData.rawLocations} points, ${gpsData.rawTrips} trips`, 'ok');
+        }
+      }
+
+      if (!gpsData) {
+        log(`Using simulated GPS for ${driver.name} ${date} (no live data)`, 'warn');
+        gpsData = simulateGPS(dayData, i * 997 + driver.name.length * 31 + driverDays.indexOf(dayData) * 113);
+      }
+
+      // Aggregate GPS across days
+      if (!aggregatedGPS) {
+        aggregatedGPS = { ...gpsData, daysAnalyzed: 1 };
+      } else {
+        aggregatedGPS.daysAnalyzed++;
+        aggregatedGPS.engineOnMin += gpsData.engineOnMin;
+        aggregatedGPS.actualMiles += gpsData.actualMiles;
+        aggregatedGPS.lateStart = (aggregatedGPS.lateStart + gpsData.lateStart) / 2;
+        aggregatedGPS.earlyStop = (aggregatedGPS.earlyStop + gpsData.earlyStop) / 2;
+        aggregatedGPS.gpsAfterClockout = aggregatedGPS.gpsAfterClockout || gpsData.gpsAfterClockout;
+        aggregatedGPS.gpsAfterMin += gpsData.gpsAfterMin;
+        aggregatedGPS.unexplained = [...(aggregatedGPS.unexplained || []), ...(gpsData.unexplained || [])];
+        aggregatedGPS.deliveryStops += gpsData.deliveryStops;
+        aggregatedGPS.microStopCount += gpsData.microStopCount;
+        aggregatedGPS.warehouseDwellExtra += gpsData.warehouseDwellExtra;
+        aggregatedGPS.shiftMin += gpsData.shiftMin;
       }
     }
 
-    // Fall back to simulation if Motive data unavailable
-    if (!gpsData) {
-      log(`Using simulated GPS for ${driver.name} (no live data)`, 'warn');
-      gpsData = simulateGPS(driver, i * 997 + driver.name.length * 31);
+    // Average out per-day metrics for multi-day
+    if (aggregatedGPS && aggregatedGPS.daysAnalyzed > 1) {
+      const n = aggregatedGPS.daysAnalyzed;
+      aggregatedGPS.effectiveMph = aggregatedGPS.shiftMin > 0 ?
+        aggregatedGPS.actualMiles / (aggregatedGPS.shiftMin / 60) : 0;
+      aggregatedGPS.engineFactor = aggregatedGPS.engineOnMin / Math.max(aggregatedGPS.shiftMin, 1);
     }
 
-    allGPS.push(gpsData);
+    allGPS.push(aggregatedGPS);
   }
 
   // Second pass: score with peer data available
-  for(let i=0;i<clockData.length;i++){
+  for(let i=0;i<drivers.length;i++){
     await delay(80);
-    log(`Layer analysis: ${clockData[i].name}...`,'info');
-    const res=scoreDriver(clockData[i],allGPS[i],allGPS,i);
+    log(`Layer analysis: ${drivers[i].name}...`,'info');
+    const res=scoreDriver(drivers[i],allGPS[i],allGPS,i);
+    // Scale stolen hours by number of days
+    if (numDays > 1 && allGPS[i] && allGPS[i].daysAnalyzed > 1) {
+      res.daysAnalyzed = allGPS[i].daysAnalyzed;
+      res.stolenPerDay = res.stolenHrs;
+      res.stolenHrs = res.stolenHrs * allGPS[i].daysAnalyzed;
+    }
     results.push(res);
   }
 
@@ -1833,7 +2194,7 @@ async function runAudit(){
 
   btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';
   setStatus('done');
-  log(`Audit complete — ${results.filter(r=>r.risk!=='low').length} drivers flagged`,'ok');
+  log(`Audit complete — ${results.filter(r=>r.risk!=='low').length} drivers flagged across ${numDays} day(s)`,'ok');
   document.getElementById('lastRun')&&(document.getElementById('lastRun').textContent=new Date().toLocaleTimeString());
 }
 
@@ -1921,6 +2282,7 @@ function renderDriverCards(){
             <span class="dc-tag">MILES <b>${d.gps.actualMiles.toFixed(0)}</b></span>
             <span class="dc-tag">MPH <b>${d.gps.effectiveMph.toFixed(1)}</b></span>
             <span class="dc-tag">FLAGS <b>${d.flags.length}</b></span>
+            ${d.periodDays>1?`<span class="dc-tag" style="color:var(--cyan);">${d.periodDays} DAYS <b>${d.periodLabel||''}</b></span>`:''}
             ${d.stolenHrs>0?`<span class="dc-tag" style="color:var(--red2);">EST STOLEN <b>${d.stolenHrs.toFixed(1)}h/$${d.stolenDollars.toFixed(0)}</b></span>`:''}
           </div>
         </div>
@@ -2027,6 +2389,9 @@ function renderReport(){
   const totalDollars=results.reduce((a,r)=>a+r.stolenDollars,0);
   const totalFlags=results.reduce((a,r)=>a+r.flags.length,0);
 
+  const periodDays = results[0]?.periodDays || 1;
+  const periodLabel = periodDays > 1 ? `across ${periodDays} workdays` : 'today';
+
   document.getElementById('rptKpis').innerHTML=`
     <div class="kpi-card red">
       <div class="kpi-name">Drivers Flagged</div>
@@ -2036,7 +2401,7 @@ function renderReport(){
     <div class="kpi-card amber">
       <div class="kpi-name">Est. Hours Stolen</div>
       <div class="kpi-val amber">${totalStolen.toFixed(1)}h</div>
-      <div class="kpi-sub">across all flagged drivers today</div>
+      <div class="kpi-sub">${periodLabel}</div>
     </div>
     <div class="kpi-card amber">
       <div class="kpi-name">Est. Wages Lost</div>
@@ -2046,7 +2411,7 @@ function renderReport(){
     <div class="kpi-card blue">
       <div class="kpi-name">Total Flags Raised</div>
       <div class="kpi-val blue">${totalFlags}</div>
-      <div class="kpi-sub">across ${results.length} drivers, 8 layers</div>
+      <div class="kpi-sub">${results.length} drivers × ${periodDays} day(s), 8 layers</div>
     </div>
   `;
 
@@ -2250,185 +2615,7 @@ function delay(ms){return new Promise(r=>setTimeout(r,ms));}
   overlay.onclick=closeMenu;
 })();
 
-// ============================================
-// REAL MOTIVE DATA AUDIT ENGINE
-// ============================================
-window.runAudit=async function(){
-  var empty=document.getElementById('emptyState');
-  var loading=document.getElementById('loadingState');
-  var loadMsg=document.getElementById('loadingMsg');
-  var loadDetail=document.getElementById('loadingDetail');
-  var statusTxt=document.getElementById('statusTxt');
-  var statusDot=document.getElementById('statusDot');
-  if(empty)empty.style.display='none';
-  if(loading)loading.style.display='block';
-  if(loadMsg)loadMsg.textContent='Connecting to Motive fleet API...';
-  if(loadDetail)loadDetail.textContent='Pulling vehicle locations and driver assignments';
-  if(statusTxt)statusTxt.textContent='SCANNING';
-  if(statusDot)statusDot.style.background='#ffb020';
-  addLog('[SENTINEL] Engaging with live Motive data...');
-
-  try{
-    // Fetch ALL pages of vehicles
-    var allDrivers=[];
-    var page=1;
-    var hasMore=true;
-    while(hasMore){
-      var resp=await fetch('/.netlify/functions/motive-gps?action=vehicles&page_no='+page+'&per_page=50');
-      if(!resp.ok)throw new Error('Motive API returned '+resp.status);
-      var data=await resp.json();
-      var vehicles=data.vehicles||[];
-      if(vehicles.length===0){hasMore=false;break;}
-      var drivers=vehicles.filter(function(v){return v.vehicle.current_driver;}).map(function(v){
-        var ve=v.vehicle;var loc=ve.current_location||{};var dr=ve.current_driver||{};
-        return{
-          name:((dr.first_name||'')+' '+(dr.last_name||'')).trim(),
-          driverId:dr.id,truck:ve.number,year:ve.year,make:ve.make,model:ve.model,
-          lat:loc.lat,lon:loc.lon,speed:loc.speed,
-          engineHrs:loc.engine_hours||0,odometer:loc.odometer||0,
-          locatedAt:loc.located_at,fuel:loc.fuel_primary_remaining_percentage,
-          bearing:loc.bearing,description:loc.description
-        };
-      });
-      allDrivers=allDrivers.concat(drivers);
-      if(loadMsg)loadMsg.textContent='Loaded '+allDrivers.length+' drivers (page '+page+')...';
-      var pagination=data.pagination||{};
-      if(!pagination.next||vehicles.length<50)hasMore=false;
-      page++;
-    }
-
-    if(allDrivers.length===0)throw new Error('No active drivers found in Motive');
-    addLog('[MOTIVE] '+allDrivers.length+' active drivers loaded across '+allDrivers.length+' vehicles');
-    if(loadMsg)loadMsg.textContent='Running detection layers on '+allDrivers.length+' drivers...';
-    if(loadDetail)loadDetail.textContent='Analyzing GPS, velocity, engine hours, fuel levels';
-
-    var wEl=document.getElementById('driverWage');
-    var wage=wEl?parseFloat(wEl.value)||23:23;
-    var vEl=document.getElementById('threshVelocity');
-    var thVeloc=vEl?parseFloat(vEl.value)||8:8;
-    var uEl=document.getElementById('threshUnexplained');
-    var thUnexp=uEl?parseInt(uEl.value)||15:15;
-    var now=Date.now();
-    var totalStolen=0;var totalLost=0;
-
-    var results=allDrivers.map(function(d){
-      var flags=[];var score=0;var stolen=0;
-
-      // Layer 1: Stationary with engine on
-      if(d.speed===0||d.speed===null){
-        flags.push({l:'Stationary',d:'Speed 0 with engine at '+Math.round(d.engineHrs).toLocaleString()+'h',sev:'medium'});
-        score+=20;stolen+=0.25;
-      }
-
-      // Layer 2: Low effective velocity
-      if(d.odometer>0&&d.engineHrs>0){
-        var dailyHrs=(d.engineHrs%24)||8;
-        var mph=d.odometer/dailyHrs;
-        if(mph<thVeloc&&dailyHrs>2){
-          flags.push({l:'Low Velocity',d:mph.toFixed(1)+' mph effective ('+Math.round(d.odometer).toLocaleString()+' mi / '+dailyHrs.toFixed(1)+'h)',sev:'high'});
-          score+=40;stolen+=1.0;
-        }
-      }
-
-      // Layer 3: Stale GPS (no update in 1+ hours during work hours)
-      if(d.locatedAt){
-        var lastSeen=new Date(d.locatedAt);
-        var ageMins=Math.round((now-lastSeen.getTime())/60000);
-        if(ageMins>60){
-          flags.push({l:'Stale GPS',d:'Last ping '+ageMins+' min ago ('+lastSeen.toLocaleTimeString()+')',sev:'medium'});
-          score+=15;stolen+=0.5;
-        }
-      }else{
-        flags.push({l:'No GPS',d:'No location data available',sev:'high'});
-        score+=30;stolen+=1.0;
-      }
-
-      // Layer 4: Low fuel alert
-      if(d.fuel!=null&&d.fuel<15){
-        flags.push({l:'Low Fuel',d:d.fuel+'% remaining',sev:'low'});
-        score+=5;
-      }
-
-      // Layer 5: High engine hours relative to odometer (idling)
-      if(d.engineHrs>100&&d.odometer>0){
-        var miPerEngHr=d.odometer/d.engineHrs;
-        if(miPerEngHr<10){
-          flags.push({l:'Excessive Idle',d:miPerEngHr.toFixed(1)+' mi/eng-hr (high idle ratio)',sev:'high'});
-          score+=35;stolen+=0.75;
-        }
-      }
-
-      totalStolen+=stolen;totalLost+=stolen*wage;
-      return{
-        name:d.name,truck:d.truck,year:d.year,make:d.make,model:d.model,
-        score:score,
-        risk:score>=80?'critical':score>=50?'high':score>=20?'medium':'clean',
-        flags:flags,stolen:stolen,cost:stolen*wage,
-        engineHrs:d.engineHrs,odometer:Math.round(d.odometer),
-        fuel:d.fuel,speed:d.speed,lat:d.lat,lon:d.lon,
-        locatedAt:d.locatedAt,description:d.description
-      };
-    }).sort(function(a,b){return b.score-a.score;});
-
-    // Update header stats
-    var flagged=results.filter(function(r){return r.risk!=='clean';}).length;
-    var hd=document.getElementById('hmDrivers');if(hd)hd.textContent=allDrivers.length;
-    var hf=document.getElementById('hmFlagged');if(hf)hf.textContent=flagged;
-    var hh=document.getElementById('hmHours');if(hh)hh.textContent=totalStolen.toFixed(1)+'h';
-    var hl=document.getElementById('hmDollars');if(hl)hl.textContent='$'+Math.round(totalLost);
-    if(statusTxt)statusTxt.textContent='ACTIVE';
-    if(statusDot)statusDot.style.background='#ff2d2d';
-    if(loading)loading.style.display='none';
-
-    // Render driver threat board
-    var stack=document.getElementById('driverStack');
-    if(stack){
-      stack.innerHTML=results.map(function(r,i){
-        var rc=r.risk==='critical'?'#ff2d2d':r.risk==='high'?'#ffb020':r.risk==='medium'?'#4da3ff':'#00e676';
-        var vehicleInfo=r.year&&r.make?r.year+' '+r.make+(r.model?' '+r.model:''):'';
-        return '<div style="background:#111822;border:1px solid #243347;border-left:4px solid '+rc+';border-radius:10px;padding:16px 18px;margin-bottom:8px;display:flex;align-items:center;gap:16px">'+
-          '<div style="font-family:Oswald,sans-serif;font-size:32px;color:#3d5470;width:44px;text-align:center;flex-shrink:0">'+(i+1).toString().padStart(2,'0')+'</div>'+
-          '<div style="flex:1;min-width:0">'+
-            '<div style="font-family:Oswald,sans-serif;font-size:17px;font-weight:600;color:#dce8f5;letter-spacing:0.02em">'+r.name+'</div>'+
-            '<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:#7e9bb5;margin-top:4px">TRK #'+r.truck+(vehicleInfo?' | '+vehicleInfo:'')+' | '+r.odometer.toLocaleString()+' mi | '+Math.round(r.engineHrs).toLocaleString()+' eng hrs'+(r.fuel!=null?' | '+r.fuel+'% fuel':'')+'</div>'+
-            (r.description?'<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:#3d5470;margin-top:2px">'+r.description+'</div>':'')+
-            r.flags.map(function(f){
-              var fc=f.sev==='high'?'#ff6b6b':f.sev==='medium'?'#ffb020':'#7e9bb5';
-              return '<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:'+fc+';margin-top:3px">\u26a0 '+f.l+' \u2014 '+f.d+'</div>';
-            }).join('')+
-            (r.stolen>0?'<div style="font-family:JetBrains Mono,monospace;font-size:10px;color:#ff2d2d;margin-top:4px;font-weight:700">EST STOLEN: '+r.stolen.toFixed(1)+'h / $'+Math.round(r.cost)+'</div>':'')+
-          '</div>'+
-          '<div style="text-align:center;flex-shrink:0">'+
-            '<div style="width:56px;height:56px;border-radius:50%;border:3px solid '+rc+';display:flex;align-items:center;justify-content:center;font-family:Oswald,sans-serif;font-size:22px;font-weight:700;color:'+rc+'">'+r.score+'</div>'+
-            '<div style="font-family:JetBrains Mono,monospace;font-size:9px;font-weight:700;color:'+rc+';margin-top:4px;text-transform:uppercase;letter-spacing:0.1em">'+r.risk+'</div>'+
-          '</div>'+
-        '</div>';
-      }).join('');
-    }
-
-    var st=document.querySelector('.sec-title');
-    if(st)st.innerHTML='Driver Threat Board <span style="background:#ff2d2d;color:#fff;padding:2px 10px;border-radius:4px;font-size:12px;margin-left:8px;font-family:JetBrains Mono,monospace">'+flagged+' FLAGGED</span> <span style="background:#111822;color:#7e9bb5;padding:2px 10px;border-radius:4px;font-size:12px;margin-left:4px;font-family:JetBrains Mono,monospace">'+allDrivers.length+' TOTAL</span>';
-
-    // Update risk distribution in sidebar
-    var counts={critical:0,high:0,medium:0,clean:0};
-    results.forEach(function(r){counts[r.risk]++;});
-    var rcEl=document.querySelector('.risk-critical .risk-count');if(rcEl)rcEl.textContent=counts.critical;
-    var rhEl=document.querySelector('.risk-high .risk-count');if(rhEl)rhEl.textContent=counts.high;
-    var rmEl=document.querySelector('.risk-medium .risk-count');if(rmEl)rmEl.textContent=counts.medium;
-    var rlEl=document.querySelector('.risk-clean .risk-count');if(rlEl)rlEl.textContent=counts.clean;
-
-    addLog('[COMPLETE] '+flagged+'/'+allDrivers.length+' drivers flagged | Est '+totalStolen.toFixed(1)+'h stolen ($'+Math.round(totalLost)+') at $'+wage+'/hr');
-
-  }catch(e){
-    if(loading)loading.style.display='none';
-    if(empty){empty.style.display='block';}
-    if(statusTxt)statusTxt.textContent='ERROR';
-    if(statusDot)statusDot.style.background='#ff2d2d';
-    addLog('[ERROR] '+e.message);
-    var loadMsgEl=document.getElementById('loadingMsg');
-    if(loadMsgEl)loadMsgEl.textContent='Error: '+e.message;
-  }
-};
+// Second runAudit override removed — the real engine at line 1780 handles everything
 
 </script>
 </body>
