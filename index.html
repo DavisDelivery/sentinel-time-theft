@@ -3,17 +3,253 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SENTINEL — Davis Delivery Fleet Audit</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<title>SENTINEL — Fleet Threat Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#0a0e17; --s1:#0f1520; --s2:#141c2b; --s3:#1a2438; --s4:#212e45;
-  --b1:#1c2842; --b2:#263758; --b3:#304670;
-  --red:#ef4444; --red2:#f87171; --amber:#f59e0b; --amber2:#fbbf24;
-  --green:#10b981; --green2:#34d399; --blue:#2563eb; --blue2:#3b82f6; --blue3:#60a5fa;
-  --cyan:#06b6d4; --text:#e2e8f0; --text2:#94a3b8; --text3:#475569;
-  --head:'Bebas Neue',sans-serif; --ui:'DM Sans',sans-serif; --mono:'JetBrains Mono',monospace;
-  --radius:10px;
+  --bg:#05080e; --s1:#0a0f1a; --s2:#0e1524; --s3:#131d30; --s4:#1a2740;
+  --b1:#0f2040; --b2:#153060; --b3:#1a4080;
+  --red:#ff1a1a; --red2:#ff4d4d; --amber:#ffaa00; --amber2:#ffcc33;
+  --green:#00ff88; --green2:#33ffaa; --blue:#0066ff; --blue2:#1a8cff; --blue3:#4da6ff;
+  --cyan:#00d4ff; --cyan2:#33e0ff;
+  --energon:#00d4ff; --spark:#ff6600;
+  --text:#c8daf0; --text2:#6889aa; --text3:#304868;
+  --head:'Orbitron',sans-serif; --ui:'Rajdhani',sans-serif; --mono:'JetBrains Mono',monospace;
+  --radius:4px;
+  --glow:0 0 12px rgba(0,212,255,.25);
+  --glow-red:0 0 12px rgba(255,26,26,.3);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:var(--ui);font-weight:500;min-height:100vh;overflow-x:hidden;}
+
+/* ── METAL TEXTURE ── */
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    repeating-linear-gradient(90deg,transparent,transparent 2px,rgba(0,212,255,.008) 2px,rgba(0,212,255,.008) 3px),
+    repeating-linear-gradient(0deg,transparent,transparent 60px,rgba(0,212,255,.015) 60px,rgba(0,212,255,.015) 61px);
+}
+
+/* ── ANGULAR CLIP PATHS ── */
+.clip-angle{clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));}
+
+/* ── TOP BAR ── */
+.topbar{position:sticky;top:0;z-index:500;
+  background:linear-gradient(180deg,#0c1222,#080e1a);
+  border-bottom:2px solid var(--energon);
+  box-shadow:0 2px 20px rgba(0,212,255,.15);
+  display:flex;align-items:center;padding:0 16px;height:52px;gap:12px;}
+.topbar-brand{display:flex;align-items:center;gap:10px;}
+.eye{width:28px;height:28px;position:relative;flex-shrink:0;}
+.eye::before{content:'';position:absolute;inset:0;
+  background:conic-gradient(from 0deg,var(--energon),var(--blue),var(--energon));
+  clip-path:polygon(50% 0%,85% 25%,100% 50%,85% 75%,50% 100%,15% 75%,0% 50%,15% 25%);
+  animation:eyeSpin 8s linear infinite;}
+.eye::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:10px;height:10px;background:var(--energon);border-radius:50%;
+  box-shadow:0 0 8px var(--energon),0 0 16px var(--energon);
+  animation:eyePulse 2s ease-in-out infinite;}
+@keyframes eyeSpin{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}
+@keyframes eyePulse{0%,100%{box-shadow:0 0 8px var(--energon),0 0 16px var(--energon)}50%{box-shadow:0 0 4px var(--energon),0 0 8px var(--energon)}}
+.brand-title{font-family:var(--head);font-size:18px;font-weight:800;letter-spacing:.2em;
+  background:linear-gradient(135deg,var(--energon),#fff,var(--energon));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none;}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+.status{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;}
+.status-dot{width:8px;height:8px;border-radius:2px;background:var(--text3);transform:rotate(45deg);}
+.gear-btn{background:none;border:1px solid var(--b2);color:var(--text2);font-size:16px;cursor:pointer;padding:4px 6px;border-radius:var(--radius);}
+.gear-btn:hover{color:var(--energon);border-color:var(--energon);}
+
+/* ── ACTION BAR ── */
+.action-bar{
+  background:linear-gradient(180deg,var(--s1),var(--s2));
+  border-bottom:1px solid var(--b1);padding:10px 16px;
+  display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.period-group{display:flex;gap:0;overflow:hidden;
+  border:1px solid var(--b2);clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);}
+.period-group button{background:var(--s1);border:none;border-right:1px solid var(--b1);
+  color:var(--text3);font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:.12em;
+  padding:8px 14px;cursor:pointer;transition:all .15s;}
+.period-group button:last-child{border-right:none;}
+.period-group button:hover{background:var(--s3);color:var(--text2);}
+.period-group button.active{background:linear-gradient(135deg,var(--blue),#0044cc);color:#fff;
+  text-shadow:0 0 8px rgba(0,102,255,.5);}
+.date-display{background:var(--s1);border:1px solid var(--b2);color:var(--energon);
+  font-family:var(--mono);font-size:12px;font-weight:500;padding:8px 14px;
+  border-radius:var(--radius);cursor:pointer;transition:all .15s;white-space:nowrap;min-width:160px;
+  text-align:center;letter-spacing:.04em;}
+.date-display:hover{border-color:var(--energon);box-shadow:var(--glow);}
+.run-btn{
+  background:linear-gradient(135deg,#cc0000,var(--red));color:#fff;
+  border:1px solid #ff3333;
+  font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:.15em;
+  padding:9px 22px;cursor:pointer;transition:all .2s;white-space:nowrap;
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+  text-shadow:0 0 8px rgba(255,0,0,.4);}
+.run-btn:hover{filter:brightness(1.2);box-shadow:var(--glow-red);}
+.run-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* ── DATA SOURCES ── */
+.data-bar{background:var(--s1);border-bottom:1px solid var(--b1);padding:8px 16px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.data-bar .lbl{font-family:var(--head);font-size:9px;color:var(--text3);letter-spacing:.15em;text-transform:uppercase;margin-right:4px;}
+.src-btn{background:var(--s2);border:1px solid var(--b1);color:var(--text2);
+  font-family:var(--ui);font-size:12px;font-weight:600;padding:5px 12px;
+  border-radius:var(--radius);cursor:pointer;transition:all .15s;white-space:nowrap;}
+.src-btn:hover{border-color:var(--energon);color:var(--energon);}
+.src-btn.loaded{border-color:var(--green);color:var(--green);box-shadow:0 0 8px rgba(0,255,136,.15);}
+.upload-wrap{position:relative;overflow:hidden;display:inline-block;}
+.upload-wrap input[type=file]{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;left:0;top:0;}
+
+/* ── KPIs ── */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--b1);}
+.kpi{background:linear-gradient(180deg,var(--s2),var(--s1));padding:14px 16px;text-align:center;position:relative;}
+.kpi::after{content:'';position:absolute;bottom:0;left:20%;right:20%;height:1px;
+  background:linear-gradient(90deg,transparent,var(--energon),transparent);opacity:.3;}
+.kpi-val{font-family:var(--head);font-size:26px;font-weight:800;line-height:1;letter-spacing:.06em;}
+.kpi-lbl{font-family:var(--head);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:.2em;margin-top:4px;}
+@media(max-width:480px){.kpi-row{grid-template-columns:repeat(2,1fr);}.kpi-val{font-size:22px;}}
+
+/* ── TABS ── */
+.tab-bar{display:flex;background:var(--s1);border-bottom:1px solid var(--b1);overflow-x:auto;}
+.tab{background:none;border:none;color:var(--text3);font-family:var(--head);font-size:12px;font-weight:600;
+  letter-spacing:.1em;padding:11px 20px;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;}
+.tab:hover{color:var(--text2);}
+.tab.active{color:var(--energon);border-bottom-color:var(--energon);text-shadow:0 0 8px rgba(0,212,255,.3);}
+
+/* ── CONTENT ── */
+.content-area{padding:16px;min-height:50vh;}
+.content{display:none;}
+.content.visible{display:block;}
+
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:60px 20px;}
+.empty-icon{font-size:48px;margin-bottom:12px;filter:drop-shadow(0 0 12px rgba(0,212,255,.3));}
+.empty h2{font-family:var(--head);font-size:22px;font-weight:800;letter-spacing:.2em;
+  background:linear-gradient(135deg,var(--energon),#fff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px;}
+.empty p{color:var(--text2);font-size:14px;max-width:420px;margin:0 auto;line-height:1.6;}
+
+/* ── DRIVER CARDS ── */
+.driver-stack{display:flex;flex-direction:column;gap:8px;}
+.dcard{background:linear-gradient(135deg,var(--s2),var(--s1));
+  border:1px solid var(--b1);border-radius:var(--radius);overflow:hidden;transition:all .2s;
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));}
+.dcard:hover{border-color:var(--b3);box-shadow:0 0 12px rgba(0,212,255,.08);}
+.dcard-head{display:flex;align-items:center;padding:14px 16px;gap:14px;cursor:pointer;user-select:none;}
+.dcard-rank{font-family:var(--head);font-size:24px;font-weight:800;color:var(--text3);width:36px;text-align:center;flex-shrink:0;letter-spacing:.06em;}
+.dcard-info{flex:1;min-width:0;}
+.dcard-name{font-family:var(--ui);font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dcard-meta{font-family:var(--mono);font-size:10px;color:var(--text2);margin-top:3px;}
+.dcard-score{width:48px;height:48px;border-radius:4px;border:2px solid;display:flex;align-items:center;justify-content:center;
+  font-family:var(--head);font-size:20px;font-weight:800;flex-shrink:0;transform:rotate(0deg);
+  clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);}
+.dcard-body{display:none;padding:0 16px 14px 66px;border-top:1px solid var(--b1);}
+.dcard.expand .dcard-body{display:block;padding-top:12px;}
+.flag-line{font-family:var(--mono);font-size:11px;margin-bottom:4px;display:flex;align-items:baseline;gap:6px;}
+.flag-sev{font-size:12px;}
+.flag-label{font-weight:700;min-width:90px;}
+.flag-detail{color:var(--text2);}
+.stolen-line{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--red);margin-top:8px;padding-top:8px;border-top:1px solid var(--b1);}
+.timeline-bar{margin-top:10px;height:28px;background:var(--s1);border-radius:2px;position:relative;overflow:hidden;}
+.expand-ico{margin-left:auto;color:var(--text3);font-size:12px;transition:transform .2s;}
+.dcard.expand .expand-ico{transform:rotate(180deg);}
+
+/* ── FILTER BAR ── */
+.filter-bar{display:flex;align-items:center;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+.fb-btn{background:var(--s2);border:1px solid var(--b1);color:var(--text3);
+  font-family:var(--head);font-size:11px;font-weight:600;letter-spacing:.08em;
+  padding:5px 12px;border-radius:var(--radius);cursor:pointer;transition:all .15s;}
+.fb-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 0 8px rgba(0,102,255,.2);}
+.fb-btn:hover{border-color:var(--blue2);}
+.sort-select{background:var(--s2);border:1px solid var(--b1);color:var(--text2);
+  font-family:var(--ui);font-size:11px;padding:5px 8px;border-radius:var(--radius);margin-left:auto;}
+
+/* ── REPORT TAB ── */
+.rpt-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;}
+.rpt-kpi{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;text-align:center;}
+.rpt-kpi-val{font-family:var(--head);font-size:22px;font-weight:800;letter-spacing:.06em;}
+.rpt-kpi-lbl{font-family:var(--head);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;margin-top:2px;}
+.rpt-table{width:100%;border-collapse:collapse;font-size:12px;}
+.rpt-table th{font-family:var(--head);font-size:9px;color:var(--energon);text-transform:uppercase;letter-spacing:.12em;text-align:left;padding:8px;border-bottom:1px solid var(--b2);}
+.rpt-table td{padding:8px;border-bottom:1px solid var(--b1);font-family:var(--mono);font-size:11px;}
+
+/* ── ALGO TAB ── */
+.algo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;}
+.algo-card{background:linear-gradient(135deg,var(--s2),var(--s1));border:1px solid var(--b1);border-radius:var(--radius);padding:16px;
+  clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px));}
+.algo-card h3{font-family:var(--head);font-size:12px;font-weight:700;letter-spacing:.1em;margin-bottom:10px;color:var(--energon);}
+.algo-row{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:11px;color:var(--text2);padding:4px 0;border-bottom:1px solid rgba(0,212,255,.06);}
+.algo-pts{font-weight:700;flex-shrink:0;}
+
+/* ── LOG PANEL ── */
+.log-footer{position:fixed;bottom:0;left:0;right:0;z-index:400;
+  background:linear-gradient(180deg,var(--s2),var(--s1));border-top:1px solid var(--energon);transition:transform .3s;}
+.log-footer.collapsed{transform:translateY(calc(100% - 32px));}
+.log-toggle{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;cursor:pointer;
+  font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:.1em;user-select:none;}
+.log-toggle:hover{color:#fff;}
+.log-body{height:140px;overflow-y:auto;padding:4px 16px 8px;font-family:var(--mono);font-size:10px;}
+.log-line{padding:2px 0;color:var(--text2);border-bottom:1px solid rgba(0,212,255,.03);}
+.log-line.ok{color:var(--green);}
+.log-line.hi{color:var(--energon);}
+.log-line.warn{color:var(--amber);}
+.log-line.err{color:var(--red);}
+
+/* ── SETTINGS MODAL ── */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:900;align-items:center;justify-content:center;
+  backdrop-filter:blur(4px);}
+.modal-bg.open{display:flex;}
+.modal{background:linear-gradient(180deg,var(--s2),var(--s1));border:1px solid var(--energon);
+  border-radius:var(--radius);padding:24px;width:92%;max-width:420px;max-height:85vh;overflow-y:auto;
+  box-shadow:0 0 30px rgba(0,212,255,.15);
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));}
+.modal h2{font-family:var(--head);font-size:20px;font-weight:800;letter-spacing:.2em;
+  color:var(--energon);margin-bottom:16px;}
+.modal label{font-family:var(--head);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;display:block;margin-bottom:4px;margin-top:12px;}
+.modal input[type=range]{width:100%;accent-color:var(--energon);}
+.modal input[type=text],.modal input[type=number],.modal input[type=password]{
+  width:100%;background:var(--s1);border:1px solid var(--b2);color:var(--text);
+  font-family:var(--mono);font-size:12px;padding:8px;border-radius:var(--radius);}
+.modal input:focus{border-color:var(--energon);outline:none;box-shadow:var(--glow);}
+.modal .thresh-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;}
+.modal .thresh-val{font-family:var(--mono);font-size:11px;color:var(--energon);}
+.modal-close{background:linear-gradient(135deg,var(--blue),#0044cc);border:1px solid var(--blue2);
+  color:#fff;font-family:var(--head);font-weight:700;letter-spacing:.12em;
+  padding:10px 24px;border-radius:var(--radius);cursor:pointer;width:100%;margin-top:20px;font-size:13px;}
+.modal-close:hover{box-shadow:0 0 12px rgba(0,102,255,.3);}
+.modal-cancel{background:none;border:1px solid var(--b2);color:var(--text2);
+  font-family:var(--head);font-weight:600;letter-spacing:.1em;
+  padding:8px 24px;border-radius:var(--radius);cursor:pointer;width:100%;margin-top:8px;font-size:11px;}
+.modal-cancel:hover{border-color:var(--text2);color:var(--text);}
+
+/* ── DASHCAM MODAL ── */
+.cam-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:950;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);}
+.cam-modal.open{display:flex;}
+.cam-box{background:linear-gradient(180deg,var(--s2),var(--s1));border:1px solid var(--energon);border-radius:var(--radius);padding:24px;width:92%;max-width:460px;box-shadow:0 0 30px rgba(0,212,255,.15);}
+.cam-box h3{font-family:var(--head);font-size:16px;font-weight:700;letter-spacing:.12em;color:var(--energon);margin-bottom:12px;}
+.cam-box .field{margin-bottom:8px;}
+.cam-box .field label{font-family:var(--head);font-size:9px;color:var(--text3);letter-spacing:.1em;display:block;margin-bottom:3px;}
+.cam-box textarea{width:100%;background:var(--s1);border:1px solid var(--b2);color:var(--text);font-family:var(--ui);font-size:13px;padding:8px;border-radius:var(--radius);resize:vertical;min-height:60px;}
+.cam-btns{display:flex;gap:8px;margin-top:12px;}
+.cam-btns button{flex:1;padding:10px;border-radius:var(--radius);font-family:var(--head);font-weight:700;letter-spacing:.08em;cursor:pointer;border:none;font-size:12px;}
+
+/* ── DATE PICKER ── */
+.pick-section{margin-bottom:8px;}
+.pick-input{width:100%;background:var(--s1);border:1px solid var(--b2);color:var(--text);
+  font-family:var(--mono);font-size:14px;padding:12px;border-radius:var(--radius);margin-top:4px;}
+.pick-input:focus{border-color:var(--energon);outline:none;box-shadow:var(--glow);}
+.pick-hint{font-family:var(--mono);font-size:11px;color:var(--energon);margin-top:6px;padding:6px 10px;background:var(--s1);border-radius:var(--radius);border:1px solid var(--b1);}
+
+/* ── RESPONSIVE ── */
+@media(max-width:600px){
+  .action-bar{flex-direction:column;align-items:stretch;}
+  .date-display{width:100%;}
+  .run-btn{width:100%;}
+  .algo-grid{grid-template-columns:1fr;}
+  .content-area{padding:12px;}
+  .dcard-body{padding-left:16px;}
+  .rpt-kpis{grid-template-columns:repeat(2,1fr);}
+  .brand-title{font-size:15px;}
+}
+.content-area{padding-bottom:180px;}
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100vh;overflow-x:hidden;}
@@ -165,6 +401,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100
 }
 /* pad bottom so log panel doesn't cover content */
 .content-area{padding-bottom:180px;}
+
 </style>
 </head>
 <body>
@@ -185,9 +422,45 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100
     <button id="pDay" class="active" onclick="setPeriod('day')">DAY</button>
     <button id="pWeek" onclick="setPeriod('week')">WEEK</button>
     <button id="pMonth" onclick="setPeriod('month')">MONTH</button>
+    <button id="pCustom" onclick="setPeriod('custom')">CUSTOM</button>
   </div>
-  <input type="date" id="auditDate">
+  <button class="date-display" id="dateDisplay" onclick="openDatePicker()">📅 Select Date</button>
+  <!-- Hidden native inputs that get triggered by the display button -->
+  <input type="date" id="auditDate" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+  <input type="date" id="auditDateEnd" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
   <button class="run-btn" id="runBtn" onclick="runAudit()">⚡ ENGAGE SENTINEL</button>
+</div>
+
+<!-- DATE PICKER MODAL -->
+<div class="modal-bg" id="dateModal">
+  <div class="modal" style="max-width:360px;">
+    <h2 id="dateModalTitle">SELECT DATE</h2>
+    <!-- DAY picker -->
+    <div id="pickDay" class="pick-section">
+      <label>Date</label>
+      <input type="date" id="pickDayInput" class="pick-input">
+    </div>
+    <!-- WEEK picker -->
+    <div id="pickWeek" class="pick-section" style="display:none;">
+      <label>Week starting</label>
+      <input type="date" id="pickWeekInput" class="pick-input">
+      <div class="pick-hint" id="weekHint">Mon – Sun</div>
+    </div>
+    <!-- MONTH picker -->
+    <div id="pickMonth" class="pick-section" style="display:none;">
+      <label>Month</label>
+      <input type="month" id="pickMonthInput" class="pick-input">
+    </div>
+    <!-- CUSTOM range -->
+    <div id="pickCustom" class="pick-section" style="display:none;">
+      <label>Start date</label>
+      <input type="date" id="pickCustomStart" class="pick-input">
+      <label style="margin-top:10px;">End date</label>
+      <input type="date" id="pickCustomEnd" class="pick-input">
+    </div>
+    <button class="modal-close" onclick="confirmDatePick()">CONFIRM</button>
+    <button class="modal-cancel" onclick="closeDatePicker()">Cancel</button>
+  </div>
 </div>
 
 <!-- DATA SOURCES -->
@@ -223,9 +496,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100
   <!-- FLAGS -->
   <div id="tab-flags" class="content visible">
     <div class="empty" id="emptyState">
-      <div class="empty-icon">👁️</div>
-      <h2>SENTINEL IS WATCHING</h2>
-      <p>Load driver clock data (Motive HOS, B600, or CSV), then hit ENGAGE SENTINEL. The 8-layer analysis cross-references GPS telemetry against clock records to surface time theft.</p>
+      <div class="empty-icon">⬡</div>
+      <h2>SENTINEL ONLINE</h2>
+      <p>Initialize clock data source (Motive HOS, B600, or CSV), then engage SENTINEL. The 8-layer threat matrix cross-references GPS telemetry against clock records to identify time theft vectors.</p>
     </div>
     <div id="flagsContent" style="display:none;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -302,7 +575,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100
 <!-- LOG FOOTER -->
 <div class="log-footer collapsed" id="logFooter">
   <div class="log-toggle" onclick="toggleLog()">
-    <span>📋 System Log</span><span>▲</span>
+    <span>◆ DATASTREAM</span><span>▲</span>
   </div>
   <div class="log-body" id="logPanel"></div>
 </div>
@@ -384,7 +657,14 @@ const SUSPICIOUS_LOCS = ['QuikTrip','Chick-fil-A','McDonald\'s','Wendy\'s','Waff
 // ═══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',()=>{
   const d = new Date().toISOString().split('T')[0];
+  auditStartDate = d;
+  auditEndDate = d;
   document.getElementById('auditDate').value = d;
+  document.getElementById('auditDateEnd').value = d;
+  updateDateDisplay();
+  // Week picker hint updates on change
+  const weekInput = document.getElementById('pickWeekInput');
+  if (weekInput) weekInput.addEventListener('input', updateWeekHint);
 });
 
 // ═══════════════════════════════════════════
@@ -987,27 +1267,146 @@ function buildTimeline(driver,gps,ciMin,coMin){
 // MAIN AUDIT RUNNER
 // ═══════════════════════════════════════════
 // ═══════════════════════════════════════════
-// PERIOD SELECTOR
+// PERIOD & DATE PICKER
 // ═══════════════════════════════════════════
 let auditPeriod = 'day';
+let auditStartDate = '';
+let auditEndDate = '';
+
 function setPeriod(p) {
   auditPeriod = p;
-  ['pDay','pWeek','pMonth'].forEach(id => {
+  ['pDay','pWeek','pMonth','pCustom'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) { el.style.background = ''; el.style.borderColor = ''; el.style.color = ''; }
+    if (el) el.classList.remove('active');
   });
   const active = document.getElementById('p' + p.charAt(0).toUpperCase() + p.slice(1));
-  if (active) { active.style.background = 'var(--blue)'; active.style.borderColor = 'var(--blue2)'; active.style.color = '#fff'; }
+  if (active) active.classList.add('active');
+  openDatePicker();
+}
+
+function openDatePicker() {
+  const modal = document.getElementById('dateModal');
+  modal.classList.add('open');
+  // Show the right picker section
+  ['pickDay','pickWeek','pickMonth','pickCustom'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  const titles = { day: 'SELECT DATE', week: 'SELECT WEEK', month: 'SELECT MONTH', custom: 'CUSTOM RANGE' };
+  document.getElementById('dateModalTitle').textContent = titles[auditPeriod] || 'SELECT DATE';
+
+  const today = new Date().toISOString().split('T')[0];
+  const curMonth = today.substring(0, 7);
+
+  if (auditPeriod === 'day') {
+    document.getElementById('pickDay').style.display = 'block';
+    document.getElementById('pickDayInput').value = auditStartDate || today;
+  } else if (auditPeriod === 'week') {
+    document.getElementById('pickWeek').style.display = 'block';
+    document.getElementById('pickWeekInput').value = auditStartDate || today;
+    updateWeekHint();
+  } else if (auditPeriod === 'month') {
+    document.getElementById('pickMonth').style.display = 'block';
+    document.getElementById('pickMonthInput').value = auditStartDate ? auditStartDate.substring(0, 7) : curMonth;
+  } else if (auditPeriod === 'custom') {
+    document.getElementById('pickCustom').style.display = 'block';
+    document.getElementById('pickCustomStart').value = auditStartDate || today;
+    document.getElementById('pickCustomEnd').value = auditEndDate || today;
+  }
+}
+
+function closeDatePicker() {
+  document.getElementById('dateModal').classList.remove('open');
+}
+
+function confirmDatePick() {
+  if (auditPeriod === 'day') {
+    auditStartDate = document.getElementById('pickDayInput').value;
+    auditEndDate = auditStartDate;
+  } else if (auditPeriod === 'week') {
+    const picked = document.getElementById('pickWeekInput').value;
+    // Find Monday of that week
+    const d = new Date(picked + 'T12:00:00');
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+    const monday = new Date(d.setDate(diff));
+    auditStartDate = monday.toISOString().split('T')[0];
+    const sunday = new Date(monday);
+    sunday.setDate(sunday.getDate() + 6);
+    auditEndDate = sunday.toISOString().split('T')[0];
+  } else if (auditPeriod === 'month') {
+    const monthVal = document.getElementById('pickMonthInput').value; // YYYY-MM
+    auditStartDate = monthVal + '-01';
+    const parts = monthVal.split('-');
+    const lastDay = new Date(parseInt(parts[0]), parseInt(parts[1]), 0).getDate();
+    auditEndDate = monthVal + '-' + String(lastDay).padStart(2, '0');
+  } else if (auditPeriod === 'custom') {
+    auditStartDate = document.getElementById('pickCustomStart').value;
+    auditEndDate = document.getElementById('pickCustomEnd').value;
+    if (auditEndDate < auditStartDate) {
+      const tmp = auditStartDate;
+      auditStartDate = auditEndDate;
+      auditEndDate = tmp;
+    }
+  }
+
+  // Update hidden input for compatibility
+  document.getElementById('auditDate').value = auditStartDate;
+  document.getElementById('auditDateEnd').value = auditEndDate;
+
+  // Update display button
+  updateDateDisplay();
+  closeDatePicker();
+}
+
+function updateDateDisplay() {
+  const btn = document.getElementById('dateDisplay');
+  if (!auditStartDate) { btn.textContent = '📅 Select Date'; return; }
+
+  const fmt = (d) => {
+    const dt = new Date(d + 'T12:00:00');
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  if (auditPeriod === 'day') {
+    btn.textContent = '📅 ' + fmt(auditStartDate);
+  } else if (auditPeriod === 'week') {
+    btn.textContent = '📅 ' + fmt(auditStartDate) + ' – ' + fmt(auditEndDate);
+  } else if (auditPeriod === 'month') {
+    const dt = new Date(auditStartDate + 'T12:00:00');
+    btn.textContent = '📅 ' + dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  } else {
+    btn.textContent = '📅 ' + fmt(auditStartDate) + ' – ' + fmt(auditEndDate);
+  }
+}
+
+function updateWeekHint() {
+  const val = document.getElementById('pickWeekInput').value;
+  if (!val) return;
+  const d = new Date(val + 'T12:00:00');
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(new Date(d).setDate(diff));
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const fmt = (dt) => dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  document.getElementById('weekHint').textContent = fmt(monday) + ' – ' + fmt(sunday);
 }
 
 function getAuditDates() {
-  const baseDate = document.getElementById('auditDate').value;
-  if (!baseDate) return [new Date().toISOString().split('T')[0]];
-  const start = new Date(baseDate + 'T12:00:00');
-  const numDays = auditPeriod === 'week' ? 7 : auditPeriod === 'month' ? 30 : 1;
+  if (!auditStartDate) {
+    // Fallback to today
+    auditStartDate = new Date().toISOString().split('T')[0];
+    auditEndDate = auditStartDate;
+  }
+  const start = new Date(auditStartDate + 'T12:00:00');
+  const end = new Date((auditEndDate || auditStartDate) + 'T12:00:00');
+  const numDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
+  const cappedDays = Math.min(numDays, 60);
+  if (numDays > 60) log('Capping range to 60 days', 'warn');
   const dates = [];
-  for (let i = 0; i < numDays; i++) {
-    const d = new Date(start); d.setDate(d.getDate() + i);
+  for (let i = 0; i < cappedDays; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
     dates.push(d.toISOString().split('T')[0]);
   }
   return dates;
@@ -1048,16 +1447,47 @@ async function fetchMotiveHOS() {
       }
     });
 
-    // Build clock data from ALL vehicles — current_driver only shows who's driving right now
-    clockData = vehicles.map(v => {
-        const ve = v.vehicle || v;
-        const dr = ve.current_driver || {};
-        const name = dr.first_name ? ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim() : `Truck #${ve.number || ve.id}`;
-        return {
-          name, truck: ve.number || String(ve.id) || '', clockIn: '06:30', clockOut: '17:00',
-          shiftHrs: 10.5, routeType: 'suburban', date: startDate
-        };
-      }).filter(d => d.truck);
+    // Build clock data from DRIVERS, not all vehicles (avoids forklifts/trailers)
+    // First build a truck map from vehicles
+    const truckMap = {};
+    vehicles.forEach(v => {
+      const ve = v.vehicle || v;
+      if (ve.current_driver) {
+        const name = ((ve.current_driver.first_name || '') + ' ' + (ve.current_driver.last_name || '')).trim();
+        if (name) truckMap[name.toLowerCase()] = ve.number;
+      }
+    });
+
+    // Fetch actual driver list
+    const driversResp = await fetch('/.netlify/functions/motive-gps?action=users&per_page=100&status=active');
+    let driverUsers = [];
+    if (driversResp.ok) {
+      const drData = await driversResp.json();
+      (drData.users || []).forEach(u => {
+        const user = u.user || u;
+        const name = ((user.first_name || '') + ' ' + (user.last_name || '')).trim();
+        if (name && (user.role === 'driver' || user.driver_company_id || !user.role)) {
+          driverUsers.push({ name, truck: truckMap[name.toLowerCase()] || '' });
+        }
+      });
+    }
+
+    if (driverUsers.length > 0) {
+      clockData = driverUsers.map(d => ({
+        name: d.name, truck: d.truck, clockIn: '06:30', clockOut: '17:00',
+        shiftHrs: 10.5, routeType: 'suburban', date: startDate
+      }));
+    } else {
+      // Fallback to vehicles with drivers
+      clockData = vehicles
+        .filter(v => (v.vehicle || v).current_driver)
+        .map(v => {
+          const ve = v.vehicle || v;
+          const dr = ve.current_driver || {};
+          const name = ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim();
+          return { name, truck: ve.number || '', clockIn: '06:30', clockOut: '17:00', shiftHrs: 10.5, routeType: 'suburban', date: startDate };
+        });
+    }
 
     // Override with HOS duty times where available
     hosRecords.forEach(rec => {
@@ -1113,39 +1543,76 @@ async function runAudit(){
 
       const dateStr = document.getElementById('auditDate').value || new Date().toISOString().split('T')[0];
 
-      // Get ALL vehicles — don't filter by current_driver since that only shows who's driving RIGHT NOW
-      clockData = allVehicles.map(v => {
+      // Build truck-to-driver map from vehicles
+      const truckDriverMap = {};
+      allVehicles.forEach(v => {
         const ve = v.vehicle || v;
-        const dr = ve.current_driver || {};
-        const name = dr.first_name ? ((dr.first_name||'') + ' ' + (dr.last_name||'')).trim() : '';
-        // Use vehicle number as identifier if no driver assigned (after hours)
-        const label = name || `Truck #${ve.number || ve.id}`;
-        return { name: label, truck: ve.number || String(ve.id) || '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
-      }).filter(d => d.truck); // Just need a truck number to pull GPS
+        if (ve.current_driver) {
+          const name = ((ve.current_driver.first_name||'') + ' ' + (ve.current_driver.last_name||'')).trim();
+          if (name) truckDriverMap[ve.number] = name;
+        }
+      });
 
-      // Also fetch the users/drivers list to fill in names for unassigned trucks
+      // Use DRIVERS list as primary source — not vehicles (which includes forklifts, trailers, etc.)
+      let driverList = [];
       try {
-        const usersResp = await fetch('/.netlify/functions/motive-gps?action=users&per_page=100&status=active');
-        if (usersResp.ok) {
+        let uPage = 1, uMore = true;
+        while (uMore) {
+          const usersResp = await fetch(`/.netlify/functions/motive-gps?action=users&per_page=100&page_no=${uPage}&status=active`);
+          if (!usersResp.ok) break;
           const usersData = await usersResp.json();
           const users = usersData.users || [];
-          log(`Motive users: ${users.length} active drivers found`, 'info');
-          // If we got more drivers than vehicles with drivers, add them
+          if (users.length === 0) { uMore = false; break; }
           users.forEach(u => {
             const user = u.user || u;
             const name = ((user.first_name||'') + ' ' + (user.last_name||'')).trim();
-            if (!name) return;
-            // Check if this driver is already in clockData
-            const exists = clockData.find(d => d.name.toLowerCase() === name.toLowerCase());
-            if (!exists) {
-              clockData.push({ name, truck: '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr });
-            } else if (exists.name.startsWith('Truck #')) {
-              // Replace truck label with actual driver name
-              exists.name = name;
+            const role = (user.role || user.driver_company_id || '').toString().toLowerCase();
+            // Only include actual drivers, not admins/dispatchers
+            if (name && (user.role === 'driver' || user.driver_company_id || !user.role)) {
+              driverList.push({ name, id: user.id, email: user.email || '' });
             }
           });
+          uPage++;
+          if (users.length < 100) uMore = false;
         }
+        log(`Motive users: ${driverList.length} drivers found`, 'info');
       } catch (e) { log(`Users fetch: ${e.message}`, 'warn'); }
+
+      // If we got drivers, use them as the source. Map each to a truck if possible.
+      if (driverList.length > 0) {
+        clockData = driverList.map(d => {
+          // Find their truck from vehicle assignments
+          let truck = '';
+          for (const [truckNum, driverName] of Object.entries(truckDriverMap)) {
+            if (driverName.toLowerCase() === d.name.toLowerCase()) { truck = truckNum; break; }
+          }
+          return { name: d.name, truck, clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
+        });
+      } else {
+        // Fallback: use vehicles but filter to likely trucks (have a driver or reasonable vehicle type)
+        log('No driver list available — falling back to vehicle list', 'warn');
+        clockData = allVehicles
+          .filter(v => {
+            const ve = v.vehicle || v;
+            // Skip if no number (likely not a real truck)
+            if (!ve.number) return false;
+            // Include if it has/had a driver
+            if (ve.current_driver) return true;
+            // Include if it looks like a truck (has make/model typical of trucks)
+            const make = (ve.make || '').toLowerCase();
+            const model = (ve.model || '').toLowerCase();
+            if (make.includes('ford') || make.includes('freightliner') || make.includes('international') ||
+                make.includes('kenworth') || make.includes('peterbilt') || make.includes('isuzu') ||
+                make.includes('hino') || make.includes('volvo') || make.includes('mack')) return true;
+            return false;
+          })
+          .map(v => {
+            const ve = v.vehicle || v;
+            const dr = ve.current_driver || {};
+            const name = dr.first_name ? ((dr.first_name||'') + ' ' + (dr.last_name||'')).trim() : `Truck #${ve.number}`;
+            return { name, truck: ve.number || '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
+          });
+      }
 
       // Apply known truck mappings
       const knownMap = { 'trevor': {truck:'0608',rt:'urban'}, 'trevarr': {truck:'4757',rt:'suburban'}, 'brent': {truck:'0294',rt:'urban'} };
