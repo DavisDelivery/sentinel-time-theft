@@ -3,1183 +3,368 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SENTINEL — Davis Delivery Time Theft Detection</title>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;700&family=Oswald:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+<title>SENTINEL — Davis Delivery Fleet Audit</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:       #080a0d;
-  --s1:       #0c1018;
-  --s2:       #111822;
-  --s3:       #17202e;
-  --s4:       #1e2a3a;
-  --b1:       #1a2535;
-  --b2:       #243347;
-  --b3:       #2d4060;
-  --red:      #ff2d2d;
-  --red2:     #ff6b6b;
-  --amber:    #ffb020;
-  --amber2:   #ffd060;
-  --green:    #00e676;
-  --green2:   #69f0ae;
-  --blue:     #1e5b92;
-  --blue2:    #2979c8;
-  --blue3:    #4da3ff;
-  --cyan:     #00bcd4;
-  --text:     #dce8f5;
-  --text2:    #7e9bb5;
-  --text3:    #3d5470;
-  --mono:     'JetBrains Mono', monospace;
-  --head:     'Oswald', sans-serif;
-  --ui:       'Rajdhani', sans-serif;
+  --bg:#0a0e17; --s1:#0f1520; --s2:#141c2b; --s3:#1a2438; --s4:#212e45;
+  --b1:#1c2842; --b2:#263758; --b3:#304670;
+  --red:#ef4444; --red2:#f87171; --amber:#f59e0b; --amber2:#fbbf24;
+  --green:#10b981; --green2:#34d399; --blue:#2563eb; --blue2:#3b82f6; --blue3:#60a5fa;
+  --cyan:#06b6d4; --text:#e2e8f0; --text2:#94a3b8; --text3:#475569;
+  --head:'Bebas Neue',sans-serif; --ui:'DM Sans',sans-serif; --mono:'JetBrains Mono',monospace;
+  --radius:10px;
 }
-
 *{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100vh;overflow-x:hidden;}
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--ui);
-  min-height: 100vh;
-  overflow-x: hidden;
-  cursor: default;
-}
+/* ── TOP BAR ── */
+.topbar{position:sticky;top:0;z-index:500;background:var(--s1);border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 16px;height:48px;gap:12px;}
+.topbar-brand{display:flex;align-items:center;gap:8px;}
+.eye{width:22px;height:22px;border:2px solid var(--red);border-radius:50%;position:relative;flex-shrink:0;}
+.eye::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:8px;height:8px;background:var(--red);border-radius:50%;animation:pulse 2s ease-in-out infinite;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}
+.brand-title{font-family:var(--head);font-size:22px;letter-spacing:.12em;color:var(--text);line-height:1;}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+.status{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--text2);letter-spacing:.06em;}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--text3);}
+.gear-btn{background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px;}
+.gear-btn:hover{color:var(--text);}
 
-/* Grid texture */
-body::after {
-  content:'';
-  position:fixed;
-  inset:0;
-  background-image:
-    linear-gradient(rgba(29,83,150,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(29,83,150,0.03) 1px, transparent 1px);
-  background-size: 40px 40px;
-  pointer-events:none;
-  z-index:0;
-}
+/* ── ACTION BAR ── */
+.action-bar{background:var(--s2);border-bottom:1px solid var(--b1);padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.period-group{display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--b2);}
+.period-group button{background:var(--s1);border:none;color:var(--text2);font-family:var(--ui);font-size:12px;font-weight:600;padding:6px 14px;cursor:pointer;transition:all .15s;}
+.period-group button:hover{background:var(--s3);color:var(--text);}
+.period-group button.active{background:var(--blue);color:#fff;}
+.action-bar input[type=date]{background:var(--s1);border:1px solid var(--b2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:6px;width:140px;}
+.run-btn{background:linear-gradient(135deg,var(--red),#dc2626);color:#fff;border:none;font-family:var(--head);font-size:16px;letter-spacing:.1em;padding:8px 20px;border-radius:6px;cursor:pointer;transition:all .2s;white-space:nowrap;}
+.run-btn:hover{filter:brightness(1.15);transform:translateY(-1px);}
+.run-btn:disabled{opacity:.5;cursor:not-allowed;transform:none;}
 
-/* Scanlines */
-body::before {
-  content:'';
-  position:fixed;
-  inset:0;
-  background: repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.04) 3px,rgba(0,0,0,0.04) 4px);
-  pointer-events:none;
-  z-index:9999;
-}
+/* ── DATA SOURCES ── */
+.data-bar{background:var(--s1);border-bottom:1px solid var(--b1);padding:8px 16px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.data-bar .lbl{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.06em;text-transform:uppercase;margin-right:4px;}
+.src-btn{background:var(--s3);border:1px solid var(--b2);color:var(--text2);font-family:var(--ui);font-size:11px;font-weight:500;padding:5px 12px;border-radius:5px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.src-btn:hover{border-color:var(--blue2);color:var(--text);}
+.src-btn.loaded{border-color:var(--green);color:var(--green);}
+.upload-wrap{position:relative;overflow:hidden;display:inline-block;}
+.upload-wrap input[type=file]{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;left:0;top:0;}
 
-/* ── HEADER ── */
-.hdr {
-  position: sticky;
-  top: 0;
-  z-index: 500;
-  background: var(--s1);
-  border-bottom: 1px solid var(--b2);
-  display: flex;
-  align-items: stretch;
-  height: 52px;
-}
+/* ── KPIs ── */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--b1);border-bottom:1px solid var(--b1);}
+.kpi{background:var(--s1);padding:14px 16px;text-align:center;}
+.kpi-val{font-family:var(--head);font-size:28px;line-height:1;letter-spacing:.04em;}
+.kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-top:4px;}
+@media(max-width:480px){.kpi-row{grid-template-columns:repeat(2,1fr);}.kpi-val{font-size:24px;}}
 
-.hdr-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 24px;
-  border-right: 1px solid var(--b2);
-  background: linear-gradient(135deg, var(--s2), var(--s1));
-}
-
-.sentinel-eye {
-  width: 30px;
-  height: 30px;
-  border: 2px solid var(--red);
-  border-radius: 50%;
-  position: relative;
-  animation: eyePulse 3s ease-in-out infinite;
-}
-.sentinel-eye::after {
-  content:'';
-  position:absolute;
-  top:50%;left:50%;
-  transform:translate(-50%,-50%);
-  width:10px;height:10px;
-  background:var(--red);
-  border-radius:50%;
-}
-@keyframes eyePulse {
-  0%,100%{box-shadow:0 0 0 0 rgba(255,45,45,0.4);}
-  50%{box-shadow:0 0 0 8px rgba(255,45,45,0);}
-}
-
-.brand-text {
-  display:flex;flex-direction:column;
-}
-.brand-name {
-  font-family:var(--head);
-  font-size:20px;
-  font-weight:700;
-  letter-spacing:0.15em;
-  color:var(--text);
-  line-height:1;
-}
-.brand-sub {
-  font-family:var(--mono);
-  font-size:9px;
-  color:var(--text3);
-  letter-spacing:0.08em;
-  text-transform:uppercase;
-}
-
-.hdr-metrics {
-  display:flex;
-  align-items:center;
-  gap:0;
-  flex:1;
-  padding: 0 0 0 24px;
-}
-
-.hdr-metric {
-  display:flex;
-  flex-direction:column;
-  padding: 0 20px 0 0;
-  margin-right: 20px;
-  border-right: 1px solid var(--b1);
-}
-.hdr-metric:last-child{border:none;}
-
-.hm-val {
-  font-family:var(--head);
-  font-size:18px;
-  font-weight:600;
-  line-height:1;
-}
-.hm-lbl {
-  font-family:var(--mono);
-  font-size:8px;
-  color:var(--text3);
-  text-transform:uppercase;
-  letter-spacing:0.1em;
-  margin-top:2px;
-}
-
-.hdr-right {
-  display:flex;
-  align-items:center;
-  gap:16px;
-  padding:0 20px;
-  margin-left:auto;
-  border-left:1px solid var(--b1);
-}
-
-.status-pill {
-  display:flex;
-  align-items:center;
-  gap:6px;
-  padding:4px 12px;
-  border-radius:2px;
-  font-family:var(--mono);
-  font-size:10px;
-  letter-spacing:0.08em;
-  text-transform:uppercase;
-  border:1px solid var(--b2);
-  background:var(--s2);
-}
-.status-dot {
-  width:6px;height:6px;
-  border-radius:50%;
-  background:var(--text3);
-}
-.status-dot.active{background:var(--green);animation:pulse2 1.5s infinite;}
-.status-dot.running{background:var(--amber);animation:pulse2 0.8s infinite;}
-@keyframes pulse2{0%,100%{opacity:1;}50%{opacity:0.3;}}
-
-/* ── LAYOUT ── */
-.app {
-  display:grid;
-  grid-template-columns: 300px 1fr;
-  height: calc(100vh - 52px);
-  position:relative;
-  z-index:1;
-}
-
-/* ── SIDEBAR ── */
-.sidebar {
-  background: var(--s1);
-  border-right: 1px solid var(--b1);
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-}
-
-.sb-scroll {
-  flex:1;
-  overflow-y:auto;
-  padding:0 0 80px 0;
-}
-
-.sb-section {
-  padding:16px;
-  border-bottom:1px solid var(--b1);
-}
-
-.sb-title {
-  font-family:var(--mono);
-  font-size:9px;
-  color:var(--text3);
-  letter-spacing:0.15em;
-  text-transform:uppercase;
-  margin-bottom:12px;
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-.sb-title::before {
-  content:'';
-  display:inline-block;
-  width:3px;height:3px;
-  background:var(--blue3);
-  border-radius:50%;
-}
-
-/* INPUTS */
-.field {
-  margin-bottom:10px;
-}
-.field label {
-  display:block;
-  font-family:var(--mono);
-  font-size:9px;
-  color:var(--text3);
-  letter-spacing:0.1em;
-  text-transform:uppercase;
-  margin-bottom:4px;
-}
-.field input, .field select {
-  width:100%;
-  background:var(--s2);
-  border:1px solid var(--b2);
-  color:var(--text);
-  padding:7px 10px;
-  font-family:var(--mono);
-  font-size:11px;
-  border-radius:2px;
-  outline:none;
-  transition:border-color 0.15s, box-shadow 0.15s;
-}
-.field input:focus,.field select:focus {
-  border-color:var(--blue2);
-  box-shadow:0 0 0 2px rgba(41,121,200,0.15);
-}
-
-/* THRESHOLD */
-.thresh {
-  margin-bottom:14px;
-}
-.thresh-hd {
-  display:flex;
-  justify-content:space-between;
-  font-family:var(--mono);
-  font-size:9px;
-  color:var(--text3);
-  text-transform:uppercase;
-  letter-spacing:0.08em;
-  margin-bottom:5px;
-}
-.thresh-val { color:var(--amber); font-weight:700; }
-
-input[type=range] {
-  width:100%;
-  -webkit-appearance:none;
-  height:3px;
-  background:var(--b2);
-  border-radius:2px;
-  outline:none;
-}
-input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance:none;
-  width:12px;height:12px;
-  border-radius:50%;
-  background:var(--blue2);
-  cursor:pointer;
-  border:2px solid var(--bg);
-  box-shadow:0 0 6px rgba(41,121,200,0.5);
-}
-
-/* UPLOAD */
-.upzone {
-  border:1px dashed var(--b3);
-  border-radius:2px;
-  padding:14px;
-  text-align:center;
-  cursor:pointer;
-  transition:all 0.2s;
-  background:var(--s2);
-  margin-bottom:8px;
-  position:relative;
-  overflow:hidden;
-}
-.upzone::before {
-  content:'';
-  position:absolute;
-  inset:0;
-  background:linear-gradient(135deg, transparent 40%, rgba(41,121,200,0.04));
-}
-.upzone:hover{border-color:var(--blue2);background:var(--s3);}
-.upzone input{display:none;}
-.upzone p{font-family:var(--mono);font-size:10px;color:var(--text3);position:relative;}
-.upzone.loaded p{color:var(--green);}
-
-/* WEIGHT PILLS */
-.weight-grid {
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:6px;
-}
-.weight-pill {
-  background:var(--s2);
-  border:1px solid var(--b1);
-  border-radius:2px;
-  padding:8px;
-}
-.weight-pill-name {
-  font-family:var(--mono);
-  font-size:8px;
-  color:var(--text3);
-  text-transform:uppercase;
-  letter-spacing:0.08em;
-  margin-bottom:4px;
-}
-.weight-pill-val {
-  font-family:var(--head);
-  font-size:16px;
-  font-weight:600;
-  color:var(--blue3);
-}
-.weight-pill-pts {
-  font-family:var(--mono);
-  font-size:8px;
-  color:var(--text3);
-}
-
-/* SCORE BREAKDOWN */
-.score-breakdown {
-  display:flex;
-  flex-direction:column;
-  gap:4px;
-}
-.sbd-row {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-family:var(--mono);
-  font-size:9px;
-}
-.sbd-name{color:var(--text2);flex:1;}
-.sbd-bar-track{flex:2;height:3px;background:var(--b1);border-radius:2px;overflow:hidden;}
-.sbd-bar-fill{height:100%;border-radius:2px;transition:width 0.5s;}
-.sbd-pts{color:var(--text3);width:30px;text-align:right;}
-
-/* STAT QUAD */
-.stat-quad {
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:6px;
-}
-.sq-box {
-  background:var(--s2);
-  border:1px solid var(--b1);
-  border-radius:2px;
-  padding:10px 8px;
-  text-align:center;
-  position:relative;
-  overflow:hidden;
-}
-.sq-box::after {
-  content:'';
-  position:absolute;
-  bottom:0;left:0;right:0;
-  height:2px;
-}
-.sq-box.c::after{background:var(--red);}
-.sq-box.h::after{background:var(--amber);}
-.sq-box.m::after{background:var(--blue2);}
-.sq-box.ok::after{background:var(--green);}
-
-.sq-num {
-  font-family:var(--head);
-  font-size:32px;
-  font-weight:700;
-  line-height:1;
-}
-.sq-num.c{color:var(--red);}
-.sq-num.h{color:var(--amber);}
-.sq-num.m{color:var(--blue3);}
-.sq-num.ok{color:var(--green);}
-.sq-lbl{font-family:var(--mono);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;margin-top:2px;}
-
-/* BUTTONS */
-.btn {
-  display:flex;align-items:center;justify-content:center;gap:8px;
-  width:100%;padding:11px;
-  font-family:var(--head);font-size:15px;font-weight:600;
-  letter-spacing:0.1em;text-transform:uppercase;
-  border:none;border-radius:2px;cursor:pointer;
-  transition:all 0.15s;margin-bottom:6px;
-}
-.btn-run {
-  background:linear-gradient(135deg, #c41f1f, var(--red));
-  color:#fff;
-  box-shadow:0 2px 20px rgba(255,45,45,0.25);
-}
-.btn-run:hover{box-shadow:0 4px 30px rgba(255,45,45,0.4);transform:translateY(-1px);}
-.btn-run:disabled{background:var(--s3);box-shadow:none;transform:none;cursor:not-allowed;color:var(--text3);}
-.btn-ghost {
-  background:transparent;
-  color:var(--text2);
-  border:1px solid var(--b2);
-}
-.btn-ghost:hover{border-color:var(--blue2);color:var(--text);}
-.btn-sm {
-  padding:5px 12px;font-size:12px;width:auto;margin-bottom:0;border-radius:2px;
-}
-.btn-blue {
-  background:var(--blue);color:#fff;
-}
-.btn-blue:hover{background:var(--blue2);}
-.btn-amber {
-  background:rgba(255,176,32,0.15);
-  color:var(--amber);
-  border:1px solid rgba(255,176,32,0.3);
-}
-.btn-amber:hover{background:rgba(255,176,32,0.25);}
-
-/* LOG */
-.log {
-  background:var(--bg);
-  border:1px solid var(--b1);
-  border-radius:2px;
-  height:110px;
-  overflow-y:auto;
-  padding:8px;
-  font-family:var(--mono);
-  font-size:10px;
-}
-.log-line{margin-bottom:2px;line-height:1.4;}
-.log-line.info{color:var(--text3);}
-.log-line.warn{color:var(--amber);}
-.log-line.err{color:var(--red2);}
-.log-line.ok{color:var(--green);}
-.log-line.hi{color:var(--blue3);}
-
-/* ── MAIN ── */
-.main {
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-}
-
-/* TABS */
-.tabs {
-  display:flex;
-  background:var(--s1);
-  border-bottom:1px solid var(--b1);
-  padding: 0 20px;
-  gap:4px;
-  flex-shrink:0;
-}
-.tab {
-  padding:14px 18px;
-  font-family:var(--head);
-  font-size:13px;
-  font-weight:600;
-  letter-spacing:0.08em;
-  text-transform:uppercase;
-  color:var(--text3);
-  cursor:pointer;
-  border:none;
-  background:none;
-  border-bottom:3px solid transparent;
-  transition:all 0.15s;
-  position:relative;
-}
+/* ── TABS ── */
+.tab-bar{display:flex;background:var(--s2);border-bottom:1px solid var(--b1);overflow-x:auto;}
+.tab{background:none;border:none;color:var(--text3);font-family:var(--ui);font-size:13px;font-weight:600;padding:10px 20px;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;}
 .tab:hover{color:var(--text2);}
-.tab.active{color:var(--text);border-bottom-color:var(--red);}
+.tab.active{color:var(--text);border-bottom-color:var(--blue);}
 
-/* CONTENT */
-.content {
-  flex:1;
-  overflow-y:auto;
-  padding:20px;
-}
+/* ── CONTENT ── */
+.content-area{padding:16px;min-height:50vh;}
+.content{display:none;}
+.content.visible{display:block;}
 
-/* EMPTY */
-.empty {
-  display:flex;flex-direction:column;
-  align-items:center;justify-content:center;
-  height:100%;min-height:300px;
-  color:var(--text3);text-align:center;
-}
-.empty-gfx {
-  font-size:60px;margin-bottom:20px;opacity:0.15;
-  animation:float 4s ease-in-out infinite;
-}
-@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
-.empty h2{font-family:var(--head);font-size:22px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;color:var(--text2);margin-bottom:8px;}
-.empty p{font-size:13px;max-width:380px;line-height:1.7;color:var(--text3);}
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:60px 20px;}
+.empty-icon{font-size:48px;margin-bottom:12px;opacity:.6;}
+.empty h2{font-family:var(--head);font-size:28px;letter-spacing:.08em;margin-bottom:8px;}
+.empty p{color:var(--text2);font-size:14px;max-width:420px;margin:0 auto;line-height:1.6;}
 
-/* FILTER BAR */
-.filter-bar {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  margin-bottom:16px;
-  flex-wrap:wrap;
-}
-.fb-btn {
-  padding:5px 14px;
-  font-family:var(--mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase;
-  border:1px solid var(--b2);background:var(--s2);color:var(--text3);
-  border-radius:2px;cursor:pointer;transition:all 0.15s;
-}
-.fb-btn.active,.fb-btn:hover{border-color:var(--red);color:var(--red2);}
-.fb-btn.ah.active,.fb-btn.ah:hover{border-color:var(--amber);color:var(--amber);}
-.fb-btn.am.active,.fb-btn.am:hover{border-color:var(--blue2);color:var(--blue3);}
-.fb-btn.al.active,.fb-btn.al:hover{border-color:var(--text3);color:var(--text2);}
+/* ── DRIVER CARDS ── */
+.driver-stack{display:flex;flex-direction:column;gap:8px;}
+.dcard{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);overflow:hidden;transition:border-color .2s;}
+.dcard:hover{border-color:var(--b3);}
+.dcard-head{display:flex;align-items:center;padding:14px 16px;gap:14px;cursor:pointer;user-select:none;}
+.dcard-rank{font-family:var(--head);font-size:28px;color:var(--text3);width:36px;text-align:center;flex-shrink:0;letter-spacing:.04em;}
+.dcard-info{flex:1;min-width:0;}
+.dcard-name{font-family:var(--ui);font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dcard-meta{font-family:var(--mono);font-size:10px;color:var(--text2);margin-top:3px;}
+.dcard-score{width:50px;height:50px;border-radius:50%;border:3px solid;display:flex;align-items:center;justify-content:center;font-family:var(--head);font-size:22px;flex-shrink:0;}
+.dcard-body{display:none;padding:0 16px 14px 66px;border-top:1px solid var(--b1);}
+.dcard.expand .dcard-body{display:block;padding-top:12px;}
+.flag-line{font-family:var(--mono);font-size:11px;margin-bottom:4px;display:flex;align-items:baseline;gap:6px;}
+.flag-sev{font-size:12px;}
+.flag-label{font-weight:700;min-width:90px;}
+.flag-detail{color:var(--text2);}
+.stolen-line{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--red);margin-top:8px;padding-top:8px;border-top:1px solid var(--b1);}
+.timeline-bar{margin-top:10px;height:28px;background:var(--s1);border-radius:4px;position:relative;overflow:hidden;}
+.expand-ico{margin-left:auto;color:var(--text3);font-size:12px;transition:transform .2s;}
+.dcard.expand .expand-ico{transform:rotate(180deg);}
 
-.sort-select {
-  margin-left:auto;
-  background:var(--s2);border:1px solid var(--b2);color:var(--text2);
-  padding:5px 10px;font-family:var(--mono);font-size:10px;
-  border-radius:2px;outline:none;cursor:pointer;
-}
-
-/* DRIVER CARDS */
-.driver-stack {
-  display:flex;flex-direction:column;gap:8px;
-}
-
-.dcard {
-  background:var(--s1);
-  border:1px solid var(--b1);
-  border-radius:3px;
-  overflow:hidden;
-  animation:cardIn 0.25s ease forwards;
-  opacity:0;
-  transform:translateY(6px);
-  position:relative;
-}
-@keyframes cardIn{to{opacity:1;transform:translateY(0);}}
-
-.dcard::before {
-  content:'';
-  position:absolute;
-  left:0;top:0;bottom:0;
-  width:4px;
-}
-.dcard.critical::before{background:linear-gradient(180deg,var(--red),#8b0000);}
-.dcard.high::before{background:linear-gradient(180deg,var(--amber),#8b5e00);}
-.dcard.medium::before{background:linear-gradient(180deg,var(--blue2),var(--blue));}
-.dcard.low::before{background:var(--b2);}
-
-/* CARD HEADER */
-.dc-hd {
-  display:grid;
-  grid-template-columns: 48px 1fr auto auto auto;
-  align-items:center;
-  gap:14px;
-  padding:14px 16px 14px 20px;
-  cursor:pointer;
-  user-select:none;
-  transition:background 0.15s;
-}
-.dc-hd:hover{background:var(--s2);}
-
-.dc-rank {
-  font-family:var(--head);
-  font-size:26px;
-  font-weight:300;
-  color:var(--b3);
-  text-align:center;
-  line-height:1;
-}
-
-.dc-info h3 {
-  font-family:var(--head);
-  font-size:17px;
-  font-weight:600;
-  letter-spacing:0.04em;
-}
-
-.dc-meta {
-  display:flex;gap:10px;flex-wrap:wrap;margin-top:3px;
-}
-.dc-tag {
-  font-family:var(--mono);
-  font-size:9px;
-  color:var(--text3);
-}
-.dc-tag b{color:var(--text2);}
-
-/* SCORE RING */
-.score-ring {
-  position:relative;
-  width:52px;height:52px;
-  flex-shrink:0;
-}
-.score-ring svg{position:absolute;inset:0;transform:rotate(-90deg);}
-.score-ring-num {
-  position:absolute;
-  inset:0;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  font-family:var(--head);
-  font-size:14px;
-  font-weight:700;
-  line-height:1;
-}
-.score-ring-lbl{font-family:var(--mono);font-size:6px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;margin-top:1px;}
-
-/* RISK BADGE */
-.rbadge {
-  padding:4px 10px;
-  font-family:var(--mono);font-size:10px;font-weight:700;
-  letter-spacing:0.1em;text-transform:uppercase;
-  border-radius:2px;
-  min-width:80px;text-align:center;
-  flex-shrink:0;
-}
-.rbadge.critical{background:rgba(255,45,45,0.1);color:var(--red);border:1px solid rgba(255,45,45,0.25);}
-.rbadge.high{background:rgba(255,176,32,0.1);color:var(--amber);border:1px solid rgba(255,176,32,0.25);}
-.rbadge.medium{background:rgba(41,121,200,0.1);color:var(--blue3);border:1px solid rgba(41,121,200,0.25);}
-.rbadge.low{background:var(--s2);color:var(--text3);border:1px solid var(--b1);}
-
-.expand-ico{color:var(--text3);font-size:14px;transition:transform 0.2s;background:none;border:none;cursor:pointer;padding:4px;}
-.expand-ico.open{transform:rotate(180deg);}
-
-/* CARD BODY */
-.dc-body{display:none;border-top:1px solid var(--b1);background:var(--s2);}
-.dc-body.open{display:block;}
-
-/* LAYER GRID */
-.layer-grid {
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:1px;
-  background:var(--b1);
-  border-bottom:1px solid var(--b1);
-}
-.layer-cell {
-  background:var(--s1);
-  padding:10px 12px;
-  display:flex;flex-direction:column;gap:2px;
-}
-.lc-name{font-family:var(--mono);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em;}
-.lc-val{font-family:var(--head);font-size:18px;font-weight:600;line-height:1;}
-.lc-sub{font-family:var(--mono);font-size:8px;color:var(--text3);}
-.lc-bar{height:2px;background:var(--b2);border-radius:1px;overflow:hidden;margin-top:4px;}
-.lc-bar-fill{height:100%;border-radius:1px;transition:width 0.6s;}
-
-/* FLAG LIST */
-.flag-list{padding:12px 16px;display:flex;flex-direction:column;gap:6px;}
-
-.flag-row {
-  display:grid;
-  grid-template-columns:24px 1fr auto auto;
-  align-items:center;
-  gap:12px;
-  background:var(--s1);
-  border:1px solid var(--b1);
-  border-radius:2px;
-  padding:10px 12px;
-  position:relative;
-  overflow:hidden;
-}
-.flag-row::before{
-  content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
-}
-.flag-row.sev-critical::before{background:var(--red);}
-.flag-row.sev-high::before{background:var(--amber);}
-.flag-row.sev-medium::before{background:var(--blue2);}
-
-.flag-ico{font-size:14px;text-align:center;}
-.flag-txt h4{font-size:13px;font-weight:500;margin-bottom:2px;}
-.flag-txt p{font-family:var(--mono);font-size:10px;color:var(--text2);}
-.flag-pts{font-family:var(--mono);font-size:11px;font-weight:700;white-space:nowrap;}
-.flag-pts.c{color:var(--red2);}
-.flag-pts.h{color:var(--amber);}
-.flag-pts.m{color:var(--blue3);}
-
-.cam-btn {
-  background:rgba(30,91,146,0.2);
-  border:1px solid rgba(45,121,200,0.3);
-  color:var(--blue3);
-  padding:4px 10px;
-  font-family:var(--mono);font-size:9px;
-  border-radius:2px;cursor:pointer;white-space:nowrap;
-  transition:all 0.15s;
-}
-.cam-btn:hover{background:rgba(30,91,146,0.4);}
-
-/* TIMELINE */
-.timeline-wrap{padding:0 16px 16px;}
-.tl-title{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;}
-
-.tl-track {
-  position:relative;
-  padding-left:16px;
-  border-left:1px solid var(--b2);
-  display:flex;flex-direction:column;gap:4px;
-  max-height:180px;overflow-y:auto;
-}
-.tl-event {
-  display:grid;
-  grid-template-columns:70px 1fr;
-  gap:10px;
-  align-items:flex-start;
-  font-size:11px;
-  position:relative;
-}
-.tl-event::before{
-  content:'';
-  position:absolute;
-  left:-20px;top:6px;
-  width:7px;height:7px;
-  border-radius:50%;
-  background:var(--b2);
-  border:1px solid var(--b3);
-}
-.tl-event.flag-event::before{background:var(--red);border-color:var(--red2);box-shadow:0 0 6px rgba(255,45,45,0.4);}
-.tl-event.stop-event::before{background:var(--amber);border-color:var(--amber2);}
-.tl-event.move-event::before{background:var(--green);border-color:var(--green2);}
-
-.tl-time{font-family:var(--mono);font-size:10px;color:var(--text3);}
-.tl-desc{color:var(--text2);font-family:var(--mono);font-size:10px;line-height:1.4;}
-
-/* PEER BENCH */
-.peer-bar-wrap{padding:0 16px 16px;}
-.peer-bars{display:flex;flex-direction:column;gap:6px;}
-.peer-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;}
-.peer-name{width:120px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.peer-track{flex:1;height:8px;background:var(--b1);border-radius:2px;overflow:hidden;}
-.peer-fill{height:100%;border-radius:2px;transition:width 0.5s;}
-.peer-score{width:40px;text-align:right;color:var(--text3);}
-
-/* BOTTOM BAR */
-.sb-footer {
-  position:sticky;
-  bottom:0;
-  background:var(--s1);
-  border-top:1px solid var(--b1);
-  padding:12px 16px;
-}
+/* ── FILTER BAR ── */
+.filter-bar{display:flex;align-items:center;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+.fb-btn{background:var(--s3);border:1px solid var(--b2);color:var(--text2);font-family:var(--ui);font-size:12px;font-weight:500;padding:5px 12px;border-radius:5px;cursor:pointer;}
+.fb-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;}
+.sort-select{background:var(--s3);border:1px solid var(--b2);color:var(--text2);font-family:var(--ui);font-size:11px;padding:5px 8px;border-radius:5px;margin-left:auto;}
 
 /* ── REPORT TAB ── */
-.rpt-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
-.kpi-card{
-  background:var(--s1);border:1px solid var(--b1);border-radius:3px;
-  padding:16px;position:relative;overflow:hidden;
-}
-.kpi-card::after{
-  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
-}
-.kpi-card.red::after{background:var(--red);}
-.kpi-card.amber::after{background:var(--amber);}
-.kpi-card.blue::after{background:var(--blue2);}
-.kpi-card.green::after{background:var(--green);}
+.rpt-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;}
+.rpt-kpi{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;text-align:center;}
+.rpt-kpi-val{font-family:var(--head);font-size:24px;letter-spacing:.04em;}
+.rpt-kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;}
+.rpt-table{width:100%;border-collapse:collapse;font-size:12px;}
+.rpt-table th{font-family:var(--mono);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:8px;border-bottom:1px solid var(--b2);}
+.rpt-table td{padding:8px;border-bottom:1px solid var(--b1);font-family:var(--mono);font-size:11px;}
 
-.kpi-val{font-family:var(--head);font-size:40px;font-weight:700;line-height:1;}
-.kpi-val.red{color:var(--red);}
-.kpi-val.amber{color:var(--amber);}
-.kpi-val.blue{color:var(--blue3);}
-.kpi-val.green{color:var(--green);}
-.kpi-name{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;}
-.kpi-sub{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:4px;}
+/* ── ALGO TAB ── */
+.algo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;}
+.algo-card{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:16px;}
+.algo-card h3{font-family:var(--ui);font-size:14px;font-weight:700;margin-bottom:10px;color:var(--text);}
+.algo-row{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:11px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--b1);}
+.algo-pts{font-weight:700;flex-shrink:0;}
 
-/* REPORT TABLE */
-.rpt-table{width:100%;border-collapse:collapse;background:var(--s1);border:1px solid var(--b1);border-radius:3px;overflow:hidden;}
-.rpt-table th{
-  padding:10px 12px;text-align:left;
-  font-family:var(--mono);font-size:8px;color:var(--text3);
-  text-transform:uppercase;letter-spacing:0.12em;
-  background:var(--s2);border-bottom:1px solid var(--b2);
-}
-.rpt-table td{padding:10px 12px;border-bottom:1px solid var(--b1);vertical-align:middle;}
-.rpt-table tr:last-child td{border-bottom:none;}
-.rpt-table tr:hover td{background:var(--s2);}
+/* ── LOG PANEL ── */
+.log-footer{position:fixed;bottom:0;left:0;right:0;z-index:400;background:var(--s1);border-top:1px solid var(--b1);transition:transform .3s;}
+.log-footer.collapsed{transform:translateY(calc(100% - 32px));}
+.log-toggle{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text3);user-select:none;}
+.log-toggle:hover{color:var(--text2);}
+.log-body{height:140px;overflow-y:auto;padding:4px 16px 8px;font-family:var(--mono);font-size:10px;}
+.log-line{padding:2px 0;color:var(--text2);border-bottom:1px solid rgba(255,255,255,.02);}
+.log-line.ok{color:var(--green);}
+.log-line.hi{color:var(--cyan);}
+.log-line.warn{color:var(--amber);}
+.log-line.err{color:var(--red);}
 
-/* ALGORITHM TAB */
-.algo-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-.algo-card{
-  background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:16px;
-}
-.algo-card h3{
-  font-family:var(--mono);font-size:9px;color:var(--text3);
-  text-transform:uppercase;letter-spacing:0.12em;margin-bottom:12px;
-  padding-bottom:8px;border-bottom:1px solid var(--b1);
-}
-.algo-row{
-  display:flex;justify-content:space-between;align-items:baseline;
-  padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.03);
-  font-size:12px;
-}
-.algo-row:last-child{border:none;}
-.algo-pts{font-family:var(--mono);font-size:11px;font-weight:700;}
-
-/* MODAL */
-.modal-bg{
-  position:fixed;inset:0;
-  background:rgba(0,0,0,0.85);
-  backdrop-filter:blur(6px);
-  z-index:1000;
-  display:none;align-items:center;justify-content:center;
-}
+/* ── SETTINGS MODAL ── */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:center;justify-content:center;}
 .modal-bg.open{display:flex;}
-.modal{
-  background:var(--s1);
-  border:1px solid var(--b2);
-  border-top:3px solid var(--blue2);
-  border-radius:4px;
-  padding:24px;
-  max-width:500px;width:90%;
-  animation:modalIn 0.2s ease;
-}
-@keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(0.97);}to{opacity:1;transform:none;}}
-.modal h2{
-  font-family:var(--head);font-size:18px;font-weight:600;
-  letter-spacing:0.06em;text-transform:uppercase;
-  margin-bottom:16px;display:flex;align-items:center;gap:10px;
-}
-.modal-info{
-  background:var(--s2);border:1px solid var(--b2);border-radius:2px;
-  padding:12px;margin-bottom:16px;
-}
-.modal-info p{font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:5px;}
-.modal-info p:last-child{margin-bottom:0;}
-.modal-info strong{color:var(--text);}
-.modal-actions{display:flex;gap:8px;justify-content:flex-end;}
-.modal-result{font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:12px;display:none;}
-.prog-bar{height:3px;background:var(--b1);border-radius:2px;overflow:hidden;margin-bottom:12px;display:none;}
-.prog-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue3));transition:width 0.2s;}
+.modal{background:var(--s2);border:1px solid var(--b2);border-radius:12px;padding:24px;width:92%;max-width:420px;max-height:85vh;overflow-y:auto;}
+.modal h2{font-family:var(--head);font-size:24px;letter-spacing:.08em;margin-bottom:16px;}
+.modal label{font-family:var(--mono);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:4px;margin-top:12px;}
+.modal input[type=range]{width:100%;accent-color:var(--blue);}
+.modal input[type=text],.modal input[type=number],.modal input[type=password]{width:100%;background:var(--s1);border:1px solid var(--b2);color:var(--text);font-family:var(--mono);font-size:12px;padding:8px;border-radius:6px;}
+.modal .thresh-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;}
+.modal .thresh-val{font-family:var(--mono);font-size:11px;color:var(--blue3);}
+.modal-close{background:var(--blue);border:none;color:#fff;font-family:var(--ui);font-weight:600;padding:10px 24px;border-radius:6px;cursor:pointer;width:100%;margin-top:20px;font-size:14px;}
 
-/* SCROLLBARS */
-::-webkit-scrollbar{width:5px;height:5px;}
-::-webkit-scrollbar-track{background:var(--bg);}
-::-webkit-scrollbar-thumb{background:var(--b2);border-radius:3px;}
+/* ── DASHCAM MODAL ── */
+.cam-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:950;align-items:center;justify-content:center;padding:20px;}
+.cam-modal.open{display:flex;}
+.cam-box{background:var(--s2);border:1px solid var(--b2);border-radius:12px;padding:24px;width:92%;max-width:460px;}
+.cam-box h3{font-family:var(--head);font-size:20px;letter-spacing:.08em;margin-bottom:12px;}
+.cam-box .field{margin-bottom:8px;}
+.cam-box .field label{font-family:var(--mono);font-size:10px;color:var(--text3);display:block;margin-bottom:3px;}
+.cam-box textarea{width:100%;background:var(--s1);border:1px solid var(--b2);color:var(--text);font-family:var(--ui);font-size:13px;padding:8px;border-radius:6px;resize:vertical;min-height:60px;}
+.cam-btns{display:flex;gap:8px;margin-top:12px;}
+.cam-btns button{flex:1;padding:10px;border-radius:6px;font-family:var(--ui);font-weight:600;cursor:pointer;border:none;font-size:13px;}
 
-/* SECTION TITLE */
-.sec-title{
-  font-family:var(--head);font-size:16px;font-weight:600;
-  letter-spacing:0.06em;text-transform:uppercase;
-  display:flex;align-items:center;gap:10px;
-  margin-bottom:14px;
-}
-.sec-badge{
-  background:var(--red);color:#fff;
-  font-family:var(--mono);font-size:9px;
-  padding:2px 8px;border-radius:2px;
-}
-
-@media(max-width:768px){
-  .app{grid-template-columns:1fr;}
-  .sidebar{display:none;}
-  .mobile-toggle{display:flex !important;}
-  .layer-grid{grid-template-columns:1fr 1fr;}
-  .rpt-kpis{grid-template-columns:1fr 1fr;}
+/* ── RESPONSIVE ── */
+@media(max-width:600px){
+  .action-bar{flex-direction:column;align-items:stretch;}
+  .action-bar input[type=date]{width:100%;}
+  .run-btn{width:100%;}
   .algo-grid{grid-template-columns:1fr;}
+  .content-area{padding:12px;}
+  .dcard-body{padding-left:16px;}
+  .rpt-kpis{grid-template-columns:repeat(2,1fr);}
 }
+/* pad bottom so log panel doesn't cover content */
+.content-area{padding-bottom:180px;}
 </style>
 </head>
 <body>
 
-<!-- HEADER -->
-<div class="hdr">
-  <button class="mobile-toggle" style="display:none;align-items:center;justify-content:center;background:none;border:1px solid rgba(255,255,255,0.3);border-radius:8px;color:#ff2d2d;font-size:20px;cursor:pointer;padding:6px 10px;margin-right:12px" id="mobileMenuBtn">&#9776;</button>
-  <div class="hdr-brand">
-    <div class="sentinel-eye"></div>
-    <div class="brand-text">
-      <div class="brand-name">SENTINEL</div>
-      <div class="brand-sub">Davis Delivery // Time Theft Detection v2.0</div>
-    </div>
-  </div>
-  <div class="hdr-metrics">
-    <div class="hdr-metric">
-      <div class="hm-val" id="hmDrivers" style="color:var(--blue3)">—</div>
-      <div class="hm-lbl">Drivers Analyzed</div>
-    </div>
-    <div class="hdr-metric">
-      <div class="hm-val" id="hmFlagged" style="color:var(--red)">—</div>
-      <div class="hm-lbl">Flagged</div>
-    </div>
-    <div class="hdr-metric">
-      <div class="hm-val" id="hmHours" style="color:var(--amber)">—</div>
-      <div class="hm-lbl">Est. Stolen Hrs</div>
-    </div>
-    <div class="hdr-metric">
-      <div class="hm-val" id="hmDollars" style="color:var(--amber2)">—</div>
-      <div class="hm-lbl">Est. $ Lost</div>
-    </div>
-  </div>
-  <div class="hdr-right">
-    <div class="status-pill">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusTxt">STANDBY</span>
-    </div>
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-brand"><div class="eye"></div><span class="brand-title">SENTINEL</span></div>
+  <div class="topbar-right">
+    <span id="lastRun" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></span>
+    <div class="status"><div class="status-dot" id="statusDot"></div><span id="statusTxt">STANDBY</span></div>
+    <button class="gear-btn" onclick="openSettings()">⚙</button>
   </div>
 </div>
 
-<!-- APP -->
-<div class="app">
-
-<!-- SIDEBAR -->
-<div class="sidebar">
-<div class="sb-scroll">
-
-  <!-- MOTIVE -->
-  <div class="sb-section">
-    <div class="sb-title">Motive API</div>
-    <div class="field">
-      <label>API Key</label>
-      <input type="password" id="motiveKey" value="2eb96247-8869-4f47-8062-6964c1dc77a8">
-    </div>
-    <div class="field">
-      <label>Audit Date</label>
-      <input type="date" id="auditDate">
-    </div>
-    <div class="field">
-      <label style="margin-bottom:4px;">Period</label>
-      <div style="display:flex;gap:4px;margin-bottom:6px;">
-        <button class="btn btn-ghost" id="pDay" onclick="setPeriod('day')" style="flex:1;padding:5px 2px;font-size:11px;background:var(--blue);border-color:var(--blue2);color:#fff;">Day</button>
-        <button class="btn btn-ghost" id="pWeek" onclick="setPeriod('week')" style="flex:1;padding:5px 2px;font-size:11px;">Week</button>
-        <button class="btn btn-ghost" id="pMonth" onclick="setPeriod('month')" style="flex:1;padding:5px 2px;font-size:11px;">Month</button>
-      </div>
-    </div>
-    <div class="field">
-      <label>Driver Wage ($/hr)</label>
-      <input type="number" id="wageRate" value="23" min="10" max="50">
-    </div>
+<!-- ACTION BAR -->
+<div class="action-bar">
+  <div class="period-group">
+    <button id="pDay" class="active" onclick="setPeriod('day')">DAY</button>
+    <button id="pWeek" onclick="setPeriod('week')">WEEK</button>
+    <button id="pMonth" onclick="setPeriod('month')">MONTH</button>
   </div>
-
-  <!-- TIME CLOCK -->
-  <div class="sb-section">
-    <div class="sb-title">Time Clock Data</div>
-    <div class="upzone" id="upZone" onclick="document.getElementById('tcFile').click()">
-      <input type="file" id="tcFile" accept=".csv,.txt" onchange="parseCSV(event)">
-      <p id="upLabel">📋 Upload clock-in/out CSV</p>
-    </div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:8px;line-height:1.6;">
-      Expected columns:<br>name, truck, clock_in, clock_out
-    </div>
-    <button class="btn btn-run" onclick="fetchLiveClockData()" style="font-size:13px;padding:9px;margin-bottom:6px;">🔴 FETCH LIVE FROM B600</button>
-    <button class="btn btn-run" onclick="fetchMotiveHOS()" style="font-size:13px;padding:9px;margin-bottom:6px;background:linear-gradient(135deg,#1e5b92,#2979c8);">📡 FETCH FROM MOTIVE HOS</button>
-    <button class="btn btn-ghost" onclick="loadDemo()">⚡ Load Demo Data (8 drivers)</button>
-  </div>
-
-  <!-- THRESHOLDS -->
-  <div class="sb-section">
-    <div class="sb-title">Detection Thresholds</div>
-
-    <div class="thresh">
-      <div class="thresh-hd"><span>Unexplained Stop</span><span class="thresh-val" id="tv1">15 min</span></div>
-      <input type="range" min="5" max="45" value="15" id="t1" oninput="document.getElementById('tv1').textContent=this.value+' min'">
-    </div>
-    <div class="thresh">
-      <div class="thresh-hd"><span>Clock/Engine Gap</span><span class="thresh-val" id="tv2">60 min</span></div>
-      <input type="range" min="15" max="120" value="60" id="t2" oninput="document.getElementById('tv2').textContent=this.value+' min'">
-    </div>
-    <div class="thresh">
-      <div class="thresh-hd"><span>Late Start Buffer</span><span class="thresh-val" id="tv3">20 min</span></div>
-      <input type="range" min="5" max="45" value="20" id="t3" oninput="document.getElementById('tv3').textContent=this.value+' min'">
-    </div>
-    <div class="thresh">
-      <div class="thresh-hd"><span>Early Stop Buffer</span><span class="thresh-val" id="tv4">20 min</span></div>
-      <input type="range" min="5" max="45" value="20" id="t4" oninput="document.getElementById('tv4').textContent=this.value+' min'">
-    </div>
-    <div class="thresh">
-      <div class="thresh-hd"><span>Velocity Floor (mph)</span><span class="thresh-val" id="tv5">12 mph</span></div>
-      <input type="range" min="5" max="30" value="12" id="t5" oninput="document.getElementById('tv5').textContent=this.value+' mph'">
-    </div>
-    <div class="thresh">
-      <div class="thresh-hd"><span>Micro-Stop Cluster</span><span class="thresh-val" id="tv6">3 stops</span></div>
-      <input type="range" min="2" max="8" value="3" id="t6" oninput="document.getElementById('tv6').textContent=this.value+' stops'">
-    </div>
-    <div class="thresh">
-      <div class="thresh-hd"><span>Peer Score Deviation</span><span class="thresh-val" id="tv7">25%</span></div>
-      <input type="range" min="10" max="60" value="25" id="t7" oninput="document.getElementById('tv7').textContent=this.value+'%'">
-    </div>
-  </div>
-
-  <!-- STATS -->
-  <div class="sb-section">
-    <div class="sb-title">Risk Distribution</div>
-    <div class="stat-quad">
-      <div class="sq-box c"><div class="sq-num c" id="sc">0</div><div class="sq-lbl">Critical</div></div>
-      <div class="sq-box h"><div class="sq-num h" id="sh">0</div><div class="sq-lbl">High</div></div>
-      <div class="sq-box m"><div class="sq-num m" id="sm">0</div><div class="sq-lbl">Medium</div></div>
-      <div class="sq-box ok"><div class="sq-num ok" id="sl">0</div><div class="sq-lbl">Clean</div></div>
-    </div>
-  </div>
-
-  <!-- LOG -->
-  <div class="sb-section">
-    <div class="sb-title">Audit Log</div>
-    <div class="log" id="logPanel">
-      <div class="log-line info">SENTINEL v2.0 — system ready</div>
-    </div>
-  </div>
-
-</div><!-- end sb-scroll -->
-
-<!-- FOOTER BUTTONS -->
-<div class="sb-footer">
-  <button class="btn btn-run" id="runBtn" onclick="runAudit()">⚡ ENGAGE SENTINEL</button>
-  <button class="btn btn-ghost" onclick="exportCSV()">📊 Export Report CSV</button>
+  <input type="date" id="auditDate">
+  <button class="run-btn" id="runBtn" onclick="runAudit()">⚡ ENGAGE SENTINEL</button>
 </div>
-</div><!-- end sidebar -->
 
-<!-- MAIN -->
-<div class="main">
-  <div class="tabs">
-    <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
-    <button class="tab" onclick="showTab('report',this)">📊 Summary Report</button>
-    <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
+<!-- DATA SOURCES -->
+<div class="data-bar">
+  <span class="lbl">Clock data:</span>
+  <button class="src-btn" onclick="fetchMotiveHOS()">📡 Motive HOS</button>
+  <button class="src-btn" onclick="fetchLiveClockData()">🔴 B600</button>
+  <div class="upload-wrap">
+    <button class="src-btn" id="upZone">📋 CSV</button>
+    <input type="file" id="tcFile" accept=".csv,.txt" onchange="parseCSV(event)">
   </div>
+  <button class="src-btn" onclick="loadDemo()">⚡ Demo</button>
+  <span id="upLabel" style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-left:4px;"></span>
+</div>
 
-  <!-- FLAGS TAB -->
-  <div id="tab-flags" class="content">
+<!-- KPIs -->
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-val" id="hmDrivers" style="color:var(--blue3)">—</div><div class="kpi-lbl">Drivers</div></div>
+  <div class="kpi"><div class="kpi-val" id="hmFlagged" style="color:var(--red)">—</div><div class="kpi-lbl">Flagged</div></div>
+  <div class="kpi"><div class="kpi-val" id="hmHours" style="color:var(--amber)">—</div><div class="kpi-lbl">Est. Stolen</div></div>
+  <div class="kpi"><div class="kpi-val" id="hmDollars" style="color:var(--amber2)">—</div><div class="kpi-lbl">$ Lost</div></div>
+</div>
+
+<!-- TABS -->
+<div class="tab-bar">
+  <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
+  <button class="tab" onclick="showTab('report',this)">📊 Report</button>
+  <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
+</div>
+
+<!-- CONTENT -->
+<div class="content-area">
+  <!-- FLAGS -->
+  <div id="tab-flags" class="content visible">
     <div class="empty" id="emptyState">
-      <div class="empty-gfx">👁️</div>
-      <h2>Sentinel is watching</h2>
-      <p>Load driver time clock data and run the audit. Sentinel will cross-reference GPS telemetry, velocity physics, micro-stop patterns, peer benchmarking, and 8 detection layers to surface time theft.</p>
+      <div class="empty-icon">👁️</div>
+      <h2>SENTINEL IS WATCHING</h2>
+      <p>Load driver clock data (Motive HOS, B600, or CSV), then hit ENGAGE SENTINEL. The 8-layer analysis cross-references GPS telemetry against clock records to surface time theft.</p>
     </div>
     <div id="flagsContent" style="display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <div class="sec-title">
-          Driver Threat Board
-          <span class="sec-badge" id="flagBadge">0 flagged</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div style="font-family:var(--ui);font-size:16px;font-weight:700;">
+          Threat Board <span id="flagBadge" style="background:var(--red);color:#fff;padding:2px 10px;border-radius:4px;font-size:11px;font-family:var(--mono);margin-left:6px;">0</span>
         </div>
+        <button class="src-btn" onclick="exportCSV()" style="font-size:10px;">📥 Export</button>
       </div>
       <div class="filter-bar">
         <button class="fb-btn active" onclick="setFilter('all',this)">All</button>
         <button class="fb-btn" onclick="setFilter('critical',this)">🔴 Critical</button>
-        <button class="fb-btn ah" onclick="setFilter('high',this)">🟡 High</button>
-        <button class="fb-btn am" onclick="setFilter('medium',this)">🔵 Medium</button>
-        <button class="fb-btn al" onclick="setFilter('low',this)">⚪ Clean</button>
+        <button class="fb-btn" onclick="setFilter('high',this)">🟡 High</button>
+        <button class="fb-btn" onclick="setFilter('medium',this)">🔵 Medium</button>
+        <button class="fb-btn" onclick="setFilter('low',this)">⚪ Clean</button>
         <select class="sort-select" onchange="setSort(this.value)">
-          <option value="score">Sort: Risk Score</option>
-          <option value="stolen">Sort: Stolen Hours</option>
-          <option value="flags">Sort: Flag Count</option>
-          <option value="name">Sort: Name A-Z</option>
+          <option value="score">Score</option>
+          <option value="stolen">Stolen Hrs</option>
+          <option value="flags">Flags</option>
+          <option value="name">Name A-Z</option>
         </select>
       </div>
       <div class="driver-stack" id="driverStack"></div>
     </div>
   </div>
 
-  <!-- REPORT TAB -->
-  <div id="tab-report" class="content" style="display:none;">
-    <div class="empty" id="rptEmpty">
-      <div class="empty-gfx">📊</div>
-      <h2>No Report Yet</h2>
-      <p>Run an audit to generate the summary report.</p>
-    </div>
+  <!-- REPORT -->
+  <div id="tab-report" class="content">
+    <div class="empty" id="rptEmpty"><div class="empty-icon">📊</div><h2>NO REPORT YET</h2><p>Run an audit to generate the summary.</p></div>
     <div id="rptContent" style="display:none;">
       <div class="rpt-kpis" id="rptKpis"></div>
-      <div class="sec-title" style="margin-bottom:12px;">Full Driver Breakdown</div>
+      <div style="font-family:var(--ui);font-size:16px;font-weight:700;margin-bottom:12px;">Driver Breakdown</div>
       <table class="rpt-table" id="rptTable"></table>
     </div>
   </div>
 
-  <!-- ALGORITHM TAB -->
-  <div id="tab-algo" class="content" style="display:none;">
-    <div class="sec-title" style="margin-bottom:16px;">Detection Algorithm — 8 Layers</div>
+  <!-- ALGORITHM -->
+  <div id="tab-algo" class="content">
+    <div style="font-family:var(--ui);font-size:16px;font-weight:700;margin-bottom:16px;">Detection Algorithm — 8 Layers</div>
     <div class="algo-grid">
-
       <div class="algo-card">
         <h3>Layer 1–4: Time & Motion</h3>
-        <div class="algo-row"><span>⏱️ Clock vs Engine time gap &gt; threshold</span><span class="algo-pts" style="color:var(--red2)">+35</span></div>
-        <div class="algo-row"><span>🚀 Velocity too low between stops (dawdling)</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
-        <div class="algo-row"><span>📐 Miles driven vs clocked hours mismatch</span><span class="algo-pts" style="color:var(--red2)">+30</span></div>
-        <div class="algo-row"><span>🌅 Late first GPS movement after clock-in</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
-        <div class="algo-row"><span>🏁 Truck stopped moving before clock-out</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
-        <div class="algo-row"><span>🚨 GPS movement detected after clock-out</span><span class="algo-pts" style="color:var(--red2)">+45</span></div>
+        <div class="algo-row"><span>⏱️ Clock vs Engine time gap</span><span class="algo-pts" style="color:var(--red2)">+35</span></div>
+        <div class="algo-row"><span>🚀 Low effective velocity</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
+        <div class="algo-row"><span>📐 Miles vs hours mismatch</span><span class="algo-pts" style="color:var(--red2)">+30</span></div>
+        <div class="algo-row"><span>🌅 Late first GPS movement</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>🏁 Stopped before clock-out</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>🚨 GPS after clock-out</span><span class="algo-pts" style="color:var(--red2)">+45</span></div>
       </div>
-
       <div class="algo-card">
-        <h3>Layer 5–6: Stop Pattern Analysis</h3>
-        <div class="algo-row"><span>🅿️ Unexplained stop at unknown location</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
-        <div class="algo-row"><span>🔁 Micro-stop cluster (many short stops)</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
-        <div class="algo-row"><span>🗺️ Repeated same non-delivery location</span><span class="algo-pts" style="color:var(--amber)">+15</span></div>
-        <div class="algo-row"><span>🔴 Warehouse geofence — clocked not moving</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
-        <div class="algo-row"><span>📍 Route deviation &gt;2mi from expected path</span><span class="algo-pts" style="color:var(--blue3)">+10</span></div>
-        <div class="algo-row"><span>⏳ Excessive dwell vs stop type baseline</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <h3>Layer 5–6: Stop Patterns</h3>
+        <div class="algo-row"><span>🅿️ Unexplained stop</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
+        <div class="algo-row"><span>🔁 Micro-stop cluster</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>🗺️ Repeated non-delivery loc</span><span class="algo-pts" style="color:var(--amber)">+15</span></div>
+        <div class="algo-row"><span>🔴 Warehouse geofence idle</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
+        <div class="algo-row"><span>📍 Route deviation &gt;2mi</span><span class="algo-pts" style="color:var(--blue3)">+10</span></div>
+        <div class="algo-row"><span>⏳ Excessive dwell time</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
       </div>
-
       <div class="algo-card">
-        <h3>Layer 7: Personal Baseline Deviation</h3>
-        <div class="algo-row"><span>📈 Today's pace vs driver's own 30-day avg</span><span class="algo-pts" style="color:var(--amber)">+0–30</span></div>
-        <div class="algo-row"><span>Stop count below personal baseline</span><span class="algo-pts" style="color:var(--blue3)">+15</span></div>
-        <div class="algo-row"><span>Avg stop duration above personal baseline</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
-        <div class="algo-row"><span>Completion time vs personal avg for route</span><span class="algo-pts" style="color:var(--amber)">+25</span></div>
-        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--b1);">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);line-height:1.7;">
-            Baseline uses simulated 30-day history. Wire to Motive historical API for real baseline computation. Higher weight given to established drivers (60+ day history).
-          </div>
-        </div>
+        <h3>Layer 7: Personal Baseline</h3>
+        <div class="algo-row"><span>📈 Pace vs 30-day average</span><span class="algo-pts" style="color:var(--amber)">+0–30</span></div>
+        <div class="algo-row"><span>Stop count below baseline</span><span class="algo-pts" style="color:var(--blue3)">+15</span></div>
+        <div class="algo-row"><span>Avg stop duration above baseline</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
       </div>
-
       <div class="algo-card">
         <h3>Layer 8: Peer Benchmarking</h3>
-        <div class="algo-row"><span>Driver efficiency vs route peer group avg</span><span class="algo-pts" style="color:var(--amber)">+0–25</span></div>
-        <div class="algo-row"><span>Miles/hr below peer group floor</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
-        <div class="algo-row"><span>Stop rate below peer group floor</span><span class="algo-pts" style="color:var(--blue3)">+15</span></div>
-        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--b1);">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);line-height:1.7;">
-            Compares each driver against all drivers running similar routes (same day, same region). A 25%+ deviation from peer median triggers flags. Accounts for traffic — all peers on same day experience same conditions.
-          </div>
-        </div>
+        <div class="algo-row"><span>Efficiency vs peer group avg</span><span class="algo-pts" style="color:var(--amber)">+0–25</span></div>
+        <div class="algo-row"><span>Miles/hr below peer floor</span><span class="algo-pts" style="color:var(--amber)">+20</span></div>
+        <div class="algo-row"><span>Stop rate below peer floor</span><span class="algo-pts" style="color:var(--blue3)">+15</span></div>
       </div>
-
-      <div class="algo-card">
-        <h3>Risk Score Bands</h3>
-        <div class="algo-row"><span style="color:var(--red);">■ CRITICAL ≥ 80</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Immediate action + cam pull</span></div>
-        <div class="algo-row"><span style="color:var(--amber);">■ HIGH 50–79</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Manager review within 24h</span></div>
-        <div class="algo-row"><span style="color:var(--blue3);">■ MEDIUM 25–49</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Monitor 5-day pattern</span></div>
-        <div class="algo-row"><span style="color:var(--text3);">■ LOW &lt; 25</span><span style="font-family:var(--mono);font-size:10px;color:var(--text3);">Log only</span></div>
-      </div>
-
-      <div class="algo-card">
-        <h3>Planned Data Integrations</h3>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text2);line-height:2;">
-          <div>🔄 Live time clock API (pending software ID)</div>
-          <div>🔄 NuVizz stop completion cross-reference</div>
-          <div>🔄 Motive fuel card transaction geo-check</div>
-          <div>🔄 Samsara data comparison/fallback</div>
-          <div>🔄 7 and 30-day trend acceleration scoring</div>
-          <div>🔄 Customer geofence database (all stops)</div>
-          <div>🔄 Automated daily email digest</div>
-          <div>✅ Motive dash cam video recall API</div>
-        </div>
-      </div>
-
     </div>
   </div>
+</div>
 
-</div><!-- end main -->
-</div><!-- end app -->
+<!-- LOG FOOTER -->
+<div class="log-footer collapsed" id="logFooter">
+  <div class="log-toggle" onclick="toggleLog()">
+    <span>📋 System Log</span><span>▲</span>
+  </div>
+  <div class="log-body" id="logPanel"></div>
+</div>
 
-<!-- DASH CAM MODAL -->
-<div class="modal-bg" id="camBg">
+<!-- SETTINGS MODAL -->
+<div class="modal-bg" id="settingsModal">
   <div class="modal">
-    <h2>📹 Request Dash Cam</h2>
-    <div class="modal-info" id="camInfo"></div>
-    <div class="prog-bar" id="camProg"><div class="prog-fill" id="camFill" style="width:0%"></div></div>
-    <div class="modal-result" id="camResult"></div>
-    <div class="modal-actions">
-      <button class="btn btn-sm btn-ghost" onclick="closeCam()">Cancel</button>
-      <button class="btn btn-sm btn-blue" id="camConfirm" onclick="submitCam()">📹 Request Video</button>
+    <h2>SETTINGS</h2>
+    <label>Motive API Key</label>
+    <input type="password" id="motiveKey" value="2eb96247-8869-4f47-8062-6964c1dc77a8">
+    <label>Driver Wage ($/hr)</label>
+    <input type="number" id="wageRate" value="23" min="10" max="50">
+    <div style="margin-top:16px;font-family:var(--head);font-size:18px;letter-spacing:.08em;">THRESHOLDS</div>
+    <label><div class="thresh-row"><span>Unexplained Stop</span><span class="thresh-val" id="tv1">15 min</span></div></label>
+    <input type="range" min="5" max="45" value="15" id="t1" oninput="document.getElementById('tv1').textContent=this.value+' min'">
+    <label><div class="thresh-row"><span>Clock/Engine Gap</span><span class="thresh-val" id="tv2">60 min</span></div></label>
+    <input type="range" min="15" max="120" value="60" id="t2" oninput="document.getElementById('tv2').textContent=this.value+' min'">
+    <label><div class="thresh-row"><span>Late Start Buffer</span><span class="thresh-val" id="tv3">20 min</span></div></label>
+    <input type="range" min="5" max="45" value="20" id="t3" oninput="document.getElementById('tv3').textContent=this.value+' min'">
+    <label><div class="thresh-row"><span>Early Stop Buffer</span><span class="thresh-val" id="tv4">20 min</span></div></label>
+    <input type="range" min="5" max="45" value="20" id="t4" oninput="document.getElementById('tv4').textContent=this.value+' min'">
+    <label><div class="thresh-row"><span>Velocity Floor</span><span class="thresh-val" id="tv5">12 mph</span></div></label>
+    <input type="range" min="5" max="30" value="12" id="t5" oninput="document.getElementById('tv5').textContent=this.value+' mph'">
+    <label><div class="thresh-row"><span>Micro-Stop Cluster</span><span class="thresh-val" id="tv6">3 stops</span></div></label>
+    <input type="range" min="2" max="8" value="3" id="t6" oninput="document.getElementById('tv6').textContent=this.value+' stops'">
+    <label><div class="thresh-row"><span>Peer Deviation</span><span class="thresh-val" id="tv7">25%</span></div></label>
+    <input type="range" min="10" max="60" value="25" id="t7" oninput="document.getElementById('tv7').textContent=this.value+'%'">
+    <button class="modal-close" onclick="closeSettings()">DONE</button>
+  </div>
+</div>
+
+<!-- DASHCAM MODAL -->
+<div class="cam-modal" id="camBg">
+  <div class="cam-box" id="camFill">
+    <h3>📹 Request Dashcam Footage</h3>
+    <div id="camInfo" style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:10px;"></div>
+    <div class="field"><label>Notes</label><textarea id="camNotes" placeholder="Reason for review..."></textarea></div>
+    <div id="camResult" style="font-family:var(--mono);font-size:11px;margin-top:8px;"></div>
+    <div class="cam-btns">
+      <button onclick="closeCam()" style="background:var(--s3);color:var(--text2);">Cancel</button>
+      <button onclick="submitCam()" style="background:var(--blue);color:#fff;">Submit Request</button>
+    </div>
+    <div id="camProg" style="display:none;margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--text3);">
+      <div id="camConfirm"></div>
     </div>
   </div>
 </div>
 
 <script>
+// ═══════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════
+function openSettings(){document.getElementById('settingsModal').classList.add('open');}
+function closeSettings(){document.getElementById('settingsModal').classList.remove('open');}
+function toggleLog(){document.getElementById('logFooter').classList.toggle('collapsed');}
+function showTab(id,btn){
+  document.querySelectorAll('.content').forEach(c=>c.classList.remove('visible'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  const el=document.getElementById('tab-'+id);if(el)el.classList.add('visible');
+  if(btn)btn.classList.add('active');
+}
+
 // ═══════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════
@@ -2240,13 +1425,6 @@ function setFilter(f,btn){
   if(results.length)renderDriverCards();
 }
 function setSort(v){curSort=v;if(results.length)renderDriverCards();}
-function showTab(id,btn){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  btn.classList.add('active');
-  ['flags','report','algo'].forEach(t=>{
-    document.getElementById(`tab-${t}`).style.display=t===id?'block':'none';
-  });
-}
 
 // ═══════════════════════════════════════════
 // DASH CAM MODAL
@@ -2359,30 +1537,11 @@ function delay(ms){return new Promise(r=>setTimeout(r,ms));}
 // ============================================
 // MOBILE SIDEBAR DRAWER
 // ============================================
-(function(){
-  if(!window.matchMedia('(max-width:768px)').matches) return;
-  var sb=document.querySelector('.sidebar');
-  var btn=document.getElementById('mobileMenuBtn');
-  var isOpen=false;
-  var overlay=document.createElement('div');
-  overlay.style.cssText='display:none;position:fixed;top:52px;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9998;';
-  document.querySelector('.app').appendChild(overlay);
-  function openMenu(){
-    isOpen=true;
-    sb.style.cssText='display:flex !important;position:fixed !important;top:52px !important;left:0 !important;bottom:0 !important;width:85vw !important;max-width:340px !important;z-index:9999 !important;box-shadow:4px 0 24px rgba(0,0,0,0.5) !important;flex-direction:column !important;overflow:hidden !important;background:var(--s1) !important;border-right:1px solid var(--b1) !important;';
-    overlay.style.display='block';
-  }
-  function closeMenu(){
-    isOpen=false;
-    sb.style.cssText='';
-    overlay.style.display='none';
-  }
-  if(btn) btn.onclick=function(e){e.stopPropagation();isOpen?closeMenu():openMenu();};
-  overlay.onclick=closeMenu;
-})();
 
 // Override removed — real audit engine handles everything
 
+
+</script>
 
 </script>
 </body>
