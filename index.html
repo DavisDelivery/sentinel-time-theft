@@ -1048,18 +1048,16 @@ async function fetchMotiveHOS() {
       }
     });
 
-    // Build clock data from vehicles (most reliable source)
-    clockData = vehicles
-      .filter(v => (v.vehicle || v).current_driver)
-      .map(v => {
+    // Build clock data from ALL vehicles — current_driver only shows who's driving right now
+    clockData = vehicles.map(v => {
         const ve = v.vehicle || v;
         const dr = ve.current_driver || {};
-        const name = ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim();
+        const name = dr.first_name ? ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim() : `Truck #${ve.number || ve.id}`;
         return {
-          name, truck: ve.number || '', clockIn: '06:30', clockOut: '17:00',
+          name, truck: ve.number || String(ve.id) || '', clockIn: '06:30', clockOut: '17:00',
           shiftHrs: 10.5, routeType: 'suburban', date: startDate
         };
-      });
+      }).filter(d => d.truck);
 
     // Override with HOS duty times where available
     hosRecords.forEach(rec => {
@@ -1114,14 +1112,40 @@ async function runAudit(){
       if (allVehicles.length === 0) { log('No vehicles found in Motive. Load demo data or upload CSV.','warn'); return; }
 
       const dateStr = document.getElementById('auditDate').value || new Date().toISOString().split('T')[0];
-      clockData = allVehicles
-        .filter(v => (v.vehicle || v).current_driver)
-        .map(v => {
-          const ve = v.vehicle || v;
-          const dr = ve.current_driver || {};
-          const name = ((dr.first_name||'') + ' ' + (dr.last_name||'')).trim();
-          return { name, truck: ve.number || '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
-        });
+
+      // Get ALL vehicles — don't filter by current_driver since that only shows who's driving RIGHT NOW
+      clockData = allVehicles.map(v => {
+        const ve = v.vehicle || v;
+        const dr = ve.current_driver || {};
+        const name = dr.first_name ? ((dr.first_name||'') + ' ' + (dr.last_name||'')).trim() : '';
+        // Use vehicle number as identifier if no driver assigned (after hours)
+        const label = name || `Truck #${ve.number || ve.id}`;
+        return { name: label, truck: ve.number || String(ve.id) || '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
+      }).filter(d => d.truck); // Just need a truck number to pull GPS
+
+      // Also fetch the users/drivers list to fill in names for unassigned trucks
+      try {
+        const usersResp = await fetch('/.netlify/functions/motive-gps?action=users&per_page=100&status=active');
+        if (usersResp.ok) {
+          const usersData = await usersResp.json();
+          const users = usersData.users || [];
+          log(`Motive users: ${users.length} active drivers found`, 'info');
+          // If we got more drivers than vehicles with drivers, add them
+          users.forEach(u => {
+            const user = u.user || u;
+            const name = ((user.first_name||'') + ' ' + (user.last_name||'')).trim();
+            if (!name) return;
+            // Check if this driver is already in clockData
+            const exists = clockData.find(d => d.name.toLowerCase() === name.toLowerCase());
+            if (!exists) {
+              clockData.push({ name, truck: '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr });
+            } else if (exists.name.startsWith('Truck #')) {
+              // Replace truck label with actual driver name
+              exists.name = name;
+            }
+          });
+        }
+      } catch (e) { log(`Users fetch: ${e.message}`, 'warn'); }
 
       // Apply known truck mappings
       const knownMap = { 'trevor': {truck:'0608',rt:'urban'}, 'trevarr': {truck:'4757',rt:'suburban'}, 'brent': {truck:'0294',rt:'urban'} };
