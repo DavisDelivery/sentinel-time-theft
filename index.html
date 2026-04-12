@@ -559,7 +559,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // SENTINEL v1.0.0 — CLEAN BUILD
 // REAL DATA ONLY. ZERO SIMULATION.
 // ═══════════════════════════════════════════
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -992,7 +992,7 @@ function processGPSData(locations, clockInMin, clockOutMin){
   // Filter to NON-warehouse moving locations for first/last movement
   const movingNonWH=locs.filter(l=>{
     const lat=l.lat||l.latitude||0;
-    const lng=l.lng||l.longitude||0;
+    const lng=l.lng||l.lon||l.longitude||0;
     return (l.speed||0)>2 && !isAtWarehouse(lat, lng);
   });
 
@@ -1009,7 +1009,7 @@ function processGPSData(locations, clockInMin, clockOutMin){
   // GPS after clock-out (exclude warehouse — returning truck is normal)
   const afterClockout=locs.filter(l=>{
     const lat=l.lat||l.latitude||0;
-    const lng=l.lng||l.longitude||0;
+    const lng=l.lng||l.lon||l.longitude||0;
     return l._etMin>clockOutMin+5 && (l.speed||0)>2 && !isAtWarehouse(lat,lng);
   });
 
@@ -1034,7 +1034,7 @@ function detectStopsFromGPS(locs){
   let stopStart=null,stopLat=null,stopLng=null;
   for(let i=0;i<locs.length;i++){
     const loc=locs[i];const speed=loc.speed||0;
-    const lat=loc.lat||loc.latitude||0;const lng=loc.lng||loc.longitude||0;
+    const lat=loc.lat||loc.latitude||0;const lng=loc.lng||loc.lon||loc.longitude||0;
     const tsMin=loc._etMin;if(tsMin===null)continue;
     if(speed<2){if(!stopStart){stopStart=tsMin;stopLat=lat;stopLng=lng;}}
     else{
