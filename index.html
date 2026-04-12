@@ -56,6 +56,9 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
 .status{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;}
 .status-dot{width:8px;height:8px;border-radius:2px;background:var(--text3);transform:rotate(45deg);}
+.status-dot.running{background:var(--amber);animation:statusBlink 1s ease-in-out infinite;}
+.status-dot.active{background:var(--green);box-shadow:0 0 6px var(--green);}
+@keyframes statusBlink{0%,100%{opacity:1}50%{opacity:.3}}
 .gear-btn{background:none;border:1px solid var(--b2);color:var(--text2);font-size:16px;cursor:pointer;padding:4px 6px;border-radius:var(--radius);}
 .gear-btn:hover{color:var(--energon);border-color:var(--energon);}
 
@@ -133,6 +136,8 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   border:1px solid var(--b1);border-radius:var(--radius);overflow:hidden;transition:all .2s;
   clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));}
 .dcard:hover{border-color:var(--b3);box-shadow:0 0 12px rgba(0,212,255,.08);}
+.dcard.nodata{opacity:.5;border-color:var(--b1);}
+.dcard.nodata:hover{opacity:.7;}
 .dcard-head{display:flex;align-items:center;padding:14px 16px;gap:14px;cursor:pointer;user-select:none;}
 .dcard-rank{font-family:var(--head);font-size:24px;font-weight:800;color:var(--text3);width:36px;text-align:center;flex-shrink:0;letter-spacing:.06em;}
 .dcard-info{flex:1;min-width:0;}
@@ -250,157 +255,68 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   .brand-title{font-size:15px;}
 }
 .content-area{padding-bottom:180px;}
-}
-*{margin:0;padding:0;box-sizing:border-box;}
-body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100vh;overflow-x:hidden;}
-
-/* ── TOP BAR ── */
-.topbar{position:sticky;top:0;z-index:500;background:var(--s1);border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 16px;height:48px;gap:12px;}
-.topbar-brand{display:flex;align-items:center;gap:8px;}
-.eye{width:22px;height:22px;border:2px solid var(--red);border-radius:50%;position:relative;flex-shrink:0;}
-.eye::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:8px;height:8px;background:var(--red);border-radius:50%;animation:pulse 2s ease-in-out infinite;}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}
-.brand-title{font-family:var(--head);font-size:22px;letter-spacing:.12em;color:var(--text);line-height:1;}
-.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
-.status{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--text2);letter-spacing:.06em;}
-.status-dot{width:8px;height:8px;border-radius:50%;background:var(--text3);}
-.gear-btn{background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px;}
-.gear-btn:hover{color:var(--text);}
-
-/* ── ACTION BAR ── */
-.action-bar{background:var(--s2);border-bottom:1px solid var(--b1);padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
-.period-group{display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--b2);}
-.period-group button{background:var(--s1);border:none;color:var(--text2);font-family:var(--ui);font-size:12px;font-weight:600;padding:6px 14px;cursor:pointer;transition:all .15s;}
-.period-group button:hover{background:var(--s3);color:var(--text);}
-.period-group button.active{background:var(--blue);color:#fff;}
-.action-bar input[type=date]{background:var(--s1);border:1px solid var(--b2);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:6px;width:140px;}
-.run-btn{background:linear-gradient(135deg,var(--red),#dc2626);color:#fff;border:none;font-family:var(--head);font-size:16px;letter-spacing:.1em;padding:8px 20px;border-radius:6px;cursor:pointer;transition:all .2s;white-space:nowrap;}
-.run-btn:hover{filter:brightness(1.15);transform:translateY(-1px);}
-.run-btn:disabled{opacity:.5;cursor:not-allowed;transform:none;}
-
-/* ── DATA SOURCES ── */
-.data-bar{background:var(--s1);border-bottom:1px solid var(--b1);padding:8px 16px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
-.data-bar .lbl{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.06em;text-transform:uppercase;margin-right:4px;}
-.src-btn{background:var(--s3);border:1px solid var(--b2);color:var(--text2);font-family:var(--ui);font-size:11px;font-weight:500;padding:5px 12px;border-radius:5px;cursor:pointer;transition:all .15s;white-space:nowrap;}
-.src-btn:hover{border-color:var(--blue2);color:var(--text);}
-.src-btn.loaded{border-color:var(--green);color:var(--green);}
-.upload-wrap{position:relative;overflow:hidden;display:inline-block;}
-.upload-wrap input[type=file]{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;left:0;top:0;}
-
-/* ── KPIs ── */
-.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--b1);border-bottom:1px solid var(--b1);}
-.kpi{background:var(--s1);padding:14px 16px;text-align:center;}
-.kpi-val{font-family:var(--head);font-size:28px;line-height:1;letter-spacing:.04em;}
-.kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-top:4px;}
-@media(max-width:480px){.kpi-row{grid-template-columns:repeat(2,1fr);}.kpi-val{font-size:24px;}}
-
-/* ── TABS ── */
-.tab-bar{display:flex;background:var(--s2);border-bottom:1px solid var(--b1);overflow-x:auto;}
-.tab{background:none;border:none;color:var(--text3);font-family:var(--ui);font-size:13px;font-weight:600;padding:10px 20px;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;}
-.tab:hover{color:var(--text2);}
-.tab.active{color:var(--text);border-bottom-color:var(--blue);}
-
-/* ── CONTENT ── */
-.content-area{padding:16px;min-height:50vh;}
-.content{display:none;}
-.content.visible{display:block;}
-
-/* ── EMPTY STATE ── */
-.empty{text-align:center;padding:60px 20px;}
-.empty-icon{font-size:48px;margin-bottom:12px;opacity:.6;}
-.empty h2{font-family:var(--head);font-size:28px;letter-spacing:.08em;margin-bottom:8px;}
-.empty p{color:var(--text2);font-size:14px;max-width:420px;margin:0 auto;line-height:1.6;}
-
-/* ── DRIVER CARDS ── */
-.driver-stack{display:flex;flex-direction:column;gap:8px;}
-.dcard{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);overflow:hidden;transition:border-color .2s;}
-.dcard:hover{border-color:var(--b3);}
-.dcard-head{display:flex;align-items:center;padding:14px 16px;gap:14px;cursor:pointer;user-select:none;}
-.dcard-rank{font-family:var(--head);font-size:28px;color:var(--text3);width:36px;text-align:center;flex-shrink:0;letter-spacing:.04em;}
-.dcard-info{flex:1;min-width:0;}
-.dcard-name{font-family:var(--ui);font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.dcard-meta{font-family:var(--mono);font-size:10px;color:var(--text2);margin-top:3px;}
-.dcard-score{width:50px;height:50px;border-radius:50%;border:3px solid;display:flex;align-items:center;justify-content:center;font-family:var(--head);font-size:22px;flex-shrink:0;}
-.dcard-body{display:none;padding:0 16px 14px 66px;border-top:1px solid var(--b1);}
-.dcard.expand .dcard-body{display:block;padding-top:12px;}
-.flag-line{font-family:var(--mono);font-size:11px;margin-bottom:4px;display:flex;align-items:baseline;gap:6px;}
-.flag-sev{font-size:12px;}
-.flag-label{font-weight:700;min-width:90px;}
-.flag-detail{color:var(--text2);}
-.stolen-line{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--red);margin-top:8px;padding-top:8px;border-top:1px solid var(--b1);}
-.timeline-bar{margin-top:10px;height:28px;background:var(--s1);border-radius:4px;position:relative;overflow:hidden;}
-.expand-ico{margin-left:auto;color:var(--text3);font-size:12px;transition:transform .2s;}
-.dcard.expand .expand-ico{transform:rotate(180deg);}
-
-/* ── FILTER BAR ── */
-.filter-bar{display:flex;align-items:center;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
-.fb-btn{background:var(--s3);border:1px solid var(--b2);color:var(--text2);font-family:var(--ui);font-size:12px;font-weight:500;padding:5px 12px;border-radius:5px;cursor:pointer;}
-.fb-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;}
-.sort-select{background:var(--s3);border:1px solid var(--b2);color:var(--text2);font-family:var(--ui);font-size:11px;padding:5px 8px;border-radius:5px;margin-left:auto;}
-
-/* ── REPORT TAB ── */
-.rpt-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;}
-.rpt-kpi{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;text-align:center;}
-.rpt-kpi-val{font-family:var(--head);font-size:24px;letter-spacing:.04em;}
-.rpt-kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:2px;}
-.rpt-table{width:100%;border-collapse:collapse;font-size:12px;}
-.rpt-table th{font-family:var(--mono);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:8px;border-bottom:1px solid var(--b2);}
-.rpt-table td{padding:8px;border-bottom:1px solid var(--b1);font-family:var(--mono);font-size:11px;}
-
-/* ── ALGO TAB ── */
-.algo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;}
-.algo-card{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:16px;}
-.algo-card h3{font-family:var(--ui);font-size:14px;font-weight:700;margin-bottom:10px;color:var(--text);}
-.algo-row{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:11px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--b1);}
-.algo-pts{font-weight:700;flex-shrink:0;}
-
-/* ── LOG PANEL ── */
-.log-footer{position:fixed;bottom:0;left:0;right:0;z-index:400;background:var(--s1);border-top:1px solid var(--b1);transition:transform .3s;}
-.log-footer.collapsed{transform:translateY(calc(100% - 32px));}
-.log-toggle{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text3);user-select:none;}
-.log-toggle:hover{color:var(--text2);}
-.log-body{height:140px;overflow-y:auto;padding:4px 16px 8px;font-family:var(--mono);font-size:10px;}
-.log-line{padding:2px 0;color:var(--text2);border-bottom:1px solid rgba(255,255,255,.02);}
-.log-line.ok{color:var(--green);}
-.log-line.hi{color:var(--cyan);}
-.log-line.warn{color:var(--amber);}
-.log-line.err{color:var(--red);}
-
-/* ── SETTINGS MODAL ── */
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:center;justify-content:center;}
-.modal-bg.open{display:flex;}
-.modal{background:var(--s2);border:1px solid var(--b2);border-radius:12px;padding:24px;width:92%;max-width:420px;max-height:85vh;overflow-y:auto;}
-.modal h2{font-family:var(--head);font-size:24px;letter-spacing:.08em;margin-bottom:16px;}
-.modal label{font-family:var(--mono);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:4px;margin-top:12px;}
-.modal input[type=range]{width:100%;accent-color:var(--blue);}
-.modal input[type=text],.modal input[type=number],.modal input[type=password]{width:100%;background:var(--s1);border:1px solid var(--b2);color:var(--text);font-family:var(--mono);font-size:12px;padding:8px;border-radius:6px;}
-.modal .thresh-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;}
-.modal .thresh-val{font-family:var(--mono);font-size:11px;color:var(--blue3);}
-.modal-close{background:var(--blue);border:none;color:#fff;font-family:var(--ui);font-weight:600;padding:10px 24px;border-radius:6px;cursor:pointer;width:100%;margin-top:20px;font-size:14px;}
-
-/* ── DASHCAM MODAL ── */
-.cam-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:950;align-items:center;justify-content:center;padding:20px;}
-.cam-modal.open{display:flex;}
-.cam-box{background:var(--s2);border:1px solid var(--b2);border-radius:12px;padding:24px;width:92%;max-width:460px;}
-.cam-box h3{font-family:var(--head);font-size:20px;letter-spacing:.08em;margin-bottom:12px;}
-.cam-box .field{margin-bottom:8px;}
-.cam-box .field label{font-family:var(--mono);font-size:10px;color:var(--text3);display:block;margin-bottom:3px;}
-.cam-box textarea{width:100%;background:var(--s1);border:1px solid var(--b2);color:var(--text);font-family:var(--ui);font-size:13px;padding:8px;border-radius:6px;resize:vertical;min-height:60px;}
-.cam-btns{display:flex;gap:8px;margin-top:12px;}
-.cam-btns button{flex:1;padding:10px;border-radius:6px;font-family:var(--ui);font-weight:600;cursor:pointer;border:none;font-size:13px;}
-
-/* ── RESPONSIVE ── */
-@media(max-width:600px){
-  .action-bar{flex-direction:column;align-items:stretch;}
-  .action-bar input[type=date]{width:100%;}
-  .run-btn{width:100%;}
-  .algo-grid{grid-template-columns:1fr;}
-  .content-area{padding:12px;}
-  .dcard-body{padding-left:16px;}
-  .rpt-kpis{grid-template-columns:repeat(2,1fr);}
-}
-/* pad bottom so log panel doesn't cover content */
-.content-area{padding-bottom:180px;}
+/* ── DRIVER CARD RENDERING ── */
+.dc-hd{display:flex;align-items:center;padding:14px 16px;gap:12px;cursor:pointer;user-select:none;transition:background .15s;}
+.dc-hd:hover{background:rgba(0,212,255,.03);}
+.dc-rank{font-family:var(--head);font-size:20px;font-weight:800;color:var(--text3);width:32px;text-align:center;flex-shrink:0;}
+.dc-info{flex:1;min-width:0;}
+.dc-info h3{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dc-meta{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+.dc-tag{font-family:var(--mono);font-size:9px;color:var(--text2);padding:1px 6px;background:var(--s1);border-radius:2px;white-space:nowrap;}
+.dc-tag b{color:var(--text);font-weight:600;}
+.score-ring{position:relative;width:52px;height:52px;flex-shrink:0;}
+.score-ring svg{display:block;}
+.score-ring-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--head);font-size:16px;font-weight:800;line-height:1;}
+.score-ring-lbl{font-size:7px;font-weight:400;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.rbadge{font-family:var(--head);font-size:9px;font-weight:800;letter-spacing:.12em;padding:4px 10px;border-radius:3px;flex-shrink:0;}
+.rbadge.critical{background:rgba(255,26,26,.15);color:var(--red);border:1px solid rgba(255,26,26,.3);}
+.rbadge.high{background:rgba(255,170,0,.12);color:var(--amber);border:1px solid rgba(255,170,0,.25);}
+.rbadge.medium{background:rgba(0,102,255,.12);color:var(--blue2);border:1px solid rgba(0,102,255,.25);}
+.rbadge.low{background:rgba(0,255,136,.08);color:var(--green);border:1px solid rgba(0,255,136,.2);}
+.rbadge.nodata{background:var(--s1);color:var(--text3);border:1px solid var(--b1);}
+.expand-ico{background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;transition:transform .2s;padding:4px;}
+.expand-ico.open{transform:rotate(180deg);}
+.dc-body{display:none;padding:12px 16px 16px;border-top:1px solid var(--b1);}
+.dc-body.open{display:block;}
+.layer-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
+@media(max-width:600px){.layer-grid{grid-template-columns:repeat(2,1fr);}}
+.layer-cell{background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;}
+.lc-name{font-family:var(--head);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;}
+.lc-val{font-family:var(--head);font-size:20px;font-weight:800;line-height:1;}
+.lc-sub{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px;}
+.lc-bar{height:3px;background:var(--b1);border-radius:2px;margin-top:6px;overflow:hidden;}
+.lc-bar-fill{height:100%;border-radius:2px;transition:width .4s;}
+.flag-list{margin-bottom:12px;}
+.flag-row{display:flex;align-items:flex-start;gap:8px;padding:8px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);margin-bottom:4px;border-left:3px solid;}
+.flag-row.sev-critical{border-left-color:var(--red);}
+.flag-row.sev-high{border-left-color:var(--amber);}
+.flag-row.sev-medium{border-left-color:var(--blue2);}
+.flag-ico{font-size:16px;flex-shrink:0;line-height:1.2;}
+.flag-txt{flex:1;min-width:0;}
+.flag-txt h4{font-family:var(--ui);font-size:12px;font-weight:700;margin-bottom:2px;}
+.flag-txt p{font-family:var(--mono);font-size:10px;color:var(--text2);line-height:1.4;}
+.flag-pts{font-family:var(--head);font-size:11px;font-weight:700;flex-shrink:0;}
+.flag-pts.c{color:var(--red);}
+.flag-pts.h{color:var(--amber);}
+.flag-pts.m{color:var(--blue2);}
+.cam-btn{background:var(--s3);border:1px solid var(--b2);color:var(--text2);font-size:10px;padding:3px 8px;border-radius:3px;cursor:pointer;flex-shrink:0;}
+.cam-btn:hover{border-color:var(--energon);color:var(--energon);}
+.timeline-wrap{margin-bottom:12px;}
+.tl-title{font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;}
+.tl-track{border-left:2px solid var(--b2);padding-left:12px;}
+.tl-event{display:flex;gap:8px;padding:3px 0;font-family:var(--mono);font-size:10px;align-items:baseline;}
+.tl-event.flag-event{color:var(--amber);}
+.tl-event.stop-event{color:var(--blue3);}
+.tl-event.move-event{color:var(--text2);}
+.tl-time{font-weight:700;min-width:38px;flex-shrink:0;}
+.tl-desc{color:inherit;}
+.peer-bar-wrap{margin-top:8px;}
+.peer-bars{display:flex;flex-direction:column;gap:4px;}
+.peer-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;}
+.peer-name{width:60px;overflow:hidden;text-overflow:ellipsis;color:var(--text2);flex-shrink:0;}
+.peer-track{flex:1;height:6px;background:var(--s1);border-radius:3px;overflow:hidden;}
+.peer-fill{height:100%;border-radius:3px;transition:width .4s;}
+.peer-score{width:24px;text-align:right;color:var(--text3);font-weight:700;}
 
 </style>
 </head>
@@ -465,15 +381,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100
 
 <!-- DATA SOURCES -->
 <div class="data-bar">
-  <span class="lbl">Clock data:</span>
-  <button class="src-btn" onclick="fetchMotiveHOS()">📡 Motive HOS</button>
-  <button class="src-btn" onclick="fetchLiveClockData()">🔴 B600</button>
+  <span class="lbl">Sources:</span>
+  <button class="src-btn" onclick="fetchLiveClockData()">🔴 B600 Live</button>
   <div class="upload-wrap">
-    <button class="src-btn" id="upZone">📋 CSV</button>
-    <input type="file" id="tcFile" accept=".csv,.txt" onchange="parseCSV(event)">
+    <button class="src-btn" id="upB600">📋 B600 CSV</button>
+    <input type="file" id="b600File" accept=".csv,.txt" onchange="parseB600CSV(event)">
   </div>
-  <button class="src-btn" onclick="loadDemo()">⚡ Demo</button>
+  <div class="upload-wrap">
+    <button class="src-btn" id="upNuVizz">📦 NuVizz CSV</button>
+    <input type="file" id="nuvizzFile" accept=".csv,.txt" onchange="parseNuVizzCSV(event)">
+  </div>
   <span id="upLabel" style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-left:4px;"></span>
+  <span id="nuvLabel" style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-left:4px;"></span>
 </div>
 
 <!-- KPIs -->
@@ -585,7 +504,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100
   <div class="modal">
     <h2>SETTINGS</h2>
     <label>Motive API Key</label>
-    <input type="password" id="motiveKey" value="2eb96247-8869-4f47-8062-6964c1dc77a8">
+    <input type="password" id="motiveKey" value="" placeholder="Set in Netlify env vars">
     <label>Driver Wage ($/hr)</label>
     <input type="number" id="wageRate" value="23" min="10" max="50">
     <div style="margin-top:16px;font-family:var(--head);font-size:18px;letter-spacing:.08em;">THRESHOLDS</div>
@@ -626,8 +545,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);min-height:100
 
 <script>
 // ═══════════════════════════════════════════
-// UI HELPERS
+// SENTINEL v1.0.0 — CLEAN BUILD
+// REAL DATA ONLY. ZERO SIMULATION.
 // ═══════════════════════════════════════════
+const APP_VERSION = '1.0.0';
+
+// ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
 function closeSettings(){document.getElementById('settingsModal').classList.remove('open');}
 function toggleLog(){document.getElementById('logFooter').classList.toggle('collapsed');}
@@ -638,40 +561,19 @@ function showTab(id,btn){
   if(btn)btn.classList.add('active');
 }
 
-// ═══════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════
-let results = [], clockData = [], curFilter='all', curSort='score', camPending=null;
+// ── STATE ──
+let results = [], curFilter='all', curSort='score', camPending=null;
+let b600Data = []; // B600 clock records: [{name, clockIn, clockOut}]
+let nuvizzData = []; // NuVizz manifest: [{driver, address, city, window_start, window_end, stop_type}]
+let vehicleCache = {}; // {vehicleNumber: {id, make, model, year, ...}}
 
 const WAGE = () => parseFloat(document.getElementById('wageRate').value)||23;
 const T = (id) => parseInt(document.getElementById(id).value);
 
-// Known non-delivery location types (classified by name pattern)
-const KNOWN_STOPS = ['warehouse','depot','terminal','distribution'];
-const SUSPICIOUS_LOCS = ['QuikTrip','Chick-fil-A','McDonald\'s','Wendy\'s','Waffle House','Cracker Barrel',
-  'Walmart','Target','Dollar General','Planet Fitness','Residence','Apartment','Subdivision',
-  'Parking Lot','Rest Area','Church','Park','Lake','Marina'];
-
-// ═══════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════
-document.addEventListener('DOMContentLoaded',()=>{
-  const d = new Date().toISOString().split('T')[0];
-  auditStartDate = d;
-  auditEndDate = d;
-  document.getElementById('auditDate').value = d;
-  document.getElementById('auditDateEnd').value = d;
-  updateDateDisplay();
-  // Week picker hint updates on change
-  const weekInput = document.getElementById('pickWeekInput');
-  if (weekInput) weekInput.addEventListener('input', updateWeekHint);
-});
-
-// ═══════════════════════════════════════════
-// LOGGING
-// ═══════════════════════════════════════════
+// ── LOGGING ──
 function log(msg, t='info'){
   const p = document.getElementById('logPanel');
+  if(!p) return;
   const d = document.createElement('div');
   d.className=`log-line ${t}`;
   const ts = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -679,266 +581,361 @@ function log(msg, t='info'){
   p.appendChild(d);
   p.scrollTop=p.scrollHeight;
 }
-const addLog = log;
+
+// ── UTILS ──
+function t2m(t){if(!t)return 0;const p=t.split(':').map(Number);return(p[0]||0)*60+(p[1]||0);}
+function m2t(m){const h=Math.floor(((m%1440)+1440)%1440/60);const mn=((m%60)+60)%60;return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
+function median(arr){if(!arr.length)return 0;const s=[...arr].sort((a,b)=>a-b);const m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+function delay(ms){return new Promise(r=>setTimeout(r,ms));}
 
 // ═══════════════════════════════════════════
-// DEMO DATA
+// PERIOD & DATE PICKER (kept from v7)
 // ═══════════════════════════════════════════
-function loadDemo(){
-  clockData=[
-    {name:'Trevor Seyers',   truck:'0608',clockIn:'06:42',clockOut:'16:58',shiftHrs:10.0,routeType:'urban'},
-    {name:'Trevarr Howard',  truck:'4757',clockIn:'06:55',clockOut:'17:30',shiftHrs:10.0,routeType:'suburban'},
-    {name:'Brent Dixon',     truck:'0294',clockIn:'07:10',clockOut:'15:45',shiftHrs:8.5, routeType:'urban'},
-    {name:'Marcus Williams', truck:'1142',clockIn:'06:30',clockOut:'17:00',shiftHrs:10.5,routeType:'suburban'},
-    {name:'James Calloway',  truck:'2287',clockIn:'07:00',clockOut:'16:30',shiftHrs:9.5, routeType:'rural'},
-    {name:'Derek Fountain',  truck:'3391',clockIn:'06:45',clockOut:'17:15',shiftHrs:10.5,routeType:'urban'},
-    {name:'Anthony Pierce',  truck:'5503',clockIn:'07:15',clockOut:'16:00',shiftHrs:8.75,routeType:'suburban'},
-    {name:'Kevin Stokes',    truck:'6674',clockIn:'06:50',clockOut:'17:45',shiftHrs:11.0,routeType:'rural'},
-  ];
-  document.getElementById('upZone').classList.add('loaded');
-  document.getElementById('upLabel').textContent=`✅ Demo: ${clockData.length} drivers loaded`;
-  log(`Demo data loaded — ${clockData.length} drivers ready`,'ok');
+let auditPeriod = 'day', auditStartDate = '', auditEndDate = '';
+
+function setPeriod(p) {
+  auditPeriod = p;
+  ['pDay','pWeek','pMonth','pCustom'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.classList.remove('active');
+  });
+  const active = document.getElementById('p' + p.charAt(0).toUpperCase() + p.slice(1));
+  if(active) active.classList.add('active');
+  openDatePicker();
 }
 
-// ═══════════════════════════════════════════
-// LIVE: FETCH FROM TOTALPASS B600
-// ═══════════════════════════════════════════
-async function fetchLiveClockData() {
-  const date = document.getElementById('auditDate').value;
-  log(`Fetching TotalPass B600 data for ${date}...`, 'hi');
-  setStatus('running');
+function openDatePicker() {
+  document.getElementById('dateModal').classList.add('open');
+  ['pickDay','pickWeek','pickMonth','pickCustom'].forEach(id=>{document.getElementById(id).style.display='none';});
+  const titles={day:'SELECT DATE',week:'SELECT WEEK',month:'SELECT MONTH',custom:'CUSTOM RANGE'};
+  document.getElementById('dateModalTitle').textContent=titles[auditPeriod]||'SELECT DATE';
+  const today=new Date().toISOString().split('T')[0];
+  if(auditPeriod==='day'){document.getElementById('pickDay').style.display='block';document.getElementById('pickDayInput').value=auditStartDate||today;}
+  else if(auditPeriod==='week'){document.getElementById('pickWeek').style.display='block';document.getElementById('pickWeekInput').value=auditStartDate||today;updateWeekHint();}
+  else if(auditPeriod==='month'){document.getElementById('pickMonth').style.display='block';document.getElementById('pickMonthInput').value=auditStartDate?auditStartDate.substring(0,7):today.substring(0,7);}
+  else{document.getElementById('pickCustom').style.display='block';document.getElementById('pickCustomStart').value=auditStartDate||today;document.getElementById('pickCustomEnd').value=auditEndDate||today;}
+}
+function closeDatePicker(){document.getElementById('dateModal').classList.remove('open');}
 
-  try {
-    const resp = await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await resp.json();
-
-    // Log scraper output
-    if (data.logs) data.logs.forEach(l => log(`[B600] ${l}`, 'info'));
-
-    if (data.success && data.records && data.records.length > 0) {
-      // Map TotalPass records to SENTINEL format
-      clockData = data.records.map(r => ({
-        name:      r.name,
-        emp_id:    r.emp_id,
-        truck:     r.emp_id || '', // emp_id often matches truck # — override in driver mapping
-        clockIn:   r.clock_in,
-        clockOut:  r.clock_out,
-        shiftHrs:  r.clock_in && r.clock_out ? (t2m(r.clock_out) - t2m(r.clock_in)) / 60 : 0,
-        routeType: 'suburban', // default — will be overridden by driver mapping below
-        date:      r.date
-      }));
-
-      // Apply known driver-to-truck mapping
-      const driverMap = {
-        'Trevor Seyers':   { truck: '0608', routeType: 'urban' },
-        'Trevarr Howard':  { truck: '4757', routeType: 'suburban' },
-        'Brent Dixon':     { truck: '0294', routeType: 'urban' },
-      };
-      clockData = clockData.map(d => {
-        const mapping = Object.entries(driverMap).find(([name]) =>
-          d.name.toLowerCase().includes(name.split(' ')[0].toLowerCase())
-        );
-        if (mapping) {
-          d.truck = mapping[1].truck;
-          d.routeType = mapping[1].routeType;
-        }
-        return d;
-      }).filter(d => d.clockIn && d.clockOut && d.name.length > 1);
-
-      document.getElementById('upZone').classList.add('loaded');
-      document.getElementById('upLabel').textContent = `✅ B600 Live: ${clockData.length} records`;
-      log(`✅ TotalPass: ${clockData.length} punch records loaded for ${date}`, 'ok');
-      return true;
-
-    } else if (!data.success) {
-      log(`B600 scrape issue: ${data.error}`, 'warn');
-      if (data.hint) log(`Hint: ${data.hint}`, 'warn');
-      log('Tip: Access clock at http://192.168.20.94, go to Reports → Export CSV, note the URL, set TOTALPASS_EXPORT_PATH env var', 'warn');
-
-      // Show modal asking user to upload CSV manually as fallback
-      showClockFallback(data);
-      return false;
-    }
-  } catch (err) {
-    log(`B600 connection error: ${err.message}`, 'err');
-    log('Is the clock online? Is this running from your office network?', 'warn');
-    showClockFallback({ error: err.message });
-    return false;
+function confirmDatePick(){
+  if(auditPeriod==='day'){auditStartDate=document.getElementById('pickDayInput').value;auditEndDate=auditStartDate;}
+  else if(auditPeriod==='week'){
+    const d=new Date(document.getElementById('pickWeekInput').value+'T12:00:00');const day=d.getDay();const diff=d.getDate()-day+(day===0?-6:1);
+    const mon=new Date(d.setDate(diff));auditStartDate=mon.toISOString().split('T')[0];const sun=new Date(mon);sun.setDate(sun.getDate()+6);auditEndDate=sun.toISOString().split('T')[0];
+  } else if(auditPeriod==='month'){
+    const mv=document.getElementById('pickMonthInput').value;auditStartDate=mv+'-01';const pts=mv.split('-');const ld=new Date(parseInt(pts[0]),parseInt(pts[1]),0).getDate();auditEndDate=mv+'-'+String(ld).padStart(2,'0');
+  } else {
+    auditStartDate=document.getElementById('pickCustomStart').value;auditEndDate=document.getElementById('pickCustomEnd').value;
+    if(auditEndDate<auditStartDate){const t=auditStartDate;auditStartDate=auditEndDate;auditEndDate=t;}
   }
+  document.getElementById('auditDate').value=auditStartDate;document.getElementById('auditDateEnd').value=auditEndDate;
+  updateDateDisplay();closeDatePicker();
 }
 
-function showClockFallback(data) {
-  const msg = `TotalPass B600 at 192.168.20.94 returned: "${data.error}"\n\nEither:\n1. Upload a CSV manually using the upload zone\n2. Make sure the clock is on the network\n3. Check if the export path needs updating`;
-  log('Falling back to manual CSV upload or demo data', 'warn');
-  // Could show a modal here — for now just log it
+function updateDateDisplay(){
+  const btn=document.getElementById('dateDisplay');if(!auditStartDate){btn.textContent='📅 Select Date';return;}
+  const fmt=d=>{const dt=new Date(d+'T12:00:00');return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});};
+  if(auditPeriod==='day') btn.textContent='📅 '+fmt(auditStartDate);
+  else if(auditPeriod==='month'){const dt=new Date(auditStartDate+'T12:00:00');btn.textContent='📅 '+dt.toLocaleDateString('en-US',{month:'long',year:'numeric'});}
+  else btn.textContent='📅 '+fmt(auditStartDate)+' – '+fmt(auditEndDate);
+}
+
+function updateWeekHint(){
+  const val=document.getElementById('pickWeekInput').value;if(!val)return;
+  const d=new Date(val+'T12:00:00');const day=d.getDay();const diff=d.getDate()-day+(day===0?-6:1);
+  const mon=new Date(new Date(d).setDate(diff));const sun=new Date(mon);sun.setDate(sun.getDate()+6);
+  const fmt=dt=>dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  document.getElementById('weekHint').textContent=fmt(mon)+' – '+fmt(sun);
+}
+
+function getAuditDates(){
+  if(!auditStartDate){auditStartDate=new Date().toISOString().split('T')[0];auditEndDate=auditStartDate;}
+  const start=new Date(auditStartDate+'T12:00:00');const end=new Date((auditEndDate||auditStartDate)+'T12:00:00');
+  const numDays=Math.max(1,Math.round((end-start)/86400000)+1);const capped=Math.min(numDays,60);
+  if(numDays>60)log('Capping range to 60 days','warn');
+  const dates=[];for(let i=0;i<capped;i++){const d=new Date(start);d.setDate(d.getDate()+i);dates.push(d.toISOString().split('T')[0]);}
+  return dates;
 }
 
 // ═══════════════════════════════════════════
-// LIVE: FETCH GPS FROM MOTIVE
+// B600 CSV PARSER (clock in/out)
 // ═══════════════════════════════════════════
-async function fetchMotiveGPS(truckId, date) {
-  try {
-    const vehiclesResp = await fetch('/.netlify/functions/motive-gps?action=vehicles');
-    if (!vehiclesResp.ok) throw new Error(`Vehicles fetch failed: ${vehiclesResp.status}`);
-    const vehiclesData = await vehiclesResp.json();
+function parseB600CSV(e){
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const lines=ev.target.result.split('\n').filter(l=>l.trim());
+      const header=lines[0].toLowerCase();
+      b600Data=lines.slice(1).map(l=>{
+        const c=l.split(',').map(x=>x.trim().replace(/"/g,''));
+        return{name:c[0]||'',clockIn:extractTime(c[1]||c[2]||''),clockOut:extractTime(c[2]||c[3]||'')};
+      }).filter(r=>r.name&&r.clockIn);
+      document.getElementById('upB600').classList.add('loaded');
+      document.getElementById('upLabel').textContent=`✅ B600: ${b600Data.length} records`;
+      log(`Parsed ${b600Data.length} B600 clock records from ${file.name}`,'ok');
+    }catch(err){log(`B600 CSV parse error: ${err.message}`,'err');}
+  };
+  reader.readAsText(file);
+}
 
-    const vehicleList = vehiclesData.vehicles || vehiclesData.data || [];
-    const vehicle = vehicleList.find(v => {
-      const ve = v.vehicle || v;
-      return String(ve.number) === String(truckId) || ve.name?.includes(truckId) || String(ve.id) === truckId;
-    });
+function extractTime(str){
+  if(!str)return'';const m=str.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?/);if(!m)return'';
+  let h=parseInt(m[1]);if(m[3]&&m[3].toUpperCase()==='PM'&&h<12)h+=12;if(m[3]&&m[3].toUpperCase()==='AM'&&h===12)h=0;
+  return String(h).padStart(2,'0')+':'+m[2];
+}
 
-    if (!vehicle) {
-      log(`Truck #${truckId} not found in Motive — using simulated GPS`, 'warn');
-      return null;
-    }
+// ═══════════════════════════════════════════
+// NUVIZZ CSV PARSER (delivery manifest)
+// ═══════════════════════════════════════════
+function parseNuVizzCSV(e){
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const lines=ev.target.result.split('\n').filter(l=>l.trim());
+      nuvizzData=lines.slice(1).map(l=>{
+        const c=l.split(',').map(x=>x.trim().replace(/"/g,''));
+        return{driver:c[0]||'',address:c[1]||'',city:c[2]||'',windowStart:c[3]||'',windowEnd:c[4]||'',stopType:c[5]||'delivery'};
+      }).filter(r=>r.driver&&r.address);
+      document.getElementById('upNuVizz').classList.add('loaded');
+      document.getElementById('nuvLabel').textContent=`✅ NuVizz: ${nuvizzData.length} stops`;
+      log(`Parsed ${nuvizzData.length} NuVizz manifest stops from ${file.name}`,'ok');
+    }catch(err){log(`NuVizz CSV parse error: ${err.message}`,'err');}
+  };
+  reader.readAsText(file);
+}
 
-    const ve = vehicle.vehicle || vehicle;
-    const vehicleId = ve.id;
-    log(`Found Motive vehicle ID ${vehicleId} for truck #${truckId}`, 'info');
-
-    // Fetch historical location breadcrumbs via v2
-    let locations = [];
-    const locResp = await fetch(`/.netlify/functions/motive-gps?action=vehicle_history&vehicle_id=${vehicleId}&start_date=${date}&end_date=${date}`);
-    if (locResp.ok) {
-      const locData = await locResp.json();
-      locations = (locData.vehicle_locations || locData.locations || locData.data || []).map(l => l.vehicle_location || l);
-      log(`GPS history: ${locations.length} breadcrumb points for ${date}`, 'info');
+// ═══════════════════════════════════════════
+// B600 LIVE FETCH (tunnel)
+// ═══════════════════════════════════════════
+async function fetchLiveClockData(){
+  const date=document.getElementById('auditDate').value||new Date().toISOString().split('T')[0];
+  log(`Attempting B600 tunnel for ${date}...`,'hi');setStatus('running');
+  try{
+    const resp=await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`);
+    const data=await resp.json();
+    if(data.logs)data.logs.forEach(l=>log(`[B600] ${l}`,'info'));
+    if(data.success&&data.records&&data.records.length>0){
+      b600Data=data.records.map(r=>({name:r.name,clockIn:r.clock_in,clockOut:r.clock_out})).filter(r=>r.name&&r.clockIn);
+      document.getElementById('upB600').classList.add('loaded');
+      document.getElementById('upLabel').textContent=`✅ B600 Live: ${b600Data.length} records`;
+      log(`✅ B600: ${b600Data.length} clock records loaded`,'ok');
     } else {
-      log(`v2 location history returned ${locResp.status} — trying driving_periods`, 'warn');
+      log(`B600 tunnel: ${data.error||'No records'}. Upload CSV instead.`,'warn');
     }
-
-    // Fetch IFTA trips
-    let trips = [];
-    const tripsResp = await fetch(`/.netlify/functions/motive-gps?action=ifta_trips&vehicle_ids[]=${vehicleId}&start_date=${date}&end_date=${date}`);
-    if (tripsResp.ok) {
-      const tripsData = await tripsResp.json();
-      trips = tripsData.ifta_trips || tripsData.trips || tripsData.data || [];
-      log(`IFTA trips: ${trips.length} trip segments for ${date}`, 'info');
-    }
-
-    // Fallback: driving_periods if no v2 breadcrumbs
-    if (locations.length === 0) {
-      const dpResp = await fetch(`/.netlify/functions/motive-gps?action=driving_periods&vehicle_id=${vehicleId}&start_date=${date}&end_date=${date}`);
-      if (dpResp.ok) {
-        const dpData = await dpResp.json();
-        const periods = dpData.driving_periods || dpData.data || [];
-        periods.forEach(p => {
-          const dp = p.driving_period || p;
-          if (dp.start_location) locations.push({ lat: dp.start_location.lat, lng: dp.start_location.lon || dp.start_location.lng, speed: 30, recorded_at: dp.start_time, description: dp.start_location.description || '' });
-          if (dp.end_location) locations.push({ lat: dp.end_location.lat, lng: dp.end_location.lon || dp.end_location.lng, speed: 0, recorded_at: dp.end_time, description: dp.end_location.description || '' });
-        });
-        log(`Driving periods fallback: ${locations.length} points from ${periods.length} periods`, 'info');
-      }
-    }
-
-    return { vehicle_id: vehicleId, locations, trips };
-
-  } catch (err) {
-    log(`Motive GPS error for truck #${truckId}: ${err.message}`, 'warn');
-    return null;
-  }
+    setStatus('ready');
+  }catch(err){log(`B600 tunnel failed: ${err.message}. Upload CSV instead.`,'warn');setStatus('ready');}
 }
 
-// Convert real Motive GPS data into the metrics our algorithm needs
-function processMotiveData(truckId, motiveData, clockInMin, clockOutMin) {
-  if (!motiveData) return null;
-  const locs = motiveData.locations || [];
-  const trips = motiveData.trips || [];
-  if (locs.length === 0 && trips.length === 0) return null;
+// ═══════════════════════════════════════════
+// MOTIVE API: Fetch all vehicles (paginated)
+// ═══════════════════════════════════════════
+async function fetchAllVehicles(){
+  let all=[], page=1, hasMore=true;
+  while(hasMore){
+    const resp=await fetch(`/.netlify/functions/motive-gps?action=vehicles&page_no=${page}&per_page=100`);
+    if(!resp.ok)break;
+    const data=await resp.json();
+    const vehicles=data.vehicles||[];
+    if(vehicles.length===0){hasMore=false;break;}
+    all=all.concat(vehicles);
+    if(!data.pagination?.next||vehicles.length<100)hasMore=false;
+    page++;
+  }
+  // Build cache: vehicleNumber -> {id, number, make, model}
+  vehicleCache={};
+  all.forEach(v=>{
+    const ve=v.vehicle||v;
+    if(ve.number)vehicleCache[ve.number]={id:ve.id,number:ve.number,make:ve.make||'',model:ve.model||''};
+    if(ve.id)vehicleCache['id_'+ve.id]={id:ve.id,number:ve.number||'',make:ve.make||'',model:ve.model||''};
+  });
+  log(`Vehicle cache: ${Object.keys(vehicleCache).length} entries from ${all.length} vehicles`,'info');
+  return all;
+}
 
-  let engineOnMin = 0, totalMiles = 0;
-  trips.forEach(trip => {
-    const t = trip.ifta_trip || trip;
-    const start = new Date(t.started_at || t.start_time || t.start_date).getTime();
-    const end = new Date(t.ended_at || t.end_time || t.end_date || t.started_at).getTime();
-    if (!isNaN(start) && !isNaN(end)) engineOnMin += (end - start) / 60000;
-    totalMiles += (t.distance_miles || t.distance || t.total_miles || 0);
+// ═══════════════════════════════════════════
+// MOTIVE API: Fetch driving_periods
+// This is the SOURCE OF TRUTH for who drove which truck and when
+// ═══════════════════════════════════════════
+async function fetchDrivingPeriods(startDate, endDate){
+  log(`Fetching driving_periods ${startDate} → ${endDate}...`,'hi');
+  let allPeriods=[], page=1;
+  while(page<=20){
+    let url=`/.netlify/functions/motive-gps?action=driving_periods&start_date=${startDate}&end_date=${endDate}&per_page=100&page_no=${page}`;
+    const resp=await fetch(url);
+    if(!resp.ok){log(`driving_periods API returned ${resp.status}`,'err');break;}
+    const data=await resp.json();
+    const periods=data.driving_periods||data.data||[];
+    if(periods.length===0)break;
+    allPeriods=allPeriods.concat(periods);
+    const pagination=data.pagination||{};
+    if(!pagination.next||periods.length<100)break;
+    page++;
+  }
+  log(`driving_periods: ${allPeriods.length} total records`,'ok');
+  return allPeriods;
+}
+
+// ═══════════════════════════════════════════
+// MOTIVE API: Fetch vehicle GPS breadcrumbs
+// ═══════════════════════════════════════════
+async function fetchVehicleLocations(vehicleId, startDate, endDate){
+  const url=`/.netlify/functions/motive-gps?action=vehicle_history&vehicle_id=${vehicleId}&start_date=${startDate}&end_date=${endDate}`;
+  const resp=await fetch(url);
+  if(!resp.ok){log(`v2/vehicle_locations/${vehicleId}: ${resp.status}`,'warn');return[];}
+  const data=await resp.json();
+  const locs=(data.vehicle_locations||data.locations||data.data||[]).map(l=>l.vehicle_location||l);
+  return locs;
+}
+
+// ═══════════════════════════════════════════
+// BUILD DRIVER DATA FROM DRIVING PERIODS
+// Groups driving_periods by driver, extracts real clock times
+// ═══════════════════════════════════════════
+function buildDriverData(periods){
+  const driverMap={};
+  periods.forEach(p=>{
+    const dp=p.driving_period||p;
+    const driver=dp.driver||{};
+    const vehicle=dp.vehicle||{};
+    const name=((driver.first_name||'')+ ' '+(driver.last_name||'')).trim();
+    if(!name||name.length<2)return;
+    const key=name.toLowerCase();
+    if(!driverMap[key])driverMap[key]={name,driverId:driver.id,vehicles:{},periods:[],startTimes:[],endTimes:[]};
+
+    // Track which vehicles this driver used
+    const vNum=vehicle.number||'';
+    const vId=vehicle.id||'';
+    if(vNum)driverMap[key].vehicles[vNum]=vId;
+
+    driverMap[key].periods.push(dp);
+
+    // Extract real start/end times
+    if(dp.start_time){
+      const st=new Date(dp.start_time);
+      if(!isNaN(st))driverMap[key].startTimes.push(st);
+    }
+    if(dp.end_time){
+      const et=new Date(dp.end_time);
+      if(!isNaN(et))driverMap[key].endTimes.push(et);
+    }
   });
 
-  if (engineOnMin === 0 && locs.length > 1) {
-    engineOnMin = locs.filter(l => (l.speed || 0) > 2).length * 2;
+  // Convert to array with derived clock times
+  return Object.values(driverMap).map(d=>{
+    // Earliest start = clock in, latest end = clock out
+    const earliest=d.startTimes.length?new Date(Math.min(...d.startTimes.map(t=>t.getTime()))):null;
+    const latest=d.endTimes.length?new Date(Math.max(...d.endTimes.map(t=>t.getTime()))):null;
+    const clockIn=earliest?`${String(earliest.getHours()).padStart(2,'0')}:${String(earliest.getMinutes()).padStart(2,'0')}`:'';
+    const clockOut=latest?`${String(latest.getHours()).padStart(2,'0')}:${String(latest.getMinutes()).padStart(2,'0')}`:'';
+    // Primary truck = most frequently driven
+    const vEntries=Object.entries(d.vehicles);
+    const truck=vEntries.length?vEntries[0][0]:'';
+    const vehicleId=vEntries.length?vEntries[0][1]:'';
+    // Total driving duration from periods
+    const totalDriveSec=d.periods.reduce((sum,p)=>{
+      const dur=p.duration_seconds||p.duration||0;
+      if(dur)return sum+dur;
+      const s=new Date(p.start_time),e=new Date(p.end_time);
+      return(!isNaN(s)&&!isNaN(e))?sum+(e-s)/1000:sum;
+    },0);
+
+    // Check B600 for override clock times
+    let b600Match=null;
+    if(b600Data.length){
+      b600Match=b600Data.find(b=>b.name.toLowerCase().includes(d.name.split(' ')[0].toLowerCase()));
+    }
+
+    return{
+      name:d.name, driverId:d.driverId, truck, vehicleId,
+      clockIn:b600Match?.clockIn||clockIn,
+      clockOut:b600Match?.clockOut||clockOut,
+      drivingMin:totalDriveSec/60,
+      periodCount:d.periods.length,
+      b600Matched:!!b600Match,
+      hasData:true
+    };
+  });
+}
+
+// ═══════════════════════════════════════════
+// GPS PROCESSING: Real Motive data → metrics
+// ═══════════════════════════════════════════
+function processGPSData(locations, clockInMin, clockOutMin){
+  if(!locations||locations.length===0)return null;
+  const locs=locations.filter(l=>{
+    const ts=new Date(l.located_at||l.timestamp||l.recorded_at);
+    return!isNaN(ts);
+  }).sort((a,b)=>{
+    return new Date(a.located_at||a.timestamp||a.recorded_at)-new Date(b.located_at||b.timestamp||b.recorded_at);
+  });
+  if(locs.length===0)return null;
+
+  // Calculate total miles from speed+time or distance field
+  let totalMiles=0, engineOnMin=0;
+  for(let i=1;i<locs.length;i++){
+    const prev=locs[i-1], cur=locs[i];
+    const t1=new Date(prev.located_at||prev.timestamp||prev.recorded_at);
+    const t2=new Date(cur.located_at||cur.timestamp||cur.recorded_at);
+    const dtMin=(t2-t1)/60000;
+    const speed=cur.speed||0;
+    if(speed>1)engineOnMin+=Math.min(dtMin,30); // cap gaps at 30min
+    totalMiles+=(speed*(Math.min(dtMin,30)/60));
+  }
+  // Also check distance fields
+  locs.forEach(l=>{if(l.distance_miles)totalMiles=Math.max(totalMiles,l.distance_miles);});
+
+  const movingLocs=locs.filter(l=>(l.speed||0)>2);
+  let firstMoveMin=clockInMin, lastMoveMin=clockOutMin;
+  if(movingLocs.length>0){
+    const ft=new Date(movingLocs[0].located_at||movingLocs[0].timestamp||movingLocs[0].recorded_at);
+    if(!isNaN(ft))firstMoveMin=ft.getHours()*60+ft.getMinutes();
+    const lt=new Date(movingLocs[movingLocs.length-1].located_at||movingLocs[movingLocs.length-1].timestamp||movingLocs[movingLocs.length-1].recorded_at);
+    if(!isNaN(lt))lastMoveMin=lt.getHours()*60+lt.getMinutes();
   }
 
-  const movingLocs = locs.filter(l => (l.speed || 0) > 2);
-  let firstMoveMin = clockInMin, lastMoveMin = clockOutMin;
+  // Detect stops
+  const stops=detectStopsFromGPS(locs);
 
-  if (movingLocs.length > 0) {
-    const firstTs = new Date(movingLocs[0].located_at || movingLocs[0].timestamp || movingLocs[0].recorded_at);
-    if (!isNaN(firstTs)) firstMoveMin = firstTs.getHours() * 60 + firstTs.getMinutes();
-    const lastTs = new Date(movingLocs[movingLocs.length-1].located_at || movingLocs[movingLocs.length-1].timestamp || movingLocs[movingLocs.length-1].recorded_at);
-    if (!isNaN(lastTs)) lastMoveMin = lastTs.getHours() * 60 + lastTs.getMinutes();
-  } else if (trips.length > 0) {
-    const ft = trips[0].ifta_trip || trips[0];
-    const lt = trips[trips.length-1].ifta_trip || trips[trips.length-1];
-    const fts = new Date(ft.started_at || ft.start_time);
-    if (!isNaN(fts)) firstMoveMin = fts.getHours() * 60 + fts.getMinutes();
-    const lts = new Date(lt.ended_at || lt.end_time || lt.started_at);
-    if (!isNaN(lts)) lastMoveMin = lts.getHours() * 60 + lts.getMinutes();
-  }
+  const shiftMin=Math.max(clockOutMin-clockInMin,1);
+  const effectiveMph=totalMiles/(shiftMin/60);
 
-  const stops = locs.length > 0 ? detectStopsFromGPS(locs) : [];
-  const shiftHrs = (clockOutMin - clockInMin) / 60;
-  const effectiveMph = shiftHrs > 0 ? totalMiles / shiftHrs : 0;
-
-  const afterClockout = locs.filter(l => {
-    const ts = new Date(l.located_at || l.timestamp || l.recorded_at);
-    if (isNaN(ts)) return false;
-    return (ts.getHours() * 60 + ts.getMinutes()) > clockOutMin + 5 && (l.speed || 0) > 2;
+  // GPS after clock-out
+  const afterClockout=locs.filter(l=>{
+    const ts=new Date(l.located_at||l.timestamp||l.recorded_at);
+    if(isNaN(ts))return false;
+    return(ts.getHours()*60+ts.getMinutes())>clockOutMin+5&&(l.speed||0)>2;
   });
 
-  return {
-    isLive: true, engineOnMin, actualMiles: totalMiles, effectiveMph,
-    engineFactor: engineOnMin / Math.max(clockOutMin - clockInMin, 1),
-    lateStart: Math.max(0, firstMoveMin - clockInMin),
-    earlyStop: Math.max(0, clockOutMin - lastMoveMin),
-    gpsAfterClockout: afterClockout.length > 0,
-    gpsAfterMin: afterClockout.length > 0 ? afterClockout.length * 2 : 0,
-    unexplained: stops,
-    deliveryStops: trips.length || Math.floor(stops.length * 0.6),
-    microStopCount: stops.filter(s => s.dur < parseInt(document.getElementById('t1')?.value || 15) && s.dur >= 5).length,
-    warehouseDwellExtra: Math.max(0, firstMoveMin - clockInMin - 10),
-    habitualStop: false, theftProfile: 0.3,
-    shiftMin: clockOutMin - clockInMin, rawLocations: locs.length, rawTrips: trips.length
+  return{
+    isLive:true, engineOnMin, actualMiles:totalMiles, effectiveMph,
+    engineFactor:engineOnMin/shiftMin,
+    lateStart:Math.max(0,firstMoveMin-clockInMin),
+    earlyStop:Math.max(0,clockOutMin-lastMoveMin),
+    gpsAfterClockout:afterClockout.length>0,
+    gpsAfterMin:afterClockout.length*2,
+    unexplained:stops,
+    deliveryStops:stops.length,
+    microStopCount:stops.filter(s=>s.dur<T('t1')&&s.dur>=5).length,
+    warehouseDwellExtra:Math.max(0,firstMoveMin-clockInMin-10),
+    shiftMin, rawLocations:locs.length
   };
 }
 
-function detectStopsFromGPS(locs) {
-  const stops = [];
-  const stopThresh = parseInt(document.getElementById('t1').value);
-  const SUSPICIOUS = ['QuikTrip','Chick-fil-A','McDonald','Wendy','Waffle House','Cracker Barrel','Walmart','Target','Residence','Apartment','Parking'];
-
-  let stopStart = null;
-  let stopLat = null, stopLng = null;
-
-  for (let i = 0; i < locs.length; i++) {
-    const loc = locs[i];
-    const speed = loc.speed || 0;
-    const lat = loc.lat || loc.latitude || 0;
-    const lng = loc.lng || loc.longitude || 0;
-    const ts = new Date(loc.located_at || loc.timestamp || loc.recorded_at);
-    if (isNaN(ts)) continue;
-    const tsMin = ts.getHours() * 60 + ts.getMinutes();
-
-    if (speed < 2) {
-      if (!stopStart) { stopStart = tsMin; stopLat = lat; stopLng = lng; }
-    } else {
-      if (stopStart !== null) {
-        const dur = tsMin - stopStart;
-        if (dur >= 5) {
-          stops.push({
-            time: m2t(stopStart),
-            timeMin: stopStart,
-            dur,
-            location: loc.description || `GPS: ${stopLat?.toFixed(4)},${stopLng?.toFixed(4)}`,
-            flagged: dur >= stopThresh,
-            lat: stopLat,
-            lng: stopLng
-          });
-        }
-        stopStart = null;
+function detectStopsFromGPS(locs){
+  const stops=[];const stopThresh=T('t1');
+  let stopStart=null,stopLat=null,stopLng=null;
+  for(let i=0;i<locs.length;i++){
+    const loc=locs[i];const speed=loc.speed||0;
+    const lat=loc.lat||loc.latitude||0;const lng=loc.lng||loc.longitude||0;
+    const ts=new Date(loc.located_at||loc.timestamp||loc.recorded_at);if(isNaN(ts))continue;
+    const tsMin=ts.getHours()*60+ts.getMinutes();
+    if(speed<2){if(!stopStart){stopStart=tsMin;stopLat=lat;stopLng=lng;}}
+    else{
+      if(stopStart!==null){
+        const dur=tsMin-stopStart;
+        if(dur>=5){stops.push({time:m2t(stopStart),timeMin:stopStart,dur,location:loc.description||`${stopLat?.toFixed(4)},${stopLng?.toFixed(4)}`,flagged:dur>=stopThresh,lat:stopLat,lng:stopLng});}
+        stopStart=null;
       }
     }
   }
@@ -946,765 +943,233 @@ function detectStopsFromGPS(locs) {
 }
 
 // ═══════════════════════════════════════════
-// CSV PARSE
+// SCORE ENGINE (8 layers — real data only)
 // ═══════════════════════════════════════════
-function parseCSV(e){
-  const file=e.target.files[0]; if(!file)return;
-  const reader=new FileReader();
-  reader.onload=ev=>{
-    try{
-      const lines=ev.target.result.split('\n').filter(l=>l.trim()).slice(1);
-      clockData=lines.map(l=>{
-        const c=l.split(',').map(x=>x.trim().replace(/"/g,''));
-        return{name:c[0],truck:c[1]||'',clockIn:c[2]||'',clockOut:c[3]||'',shiftHrs:parseFloat(c[4])||9,routeType:c[5]||'suburban'};
-      }).filter(r=>r.name&&r.clockIn);
-      document.getElementById('upZone').classList.add('loaded');
-      document.getElementById('upLabel').textContent=`✅ ${file.name} — ${clockData.length} records`;
-      log(`Parsed ${clockData.length} records from ${file.name}`,'ok');
-    }catch(err){log(`Parse error: ${err.message}`,'err');}
-  };
-  reader.readAsText(file);
-}
-
-// ═══════════════════════════════════════════
-// SEEDED RNG
-// ═══════════════════════════════════════════
-function rng(seed){
-  let s=seed;
-  return ()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296;};
-}
-
-// ═══════════════════════════════════════════
-// CORE: SIMULATE GPS DATA PER DRIVER
-// ═══════════════════════════════════════════
-function simulateGPS(driver, seed){
-  const r=rng(seed);
-  const clockInMin=t2m(driver.clockIn);
-  const clockOutMin=t2m(driver.clockOut);
-  const shiftMin=clockOutMin-clockInMin;
-
-  // Simulate: some drivers are honest, some steal varying amounts
-  const theftProfile=r(); // 0=clean, 1=heavy thief
-
-  // --- Core GPS metrics ---
-  // Engine-on time (honest drivers: ~92-98% of shift; thieves: lower)
-  const engineFactor = theftProfile < 0.35 ? (0.92+r()*0.06) : theftProfile < 0.65 ? (0.78+r()*0.12) : (0.55+r()*0.2);
-  const engineOnMin = shiftMin * engineFactor;
-
-  // Total miles driven
-  const avgMph = driver.routeType==='rural'?28:driver.routeType==='urban'?18:22;
-  const expectedMiles = (engineOnMin/60)*avgMph;
-  const actualMiles = expectedMiles * (theftProfile<0.4 ? (0.9+r()*0.15) : (0.55+r()*0.3));
-
-  // Effective mph (actual miles / clocked hours)
-  const effectiveMph = actualMiles/(shiftMin/60);
-
-  // Number of delivery stops (honest: 15-25/day; thieves: fewer)
-  const baseStops = driver.routeType==='urban'?20:driver.routeType==='suburban'?16:12;
-  const deliveryStops = Math.floor(baseStops*(theftProfile<0.4?1:theftProfile<0.7?0.75:0.55));
-
-  // Average dwell per delivery stop (minutes)
-  const avgDeliveryDwell = driver.routeType==='urban'?8:12;
-  const actualDeliveryDwell = avgDeliveryDwell*(1+theftProfile*0.5);
-
-  // Unexplained stops
-  const numUnexplained=Math.floor(theftProfile<0.3?r()*1.5:theftProfile<0.6?r()*3+1:r()*5+2);
-  const unexplained=[];
-  const stopThresh=T('t1');
-  for(let i=0;i<numUnexplained;i++){
-    const sMin=clockInMin+60+Math.floor(r()*(shiftMin-120));
-    const dur=Math.floor(r()*(theftProfile>0.5?40:25))+8;
-    const locIdx=Math.floor(r()*SUSPICIOUS_LOCS.length);
-    unexplained.push({
-      time:m2t(sMin), timeMin:sMin,
-      dur, location:SUSPICIOUS_LOCS[locIdx],
-      flagged: dur>=stopThresh
-    });
-  }
-
-  // Late start (min after clock-in before truck moved)
-  const lateStart=Math.floor(theftProfile<0.4?r()*15:r()*45);
-
-  // Early stop (min before clock-out truck stopped)
-  const earlyStop=Math.floor(theftProfile<0.4?r()*10:r()*40-10);
-
-  // GPS after clock-out?
-  const gpsAfterClockout=theftProfile>0.7 && r()<0.3;
-  const gpsAfterMin=gpsAfterClockout?Math.floor(r()*20)+5:0;
-
-  // Habitual stop (same location 3+ times)
-  const habitualStop=theftProfile>0.55 && r()<0.4;
-
-  // Micro-stop cluster: many short stops under threshold
-  const microStopCount=Math.floor(theftProfile<0.4?r()*1.5:r()*4+1);
-  const microThresh=T('t6');
-
-  // Warehouse dwell (sitting at warehouse while clocked in)
-  const warehouseDwellExtra=theftProfile>0.5?Math.floor(r()*35):Math.floor(r()*10);
-
-  // Peer data — will be computed after all drivers analyzed
-  return {
-    engineOnMin, engineFactor, actualMiles, expectedMiles,
-    effectiveMph, deliveryStops, avgDeliveryDwell: actualDeliveryDwell,
-    unexplained, lateStart, earlyStop,
-    gpsAfterClockout, gpsAfterMin,
-    habitualStop, microStopCount, warehouseDwellExtra,
-    theftProfile, shiftMin
-  };
-}
-
-// ═══════════════════════════════════════════
-// CORE: SCORE ENGINE (8 LAYERS)
-// ═══════════════════════════════════════════
-function scoreDriver(driver, gps, allGPS, idx){
-  const flags=[];
-  let score=0;
-  const clockInMin=t2m(driver.clockIn);
-  const clockOutMin=t2m(driver.clockOut);
-
-  // Layer totals for breakdown display
+function scoreDriver(driver, gps, allDriverGPS){
+  const flags=[];let score=0;
+  const ciMin=t2m(driver.clockIn),coMin=t2m(driver.clockOut);
   const layers={timeMotion:0,stopPattern:0,baseline:0,peer:0};
 
-  // ── LAYER 1-4: TIME & MOTION ──
-
-  // 1a. Clock vs Engine gap
-  const engineGapMin=(clockOutMin-clockInMin)-gps.engineOnMin;
+  // L1a: Clock vs Engine gap
+  const engineGapMin=(coMin-ciMin)-gps.engineOnMin;
   if(engineGapMin>T('t2')){
     const pts=35;score+=pts;layers.timeMotion+=pts;
     flags.push({ico:'⏱️',sev:'critical',title:'Clock/Engine Time Gap',
-      detail:`Clocked ${((clockOutMin-clockInMin)/60).toFixed(1)}h but engine only on ${(gps.engineOnMin/60).toFixed(1)}h — ${engineGapMin.toFixed(0)}min gap exceeds ${T('t2')}min threshold`,
-      pts,time:driver.clockIn,trk:driver.truck});
+      detail:`Clocked ${((coMin-ciMin)/60).toFixed(1)}h but engine on ${(gps.engineOnMin/60).toFixed(1)}h — ${engineGapMin.toFixed(0)}min gap`,pts,time:driver.clockIn});
   }
 
-  // 1b. Miles vs Clocked Hours physics check
-  const expectedMilesForHours=(((clockOutMin-clockInMin)/60)*12);
-  const mileDelta=expectedMilesForHours-gps.actualMiles;
-  const mileRatio=gps.actualMiles/Math.max(gps.expectedMiles,1);
-  if(mileRatio<0.6){
-    const pts=30;score+=pts;layers.timeMotion+=pts;
-    flags.push({ico:'📐',sev:'critical',title:'Miles vs Hours Physics Mismatch',
-      detail:`Only ${gps.actualMiles.toFixed(0)} miles driven in ${((clockOutMin-clockInMin)/60).toFixed(1)} clocked hours. Expected ≥${gps.expectedMiles.toFixed(0)} miles for a productive shift. ${((1-mileRatio)*100).toFixed(0)}% efficiency gap.`,
-      pts,time:driver.clockIn,trk:driver.truck});
-  } else if(mileRatio<0.75){
-    const pts=15;score+=pts;layers.timeMotion+=pts;
-    flags.push({ico:'📐',sev:'medium',title:'Below-Expected Mileage',
-      detail:`${gps.actualMiles.toFixed(0)} miles vs ${gps.expectedMiles.toFixed(0)} expected for this shift type. ${((1-mileRatio)*100).toFixed(0)}% below expectation.`,
-      pts,time:driver.clockIn,trk:driver.truck});
-  }
-
-  // 1c. Velocity (dawdling between stops)
-  if(gps.effectiveMph<T('t5') && gps.actualMiles>5){
+  // L1b: Velocity floor
+  if(gps.effectiveMph<T('t5')&&gps.actualMiles>5){
     const pts=25;score+=pts;layers.timeMotion+=pts;
-    flags.push({ico:'🐢',sev:'high',title:'Abnormally Low Route Velocity',
-      detail:`Effective speed ${gps.effectiveMph.toFixed(1)} mph against ${T('t5')} mph floor. Suggests significant time not moving or excessive detour distances.`,
-      pts,time:null,trk:driver.truck});
+    flags.push({ico:'🐢',sev:'high',title:'Low Route Velocity',
+      detail:`${gps.effectiveMph.toFixed(1)} mph effective vs ${T('t5')} mph floor`,pts,time:null});
   }
 
-  // 1d. Late first movement
+  // L1c: Late first movement
   if(gps.lateStart>T('t3')){
     const pts=20;score+=pts;layers.timeMotion+=pts;
-    flags.push({ico:'🌅',sev:'high',title:'Late First GPS Movement',
-      detail:`Clocked in at ${driver.clockIn} but truck did not move for ${gps.lateStart} minutes. ${gps.lateStart>T('t3')*2?'Significantly':'Moderately'} over ${T('t3')}min threshold.`,
-      pts,time:driver.clockIn,trk:driver.truck});
+    flags.push({ico:'🌅',sev:'high',title:'Late First Movement',
+      detail:`Clocked in at ${driver.clockIn} but no movement for ${gps.lateStart}min`,pts,time:driver.clockIn});
   }
 
-  // 1e. Early last movement
+  // L1d: Early last movement
   if(gps.earlyStop>T('t4')){
     const pts=20;score+=pts;layers.timeMotion+=pts;
-    flags.push({ico:'🏁',sev:'high',title:'Truck Stopped Before Clock-Out',
-      detail:`GPS shows last movement ${gps.earlyStop} minutes before ${driver.clockOut} clock-out. Possible: sitting at warehouse clocked in, or personal errand before returning.`,
-      pts,time:m2t(clockOutMin-gps.earlyStop),trk:driver.truck});
+    flags.push({ico:'🏁',sev:'high',title:'Stopped Before Clock-Out',
+      detail:`Last movement ${gps.earlyStop}min before ${driver.clockOut} clock-out`,pts,time:m2t(coMin-gps.earlyStop)});
   }
 
-  // 1f. GPS AFTER clock-out (highest confidence flag)
+  // L1e: GPS after clock-out
   if(gps.gpsAfterClockout){
     const pts=45;score+=pts;layers.timeMotion+=pts;
     flags.push({ico:'🚨',sev:'critical',title:'VEHICLE MOVED AFTER CLOCK-OUT',
-      detail:`GPS detected movement ${gps.gpsAfterMin} minutes after ${driver.clockOut} clock-out. Possible unauthorized vehicle use or fraudulent early clock-out while still on route.`,
-      pts,time:m2t(clockOutMin+gps.gpsAfterMin),trk:driver.truck});
+      detail:`Movement detected ${gps.gpsAfterMin}min after ${driver.clockOut} clock-out`,pts,time:m2t(coMin+gps.gpsAfterMin)});
   }
 
-  // ── LAYER 5-6: STOP PATTERN ANALYSIS ──
-
-  // 5a. Unexplained stops over threshold
+  // L5: Unexplained stops
   gps.unexplained.forEach(stop=>{
     if(stop.flagged){
       const pts=25;score+=pts;layers.stopPattern+=pts;
-      flags.push({ico:'🅿️',sev:'high',title:`Unexplained Stop — ${stop.dur} min`,
-        detail:`${stop.time} at "${stop.location}" — not a known delivery address. ${stop.dur}min exceeds ${T('t1')}min threshold.`,
-        pts,time:stop.time,trk:driver.truck});
+      flags.push({ico:'🅿️',sev:'high',title:`Stop — ${stop.dur}min`,
+        detail:`${stop.time} at ${stop.location} — ${stop.dur}min exceeds ${T('t1')}min threshold`,pts,time:stop.time});
     }
   });
 
-  // 5b. Micro-stop clustering (many short stops under radar)
+  // L5b: Micro-stop cluster
   if(gps.microStopCount>=T('t6')){
-    const totalMicroMin=gps.microStopCount*(T('t1')-3);
     const pts=20;score+=pts;layers.stopPattern+=pts;
-    flags.push({ico:'🔁',sev:'high',title:'Micro-Stop Cluster Detected',
-      detail:`${gps.microStopCount} short stops (each just under ${T('t1')}min threshold) detected. Total estimated unaccounted time: ~${totalMicroMin}min. Classic pattern to avoid individual threshold flags.`,
-      pts,time:null,trk:driver.truck});
+    flags.push({ico:'🔁',sev:'high',title:'Micro-Stop Cluster',
+      detail:`${gps.microStopCount} short stops under threshold — classic evasion pattern`,pts,time:null});
   }
 
-  // 5c. Habitual location
-  if(gps.habitualStop){
-    const pts=15;score+=pts;layers.stopPattern+=pts;
-    flags.push({ico:'📍',sev:'medium',title:'Habitual Non-Delivery Location',
-      detail:`Same non-delivery location appears 3+ times in recent GPS history for this driver. Indicates a recurring scheduled personal stop during work hours.`,
-      pts,time:null,trk:driver.truck});
-  }
-
-  // 5d. Warehouse dwell
+  // L5c: Warehouse dwell
   if(gps.warehouseDwellExtra>25){
     const pts=25;score+=pts;layers.stopPattern+=pts;
-    flags.push({ico:'🏭',sev:'high',title:'Excessive Warehouse Dwell While Clocked In',
-      detail:`Truck GPS shows ${gps.warehouseDwellExtra}min stationary at warehouse after clock-in before departing. Driver clocking in before ready to depart, or sitting on lot clocked in.`,
-      pts,time:driver.clockIn,trk:driver.truck});
+    flags.push({ico:'🏭',sev:'high',title:'Excessive Warehouse Dwell',
+      detail:`${gps.warehouseDwellExtra}min stationary at start before departing`,pts,time:driver.clockIn});
   }
 
-  // ── LAYER 7: PERSONAL BASELINE ──
-  // Simulated baseline (in production: pull 30-day Motive history)
-  const baselineEngFactor=0.92; // expected for clean driver
-  const baselineEffMph=driver.routeType==='urban'?18:driver.routeType==='suburban'?22:27;
-  const baselineStops=driver.routeType==='urban'?20:driver.routeType==='suburban'?16:12;
-
-  const engDeviation=(baselineEngFactor-gps.engineFactor)/baselineEngFactor;
-  const spdDeviation=(baselineEffMph-gps.effectiveMph)/baselineEffMph;
-  const stopDeviation=(baselineStops-gps.deliveryStops)/baselineStops;
-
-  if(engDeviation>0.15){
-    const pts=Math.floor(engDeviation*80);
-    score+=pts;layers.baseline+=pts;
-    flags.push({ico:'📉',sev:pts>20?'high':'medium',title:'Engine Utilization Below Personal Baseline',
-      detail:`Today's engine utilization (${(gps.engineFactor*100).toFixed(0)}%) is ${(engDeviation*100).toFixed(0)}% below this driver's typical ${(baselineEngFactor*100).toFixed(0)}%. Deviation is statistically significant.`,
-      pts,time:null,trk:driver.truck});
-  }
-
-  if(stopDeviation>0.25){
-    const pts=15;score+=pts;layers.baseline+=pts;
-    flags.push({ico:'📦',sev:'medium',title:'Delivery Stop Count Below Baseline',
-      detail:`${gps.deliveryStops} stops today vs typical ${baselineStops} for this route type — ${(stopDeviation*100).toFixed(0)}% below baseline. Fewer stops + same pay = time unaccounted.`,
-      pts,time:null,trk:driver.truck});
-  }
-
-  // ── LAYER 8: PEER BENCHMARKING ──
-  // Compare against all peers on same route type today
-  const peers=allGPS.filter((_,i)=>clockData[i]&&clockData[i].routeType===driver.routeType);
-  if(peers.length>1){
-    const peerEffMphs=peers.map(p=>p.effectiveMph);
-    const peerMedian=median(peerEffMphs);
-    const peerDeviation=(peerMedian-gps.effectiveMph)/peerMedian;
-    const peerThresh=T('t7')/100;
-
-    if(peerDeviation>peerThresh && peers.length>=2){
-      const pts=Math.floor(peerDeviation*60);
-      score+=pts;layers.peer+=pts;
-      flags.push({ico:'👥',sev:pts>20?'high':'medium',title:'Significantly Below Peer Group',
-        detail:`Effective speed ${gps.effectiveMph.toFixed(1)} mph vs peer median ${peerMedian.toFixed(1)} mph on same route type today. ${(peerDeviation*100).toFixed(0)}% below peers — same traffic, same conditions, different output.`,
-        pts,time:null,trk:driver.truck});
+  // L8: Peer comparison
+  const peerGPS=allDriverGPS.filter(p=>p&&p.gps&&p.gps.effectiveMph>0);
+  if(peerGPS.length>1){
+    const peerMedian=median(peerGPS.map(p=>p.gps.effectiveMph));
+    const dev=(peerMedian-gps.effectiveMph)/Math.max(peerMedian,1);
+    if(dev>T('t7')/100){
+      const pts=Math.min(25,Math.floor(dev*60));score+=pts;layers.peer+=pts;
+      flags.push({ico:'👥',sev:pts>15?'high':'medium',title:'Below Peer Group',
+        detail:`${gps.effectiveMph.toFixed(1)} mph vs peer median ${peerMedian.toFixed(1)} mph — ${(dev*100).toFixed(0)}% below`,pts,time:null});
     }
   }
 
-  // ── RISK CLASSIFICATION ──
-  let risk='low';
-  if(score>=80)risk='critical';
-  else if(score>=50)risk='high';
-  else if(score>=25)risk='medium';
+  // NuVizz manifest check
+  let manifestStops=[];
+  if(nuvizzData.length){
+    manifestStops=nuvizzData.filter(n=>n.driver.toLowerCase().includes(driver.name.split(' ')[0].toLowerCase()));
+  }
 
-  // ── STOLEN TIME ESTIMATE ──
-  // Physics-based: engine gap + unexplained stops + micro-stop cluster + early/late
+  let risk='low';
+  if(score>=80)risk='critical';else if(score>=50)risk='high';else if(score>=25)risk='medium';
+
   const stolenMin=Math.max(0,
-    Math.max(0,engineGapMin-15) * 0.7 +
-    gps.unexplained.filter(s=>s.flagged).reduce((a,s)=>a+s.dur,0) +
-    (gps.microStopCount>=T('t6')?gps.microStopCount*(T('t1')-3):0) * 0.5 +
-    (gps.lateStart>T('t3')?gps.lateStart-T('t3'):0) +
-    (gps.earlyStop>T('t4')?gps.earlyStop-T('t4'):0) +
-    (gps.gpsAfterClockout?gps.gpsAfterMin:0) +
+    Math.max(0,engineGapMin-15)*0.7+
+    gps.unexplained.filter(s=>s.flagged).reduce((a,s)=>a+s.dur,0)+
+    (gps.lateStart>T('t3')?gps.lateStart-T('t3'):0)+
+    (gps.earlyStop>T('t4')?gps.earlyStop-T('t4'):0)+
+    (gps.gpsAfterClockout?gps.gpsAfterMin:0)+
     (gps.warehouseDwellExtra>25?gps.warehouseDwellExtra-10:0)
   );
-  const stolenHrs=stolenMin/60;
-  const stolenDollars=stolenHrs*WAGE();
 
-  // ── GPS TIMELINE ──
-  const timeline=buildTimeline(driver, gps, clockInMin, clockOutMin);
+  const timeline=[];
+  if(driver.clockIn)timeline.push({t:driver.clockIn,type:'move',txt:'Clock-in'});
+  if(gps.lateStart>0)timeline.push({t:m2t(ciMin+gps.lateStart),type:'move',txt:`First movement (+${gps.lateStart}min)`});
+  gps.unexplained.slice(0,5).forEach(s=>{
+    timeline.push({t:s.time,type:s.flagged?'flag':'stop',txt:`${s.flagged?'⚠️ ':''}${s.dur}min at ${s.location}`});
+  });
+  if(gps.earlyStop>T('t4'))timeline.push({t:m2t(coMin-gps.earlyStop),type:'flag',txt:`Truck stopped ${gps.earlyStop}min before clock-out`});
+  if(driver.clockOut)timeline.push({t:driver.clockOut,type:'move',txt:'Clock-out'});
+  if(gps.gpsAfterClockout)timeline.push({t:m2t(coMin+gps.gpsAfterMin),type:'flag',txt:`🚨 Movement ${gps.gpsAfterMin}min after clock-out`});
+  timeline.sort((a,b)=>t2m(a.t)-t2m(b.t));
 
-  return {
-    ...driver, score, risk, flags, layers,
-    gps, stolenHrs, stolenDollars,
-    timeline, engineGapMin,
-    idx
+  return{
+    ...driver, score, risk, flags, layers, gps,
+    stolenHrs:stolenMin/60, stolenDollars:(stolenMin/60)*WAGE(),
+    timeline, engineGapMin, manifestStops, hasData:true
   };
 }
 
-function buildTimeline(driver,gps,ciMin,coMin){
-  const ev=[];
-  ev.push({t:driver.clockIn,type:'move',txt:'Clock-in / warehouse departure'});
-  if(gps.lateStart>0)
-    ev.push({t:m2t(ciMin+gps.lateStart),type:'move',txt:`First GPS movement (+${gps.lateStart}min after clock-in)`});
-  ev.push({t:m2t(ciMin+gps.lateStart+15),type:'move',txt:'En route — first delivery zone'});
-
-  gps.unexplained.slice(0,4).forEach(s=>{
-    ev.push({t:s.time,type:s.flagged?'flag':'stop',txt:`${s.flagged?'⚠️ FLAGGED':'Stop'} ${s.dur}min — ${s.location}`});
-    ev.push({t:m2t(s.timeMin+s.dur),type:'move',txt:'Resumed route'});
-  });
-
-  if(gps.microStopCount>=T('t6'))
-    ev.push({t:m2t(ciMin+Math.floor(gps.shiftMin*0.5)),type:'flag',txt:`⚠️ Micro-stop cluster — ${gps.microStopCount} short stops detected`});
-
-  ev.push({t:m2t(coMin-gps.earlyStop-20),type:'move',txt:'Returning to warehouse area'});
-
-  if(gps.earlyStop>T('t4'))
-    ev.push({t:m2t(coMin-gps.earlyStop),type:'flag',txt:`⚠️ GPS shows truck stopped — ${gps.earlyStop}min before clock-out`});
-
-  ev.push({t:driver.clockOut,type:'move',txt:'Clock-out recorded'});
-
-  if(gps.gpsAfterClockout)
-    ev.push({t:m2t(t2m(driver.clockOut)+gps.gpsAfterMin),type:'flag',txt:`🚨 GPS MOVEMENT DETECTED — ${gps.gpsAfterMin}min AFTER clock-out`});
-
-  return ev.sort((a,b)=>t2m(a.t)-t2m(b.t));
-}
-
 // ═══════════════════════════════════════════
-// MAIN AUDIT RUNNER
+// MAIN AUDIT RUNNER — REAL DATA ONLY
 // ═══════════════════════════════════════════
-// ═══════════════════════════════════════════
-// PERIOD & DATE PICKER
-// ═══════════════════════════════════════════
-let auditPeriod = 'day';
-let auditStartDate = '';
-let auditEndDate = '';
-
-function setPeriod(p) {
-  auditPeriod = p;
-  ['pDay','pWeek','pMonth','pCustom'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.remove('active');
-  });
-  const active = document.getElementById('p' + p.charAt(0).toUpperCase() + p.slice(1));
-  if (active) active.classList.add('active');
-  openDatePicker();
-}
-
-function openDatePicker() {
-  const modal = document.getElementById('dateModal');
-  modal.classList.add('open');
-  // Show the right picker section
-  ['pickDay','pickWeek','pickMonth','pickCustom'].forEach(id => {
-    document.getElementById(id).style.display = 'none';
-  });
-  const titles = { day: 'SELECT DATE', week: 'SELECT WEEK', month: 'SELECT MONTH', custom: 'CUSTOM RANGE' };
-  document.getElementById('dateModalTitle').textContent = titles[auditPeriod] || 'SELECT DATE';
-
-  const today = new Date().toISOString().split('T')[0];
-  const curMonth = today.substring(0, 7);
-
-  if (auditPeriod === 'day') {
-    document.getElementById('pickDay').style.display = 'block';
-    document.getElementById('pickDayInput').value = auditStartDate || today;
-  } else if (auditPeriod === 'week') {
-    document.getElementById('pickWeek').style.display = 'block';
-    document.getElementById('pickWeekInput').value = auditStartDate || today;
-    updateWeekHint();
-  } else if (auditPeriod === 'month') {
-    document.getElementById('pickMonth').style.display = 'block';
-    document.getElementById('pickMonthInput').value = auditStartDate ? auditStartDate.substring(0, 7) : curMonth;
-  } else if (auditPeriod === 'custom') {
-    document.getElementById('pickCustom').style.display = 'block';
-    document.getElementById('pickCustomStart').value = auditStartDate || today;
-    document.getElementById('pickCustomEnd').value = auditEndDate || today;
-  }
-}
-
-function closeDatePicker() {
-  document.getElementById('dateModal').classList.remove('open');
-}
-
-function confirmDatePick() {
-  if (auditPeriod === 'day') {
-    auditStartDate = document.getElementById('pickDayInput').value;
-    auditEndDate = auditStartDate;
-  } else if (auditPeriod === 'week') {
-    const picked = document.getElementById('pickWeekInput').value;
-    // Find Monday of that week
-    const d = new Date(picked + 'T12:00:00');
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
-    const monday = new Date(d.setDate(diff));
-    auditStartDate = monday.toISOString().split('T')[0];
-    const sunday = new Date(monday);
-    sunday.setDate(sunday.getDate() + 6);
-    auditEndDate = sunday.toISOString().split('T')[0];
-  } else if (auditPeriod === 'month') {
-    const monthVal = document.getElementById('pickMonthInput').value; // YYYY-MM
-    auditStartDate = monthVal + '-01';
-    const parts = monthVal.split('-');
-    const lastDay = new Date(parseInt(parts[0]), parseInt(parts[1]), 0).getDate();
-    auditEndDate = monthVal + '-' + String(lastDay).padStart(2, '0');
-  } else if (auditPeriod === 'custom') {
-    auditStartDate = document.getElementById('pickCustomStart').value;
-    auditEndDate = document.getElementById('pickCustomEnd').value;
-    if (auditEndDate < auditStartDate) {
-      const tmp = auditStartDate;
-      auditStartDate = auditEndDate;
-      auditEndDate = tmp;
-    }
-  }
-
-  // Update hidden input for compatibility
-  document.getElementById('auditDate').value = auditStartDate;
-  document.getElementById('auditDateEnd').value = auditEndDate;
-
-  // Update display button
-  updateDateDisplay();
-  closeDatePicker();
-}
-
-function updateDateDisplay() {
-  const btn = document.getElementById('dateDisplay');
-  if (!auditStartDate) { btn.textContent = '📅 Select Date'; return; }
-
-  const fmt = (d) => {
-    const dt = new Date(d + 'T12:00:00');
-    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  if (auditPeriod === 'day') {
-    btn.textContent = '📅 ' + fmt(auditStartDate);
-  } else if (auditPeriod === 'week') {
-    btn.textContent = '📅 ' + fmt(auditStartDate) + ' – ' + fmt(auditEndDate);
-  } else if (auditPeriod === 'month') {
-    const dt = new Date(auditStartDate + 'T12:00:00');
-    btn.textContent = '📅 ' + dt.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  } else {
-    btn.textContent = '📅 ' + fmt(auditStartDate) + ' – ' + fmt(auditEndDate);
-  }
-}
-
-function updateWeekHint() {
-  const val = document.getElementById('pickWeekInput').value;
-  if (!val) return;
-  const d = new Date(val + 'T12:00:00');
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(new Date(d).setDate(diff));
-  const sunday = new Date(monday);
-  sunday.setDate(sunday.getDate() + 6);
-  const fmt = (dt) => dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  document.getElementById('weekHint').textContent = fmt(monday) + ' – ' + fmt(sunday);
-}
-
-function getAuditDates() {
-  if (!auditStartDate) {
-    // Fallback to today
-    auditStartDate = new Date().toISOString().split('T')[0];
-    auditEndDate = auditStartDate;
-  }
-  const start = new Date(auditStartDate + 'T12:00:00');
-  const end = new Date((auditEndDate || auditStartDate) + 'T12:00:00');
-  const numDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
-  const cappedDays = Math.min(numDays, 60);
-  if (numDays > 60) log('Capping range to 60 days', 'warn');
-  const dates = [];
-  for (let i = 0; i < cappedDays; i++) {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
-    dates.push(d.toISOString().split('T')[0]);
-  }
-  return dates;
-}
-
-// ═══════════════════════════════════════════
-// FETCH CLOCK DATA FROM MOTIVE HOS
-// ═══════════════════════════════════════════
-async function fetchMotiveHOS() {
-  const dates = getAuditDates();
-  log(`Fetching Motive HOS/driver data for ${dates.length} day(s)...`, 'hi');
-  setStatus('running');
-
-  try {
-    // Get vehicles with current driver assignments
-    const vehResp = await fetch('/.netlify/functions/motive-gps?action=vehicles&per_page=100');
-    const vehData = vehResp.ok ? await vehResp.json() : { vehicles: [] };
-    const vehicles = vehData.vehicles || [];
-
-    // Get HOS logs for date range
-    const startDate = dates[0], endDate = dates[dates.length - 1];
-    const hosResp = await fetch(`/.netlify/functions/motive-gps?action=hos&start_date=${startDate}&end_date=${endDate}&per_page=100`);
-    let hosRecords = [];
-    if (hosResp.ok) {
-      const hosData = await hosResp.json();
-      hosRecords = hosData.hours_of_service || hosData.data || [];
-      log(`HOS: ${hosRecords.length} records returned`, 'info');
-    }
-
-    // Build driver-to-truck map from vehicles
-    const truckByDriver = {};
-    vehicles.forEach(v => {
-      const ve = v.vehicle || v;
-      if (ve.current_driver) {
-        const name = ((ve.current_driver.first_name || '') + ' ' + (ve.current_driver.last_name || '')).trim();
-        truckByDriver[name.toLowerCase()] = ve.number;
-        truckByDriver[ve.current_driver.id] = ve.number;
-      }
-    });
-
-    // Build clock data from DRIVERS, not all vehicles (avoids forklifts/trailers)
-    // First build a truck map from vehicles
-    const truckMap = {};
-    vehicles.forEach(v => {
-      const ve = v.vehicle || v;
-      if (ve.current_driver) {
-        const name = ((ve.current_driver.first_name || '') + ' ' + (ve.current_driver.last_name || '')).trim();
-        if (name) truckMap[name.toLowerCase()] = ve.number;
-      }
-    });
-
-    // Fetch actual driver list
-    const driversResp = await fetch('/.netlify/functions/motive-gps?action=users&per_page=100&status=active');
-    let driverUsers = [];
-    if (driversResp.ok) {
-      const drData = await driversResp.json();
-      (drData.users || []).forEach(u => {
-        const user = u.user || u;
-        const name = ((user.first_name || '') + ' ' + (user.last_name || '')).trim();
-        if (name && (user.role === 'driver' || user.driver_company_id || !user.role)) {
-          driverUsers.push({ name, truck: truckMap[name.toLowerCase()] || '' });
-        }
-      });
-    }
-
-    if (driverUsers.length > 0) {
-      clockData = driverUsers.map(d => ({
-        name: d.name, truck: d.truck, clockIn: '06:30', clockOut: '17:00',
-        shiftHrs: 10.5, routeType: 'suburban', date: startDate
-      }));
-    } else {
-      // Fallback to vehicles with drivers
-      clockData = vehicles
-        .filter(v => (v.vehicle || v).current_driver)
-        .map(v => {
-          const ve = v.vehicle || v;
-          const dr = ve.current_driver || {};
-          const name = ((dr.first_name || '') + ' ' + (dr.last_name || '')).trim();
-          return { name, truck: ve.number || '', clockIn: '06:30', clockOut: '17:00', shiftHrs: 10.5, routeType: 'suburban', date: startDate };
-        });
-    }
-
-    // Override with HOS duty times where available
-    hosRecords.forEach(rec => {
-      const entry = rec.hours_of_service || rec;
-      if (!entry.driver) return;
-      const name = ((entry.driver.first_name || '') + ' ' + (entry.driver.last_name || '')).trim();
-      const match = clockData.find(d => d.name.toLowerCase() === name.toLowerCase());
-      if (match && entry.on_duty_duration) {
-        const totalHrs = ((entry.on_duty_duration || 0) + (entry.driving_duration || 0)) / 3600;
-        if (totalHrs > 0) match.shiftHrs = totalHrs;
-      }
-    });
-
-    // Apply known truck mappings
-    const knownMap = { 'trevor': { truck: '0608', rt: 'urban' }, 'trevarr': { truck: '4757', rt: 'suburban' }, 'brent': { truck: '0294', rt: 'urban' } };
-    clockData.forEach(d => {
-      const first = d.name.split(' ')[0].toLowerCase();
-      if (knownMap[first]) { d.truck = knownMap[first].truck; d.routeType = knownMap[first].rt; }
-    });
-
-    clockData = clockData.filter(d => d.name.length > 1);
-
-    document.getElementById('upZone').classList.add('loaded');
-    document.getElementById('upLabel').textContent = `✅ Motive: ${clockData.length} drivers (${dates.length} day${dates.length>1?'s':''})`;
-    log(`✅ Motive: ${clockData.length} drivers loaded`, 'ok');
-    setStatus('ready');
-
-  } catch (err) {
-    log(`Motive HOS error: ${err.message}`, 'err');
-    setStatus('error');
-  }
-}
-
 async function runAudit(){
-  // Auto-fetch from Motive if no clock data loaded
-  if(!clockData.length){
-    log('No clock data — auto-pulling drivers from Motive...','hi');
-    try {
-      let allVehicles = [];
-      let page = 1, hasMore = true;
-      while (hasMore) {
-        const resp = await fetch(`/.netlify/functions/motive-gps?action=vehicles&page_no=${page}&per_page=50`);
-        if (!resp.ok) throw new Error(`Motive API returned ${resp.status}`);
-        const data = await resp.json();
-        const vehicles = data.vehicles || [];
-        if (vehicles.length === 0) { hasMore = false; break; }
-        allVehicles = allVehicles.concat(vehicles);
-        const pagination = data.pagination || {};
-        if (!pagination.next || vehicles.length < 50) hasMore = false;
-        page++;
-      }
-      if (allVehicles.length === 0) { log('No vehicles found in Motive. Load demo data or upload CSV.','warn'); return; }
-
-      const dateStr = document.getElementById('auditDate').value || new Date().toISOString().split('T')[0];
-
-      // Build truck-to-driver map from vehicles
-      const truckDriverMap = {};
-      allVehicles.forEach(v => {
-        const ve = v.vehicle || v;
-        if (ve.current_driver) {
-          const name = ((ve.current_driver.first_name||'') + ' ' + (ve.current_driver.last_name||'')).trim();
-          if (name) truckDriverMap[ve.number] = name;
-        }
-      });
-
-      // Use DRIVERS list as primary source — not vehicles (which includes forklifts, trailers, etc.)
-      let driverList = [];
-      try {
-        let uPage = 1, uMore = true;
-        while (uMore) {
-          const usersResp = await fetch(`/.netlify/functions/motive-gps?action=users&per_page=100&page_no=${uPage}&status=active`);
-          if (!usersResp.ok) break;
-          const usersData = await usersResp.json();
-          const users = usersData.users || [];
-          if (users.length === 0) { uMore = false; break; }
-          users.forEach(u => {
-            const user = u.user || u;
-            const name = ((user.first_name||'') + ' ' + (user.last_name||'')).trim();
-            const role = (user.role || user.driver_company_id || '').toString().toLowerCase();
-            // Only include actual drivers, not admins/dispatchers
-            if (name && (user.role === 'driver' || user.driver_company_id || !user.role)) {
-              driverList.push({ name, id: user.id, email: user.email || '' });
-            }
-          });
-          uPage++;
-          if (users.length < 100) uMore = false;
-        }
-        log(`Motive users: ${driverList.length} drivers found`, 'info');
-      } catch (e) { log(`Users fetch: ${e.message}`, 'warn'); }
-
-      // If we got drivers, use them as the source. Map each to a truck if possible.
-      if (driverList.length > 0) {
-        clockData = driverList.map(d => {
-          // Find their truck from vehicle assignments
-          let truck = '';
-          for (const [truckNum, driverName] of Object.entries(truckDriverMap)) {
-            if (driverName.toLowerCase() === d.name.toLowerCase()) { truck = truckNum; break; }
-          }
-          return { name: d.name, truck, clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
-        });
-      } else {
-        // Fallback: use vehicles but filter to likely trucks (have a driver or reasonable vehicle type)
-        log('No driver list available — falling back to vehicle list', 'warn');
-        clockData = allVehicles
-          .filter(v => {
-            const ve = v.vehicle || v;
-            // Skip if no number (likely not a real truck)
-            if (!ve.number) return false;
-            // Include if it has/had a driver
-            if (ve.current_driver) return true;
-            // Include if it looks like a truck (has make/model typical of trucks)
-            const make = (ve.make || '').toLowerCase();
-            const model = (ve.model || '').toLowerCase();
-            if (make.includes('ford') || make.includes('freightliner') || make.includes('international') ||
-                make.includes('kenworth') || make.includes('peterbilt') || make.includes('isuzu') ||
-                make.includes('hino') || make.includes('volvo') || make.includes('mack')) return true;
-            return false;
-          })
-          .map(v => {
-            const ve = v.vehicle || v;
-            const dr = ve.current_driver || {};
-            const name = dr.first_name ? ((dr.first_name||'') + ' ' + (dr.last_name||'')).trim() : `Truck #${ve.number}`;
-            return { name, truck: ve.number || '', clockIn: '06:00', clockOut: '18:00', shiftHrs: 12, routeType: 'suburban', date: dateStr };
-          });
-      }
-
-      // Apply known truck mappings
-      const knownMap = { 'trevor': {truck:'0608',rt:'urban'}, 'trevarr': {truck:'4757',rt:'suburban'}, 'brent': {truck:'0294',rt:'urban'} };
-      clockData.forEach(d => {
-        const first = d.name.split(' ')[0].toLowerCase();
-        if (knownMap[first]) { d.truck = knownMap[first].truck; d.routeType = knownMap[first].rt; }
-      });
-
-      log(`✅ Auto-loaded ${clockData.length} drivers from Motive fleet`, 'ok');
-      const upLabel = document.getElementById('upLabel');
-      if (upLabel) upLabel.textContent = `✅ Motive: ${clockData.length} drivers`;
-    } catch (err) {
-      log(`Motive auto-fetch failed: ${err.message}. Load demo or upload CSV.`, 'err');
-      return;
-    }
-  }
-
   const btn=document.getElementById('runBtn');
   btn.disabled=true;btn.textContent='⏳ SCANNING...';
-  setStatus('running');
-  results=[];
+  setStatus('running');results=[];
 
-  log('SENTINEL audit initiated — 8-layer analysis engaged','hi');
-  log(`Analyzing ${clockData.length} drivers...`,'info');
+  const dates=getAuditDates();
+  const startDate=dates[0], endDate=dates[dates.length-1];
+  log(`SENTINEL v${APP_VERSION} — ${dates.length} day(s): ${startDate} → ${endDate}`,'hi');
 
-  // First pass: generate GPS data for all drivers (live from Motive, or simulated)
-  log('Fetching GPS data from Motive...', 'hi');
-  const allGPS = [];
-  for (let i = 0; i < clockData.length; i++) {
-    const driver = clockData[i];
-    const date = document.getElementById('auditDate').value;
-    const clockInMin = t2m(driver.clockIn);
-    const clockOutMin = t2m(driver.clockOut);
+  try{
+    // Step 1: Fetch all vehicles (builds cache for ID lookups)
+    await fetchAllVehicles();
 
-    // Try live Motive GPS first
-    let gpsData = null;
-    if (driver.truck) {
-      const motiveRaw = await fetchMotiveGPS(driver.truck, date);
-      if (motiveRaw) {
-        gpsData = processMotiveData(driver.truck, motiveRaw, clockInMin, clockOutMin);
-        if (gpsData) log(`✅ Live GPS: Truck #${driver.truck} — ${gpsData.rawLocations} points, ${gpsData.rawTrips} trips`, 'ok');
+    // Step 2: Fetch driving_periods — THE source of truth
+    const periods=await fetchDrivingPeriods(startDate, endDate);
+    if(periods.length===0){
+      log('⚠️ No driving_periods returned for this date range. No drivers were active.','warn');
+      btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('ready');return;
+    }
+
+    // Step 3: Build driver data from periods
+    const drivers=buildDriverData(periods);
+    log(`Built ${drivers.length} driver profiles from driving_periods`,'ok');
+
+    if(drivers.length===0){
+      log('No driver data to analyze','warn');
+      btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('ready');return;
+    }
+
+    // Step 4: For each driver's truck, fetch GPS breadcrumbs
+    log('Fetching GPS breadcrumbs per vehicle...','hi');
+    const driverGPSData=[];
+    for(let i=0;i<drivers.length;i++){
+      const d=drivers[i];
+      await delay(50); // rate limit
+      let gps=null;
+
+      if(d.vehicleId){
+        log(`GPS: ${d.name} → vehicle ${d.truck} (ID: ${d.vehicleId})...`,'info');
+        const locs=await fetchVehicleLocations(d.vehicleId, startDate, endDate);
+        if(locs.length>0){
+          const ciMin=t2m(d.clockIn),coMin=t2m(d.clockOut);
+          gps=processGPSData(locs, ciMin, coMin);
+          if(gps)log(`✅ ${d.name}: ${locs.length} GPS points, ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`,'ok');
+        }
+      } else {
+        // Try looking up vehicle by truck number
+        const cached=vehicleCache[d.truck];
+        if(cached){
+          const locs=await fetchVehicleLocations(cached.id, startDate, endDate);
+          if(locs.length>0){
+            gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut));
+            if(gps)log(`✅ ${d.name}: ${locs.length} GPS points via cache lookup`,'ok');
+          }
+        }
+      }
+
+      if(!gps){
+        log(`${d.name}: NO GPS DATA — will show as NO DATA (not flagged)`,'warn');
+      }
+
+      driverGPSData.push({...d, gps});
+    }
+
+    // Step 5: Score only drivers WITH GPS data
+    for(let i=0;i<driverGPSData.length;i++){
+      const d=driverGPSData[i];
+      if(d.gps){
+        const scored=scoreDriver(d, d.gps, driverGPSData);
+        results.push(scored);
+      } else {
+        // NO DATA card — never flagged
+        results.push({
+          ...d, score:0, risk:'nodata', flags:[], layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0},
+          gps:{engineOnMin:0,actualMiles:0,effectiveMph:0,engineFactor:0,lateStart:0,earlyStop:0,
+            gpsAfterClockout:false,gpsAfterMin:0,unexplained:[],deliveryStops:0,microStopCount:0,
+            warehouseDwellExtra:0,shiftMin:0,rawLocations:0},
+          stolenHrs:0, stolenDollars:0, timeline:[], engineGapMin:0, manifestStops:[],
+          hasData:false
+        });
       }
     }
 
-    // Fall back to simulation if Motive data unavailable
-    if (!gpsData) {
-      log(`Using simulated GPS for ${driver.name} (no live data)`, 'warn');
-      gpsData = simulateGPS(driver, i * 997 + driver.name.length * 31);
-    }
+    results.sort((a,b)=>b.score-a.score);
+    updateHeader();updateStats();renderFlags();renderReport();
+    btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('done');
+    log(`✅ Audit complete — ${results.filter(r=>r.risk!=='low'&&r.risk!=='nodata').length} drivers flagged, ${results.filter(r=>r.risk==='nodata').length} no data`,'ok');
 
-    allGPS.push(gpsData);
+  }catch(err){
+    log(`Audit error: ${err.message}`,'err');
+    btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('error');
   }
-
-  // Second pass: score with peer data available
-  for(let i=0;i<clockData.length;i++){
-    await delay(80);
-    log(`Layer analysis: ${clockData[i].name}...`,'info');
-    const res=scoreDriver(clockData[i],allGPS[i],allGPS,i);
-    results.push(res);
-  }
-
-  results.sort((a,b)=>b.score-a.score);
-
-  updateHeader();
-  updateStats();
-  renderFlags();
-  renderReport();
-
-  btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';
-  setStatus('done');
-  log(`Audit complete — ${results.filter(r=>r.risk!=='low').length} drivers flagged`,'ok');
-  document.getElementById('lastRun')&&(document.getElementById('lastRun').textContent=new Date().toLocaleTimeString());
 }
 
 // ═══════════════════════════════════════════
-// RENDER FLAGS
+// RENDER
 // ═══════════════════════════════════════════
 function renderFlags(){
   document.getElementById('emptyState').style.display='none';
   document.getElementById('flagsContent').style.display='block';
-
-  const flagged=results.filter(r=>r.risk!=='low').length;
+  const flagged=results.filter(r=>r.risk!=='low'&&r.risk!=='nodata').length;
   document.getElementById('flagBadge').textContent=`${flagged} flagged`;
   renderDriverCards();
 }
 
 function renderDriverCards(){
-  const stack=document.getElementById('driverStack');
-  stack.innerHTML='';
-
+  const stack=document.getElementById('driverStack');stack.innerHTML='';
   let filtered=[...results];
-  if(curFilter!=='all')filtered=filtered.filter(r=>r.risk===curFilter);
+  if(curFilter==='nodata')filtered=filtered.filter(r=>r.risk==='nodata');
+  else if(curFilter!=='all')filtered=filtered.filter(r=>r.risk===curFilter);
   if(curSort==='stolen')filtered.sort((a,b)=>b.stolenHrs-a.stolenHrs);
   else if(curSort==='flags')filtered.sort((a,b)=>b.flags.length-a.flags.length);
   else if(curSort==='name')filtered.sort((a,b)=>a.name.localeCompare(b.name));
@@ -1714,46 +1179,59 @@ function renderDriverCards(){
     card.className=`dcard ${d.risk}`;
     card.style.animationDelay=`${i*35}ms`;
 
-    // Score ring SVG
-    const maxScore=120;
-    const pct=Math.min(d.score/maxScore,1);
-    const r=20,circ=2*Math.PI*r;
-    const dash=pct*circ;
-    const ringColor=d.risk==='critical'?'var(--red)':d.risk==='high'?'var(--amber)':d.risk==='medium'?'var(--blue2)':'var(--b3)';
+    if(d.risk==='nodata'){
+      card.classList.add('nodata');
+      card.innerHTML=`
+        <div class="dc-hd" style="cursor:default;padding:14px 16px;display:flex;align-items:center;gap:14px;">
+          <div class="dc-rank" style="font-family:var(--head);font-size:20px;color:var(--text3);">${String(i+1).padStart(2,'0')}</div>
+          <div style="flex:1;">
+            <h3 style="font-size:15px;font-weight:700;">${d.name}</h3>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px;">
+              TRK #${d.truck||'?'} · ${d.periodCount||0} driving periods · ${d.drivingMin?.toFixed(0)||0}min driving
+            </div>
+          </div>
+          <div style="font-family:var(--head);font-size:10px;color:var(--text3);letter-spacing:.12em;padding:6px 14px;border:1px solid var(--b1);border-radius:var(--radius);">NO DATA</div>
+        </div>`;
+      stack.appendChild(card);return;
+    }
 
-    // Layer breakdown bars (for expanded view)
-    const maxLayer=80;
-    const layerRows=['timeMotion','stopPattern','baseline','peer'];
-    const layerNames=['Time/Motion','Stop Pattern','Baseline Dev','Peer Bench'];
+    const maxScore=120;const pct=Math.min(d.score/maxScore,1);
+    const r=20,circ=2*Math.PI*r,dash=pct*circ;
+    const ringColor=d.risk==='critical'?'var(--red)':d.risk==='high'?'var(--amber)':d.risk==='medium'?'var(--blue2)':'var(--b3)';
 
     const flagsHtml=d.flags.map(f=>`
       <div class="flag-row sev-${f.sev}">
         <div class="flag-ico">${f.ico}</div>
-        <div class="flag-txt">
-          <h4>${f.title}</h4>
-          <p>${f.detail}</p>
-        </div>
+        <div class="flag-txt"><h4>${f.title}</h4><p>${f.detail}</p></div>
         <div class="flag-pts ${f.sev==='critical'?'c':f.sev==='high'?'h':'m'}">+${f.pts}pts</div>
-        ${f.time?`<button class="cam-btn" onclick="openCam('${d.name}','${d.truck}','${f.time}','${f.title.replace(/'/g,"\\'")}')">📹 Cam</button>`:'<div></div>'}
+        ${f.time?`<button class="cam-btn" onclick="openCam('${d.name}','${d.truck}','${f.time}','${f.title.replace(/'/g,"\\'")}')">📹</button>`:''}
       </div>
     `).join('');
 
-    const timelineHtml=d.timeline.map(e=>`
+    const timelineHtml=(d.timeline||[]).map(e=>`
       <div class="tl-event ${e.type==='flag'?'flag-event':e.type==='stop'?'stop-event':'move-event'}">
-        <span class="tl-time">${e.t}</span>
-        <span class="tl-desc">${e.txt}</span>
+        <span class="tl-time">${e.t}</span><span class="tl-desc">${e.txt}</span>
       </div>
     `).join('');
 
-    // Peer comparison bars
-    const sameRouteDrivers=results.filter(r=>r.routeType===d.routeType).slice(0,5);
-    const maxPeerScore=Math.max(...sameRouteDrivers.map(p=>p.score),1);
-    const peerBarsHtml=sameRouteDrivers.map(p=>`
+    // NuVizz manifest section
+    let manifestHtml='';
+    if(d.manifestStops&&d.manifestStops.length>0){
+      manifestHtml=`<div class="tl-title" style="margin-top:12px;">// NuVizz Manifest — ${d.manifestStops.length} expected stops</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text2);">
+          ${d.manifestStops.map(s=>`<div style="padding:2px 0;">${s.windowStart||'?'}-${s.windowEnd||'?'} · ${s.address}, ${s.city} · ${s.stopType}</div>`).join('')}
+        </div>`;
+    } else if(nuvizzData.length>0){
+      manifestHtml=`<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:8px;">No NuVizz manifest match for this driver</div>`;
+    }
+
+    // Peer bars
+    const peerDrivers=results.filter(p=>p.hasData&&p.gps.effectiveMph>0).slice(0,6);
+    const maxPS=Math.max(...peerDrivers.map(p=>p.score),1);
+    const peerBarsHtml=peerDrivers.map(p=>`
       <div class="peer-row">
         <span class="peer-name" style="${p.name===d.name?'color:var(--text);font-weight:700;':''}">${p.name.split(' ')[0]}</span>
-        <div class="peer-track">
-          <div class="peer-fill" style="width:${(p.score/maxPeerScore*100).toFixed(0)}%;background:${p.risk==='critical'?'var(--red)':p.risk==='high'?'var(--amber)':p.risk==='medium'?'var(--blue2)':'var(--b3)'};"></div>
-        </div>
+        <div class="peer-track"><div class="peer-fill" style="width:${(p.score/maxPS*100).toFixed(0)}%;background:${p.risk==='critical'?'var(--red)':p.risk==='high'?'var(--amber)':'var(--blue2)'};"></div></div>
         <span class="peer-score">${p.score}</span>
       </div>
     `).join('');
@@ -1762,7 +1240,7 @@ function renderDriverCards(){
       <div class="dc-hd" onclick="toggleCard(this)">
         <div class="dc-rank">${String(i+1).padStart(2,'0')}</div>
         <div class="dc-info">
-          <h3>${d.name}</h3>
+          <h3>${d.name}${d.b600Matched?' <span style="color:var(--green);font-size:9px;">●B600</span>':''}</h3>
           <div class="dc-meta">
             <span class="dc-tag">TRK <b>#${d.truck}</b></span>
             <span class="dc-tag">IN <b>${d.clockIn}</b></span>
@@ -1770,100 +1248,64 @@ function renderDriverCards(){
             <span class="dc-tag">ENGINE <b>${(d.gps.engineOnMin/60).toFixed(1)}h</b></span>
             <span class="dc-tag">MILES <b>${d.gps.actualMiles.toFixed(0)}</b></span>
             <span class="dc-tag">MPH <b>${d.gps.effectiveMph.toFixed(1)}</b></span>
+            <span class="dc-tag">GPS <b>${d.gps.rawLocations} pts</b></span>
             <span class="dc-tag">FLAGS <b>${d.flags.length}</b></span>
-            ${d.stolenHrs>0?`<span class="dc-tag" style="color:var(--red2);">EST STOLEN <b>${d.stolenHrs.toFixed(1)}h/$${d.stolenDollars.toFixed(0)}</b></span>`:''}
+            ${d.stolenHrs>0?`<span class="dc-tag" style="color:var(--red2);">EST <b>${d.stolenHrs.toFixed(1)}h/$${d.stolenDollars.toFixed(0)}</b></span>`:''}
           </div>
         </div>
         <div class="score-ring">
           <svg viewBox="0 0 52 52" width="52" height="52">
             <circle cx="26" cy="26" r="${r}" fill="none" stroke="var(--b1)" stroke-width="4"/>
             <circle cx="26" cy="26" r="${r}" fill="none" stroke="${ringColor}" stroke-width="4"
-              stroke-dasharray="${dash.toFixed(1)} ${(circ-dash).toFixed(1)}"
-              stroke-linecap="round"
+              stroke-dasharray="${dash.toFixed(1)} ${(circ-dash).toFixed(1)}" stroke-linecap="round"
               style="filter:drop-shadow(0 0 4px ${ringColor})"/>
           </svg>
-          <div class="score-ring-num" style="color:${ringColor}">
-            ${d.score}<div class="score-ring-lbl">score</div>
-          </div>
+          <div class="score-ring-num" style="color:${ringColor}">${d.score}<div class="score-ring-lbl">score</div></div>
         </div>
         <div class="rbadge ${d.risk}">${d.risk.toUpperCase()}</div>
         <button class="expand-ico">▼</button>
       </div>
       <div class="dc-body">
-        <!-- METRIC LAYER GRID -->
         <div class="layer-grid">
           <div class="layer-cell">
             <div class="lc-name">Engine On</div>
-            <div class="lc-val" style="color:${d.gps.engineFactor>0.85?'var(--green)':d.gps.engineFactor>0.7?'var(--amber)':'var(--red)'}">
-              ${(d.gps.engineFactor*100).toFixed(0)}%
-            </div>
+            <div class="lc-val" style="color:${d.gps.engineFactor>0.85?'var(--green)':d.gps.engineFactor>0.7?'var(--amber)':'var(--red)'}">${(d.gps.engineFactor*100).toFixed(0)}%</div>
             <div class="lc-sub">of clocked time</div>
-            <div class="lc-bar"><div class="lc-bar-fill" style="width:${(d.gps.engineFactor*100).toFixed(0)}%;background:${d.gps.engineFactor>0.85?'var(--green)':d.gps.engineFactor>0.7?'var(--amber)':'var(--red)'};"></div></div>
+            <div class="lc-bar"><div class="lc-bar-fill" style="width:${(d.gps.engineFactor*100).toFixed(0)}%;background:${d.gps.engineFactor>0.85?'var(--green)':'var(--amber)'};"></div></div>
           </div>
           <div class="layer-cell">
-            <div class="lc-name">Miles Driven</div>
+            <div class="lc-name">Miles</div>
             <div class="lc-val" style="color:var(--blue3)">${d.gps.actualMiles.toFixed(0)}</div>
-            <div class="lc-sub">of ${d.gps.expectedMiles.toFixed(0)} expected</div>
-            <div class="lc-bar"><div class="lc-bar-fill" style="width:${Math.min(100,(d.gps.actualMiles/d.gps.expectedMiles*100)).toFixed(0)}%;background:var(--blue2);"></div></div>
+            <div class="lc-sub">${d.gps.rawLocations} GPS points</div>
           </div>
           <div class="layer-cell">
             <div class="lc-name">Eff. Speed</div>
-            <div class="lc-val" style="color:${d.gps.effectiveMph>T('t5')+5?'var(--green)':d.gps.effectiveMph>T('t5')?'var(--amber)':'var(--red)'}">
-              ${d.gps.effectiveMph.toFixed(1)} mph
-            </div>
-            <div class="lc-sub">fleet avg: ${d.routeType==='urban'?18:d.routeType==='suburban'?22:27}mph</div>
-            <div class="lc-bar"><div class="lc-bar-fill" style="width:${Math.min(100,d.gps.effectiveMph/(d.routeType==='urban'?20:d.routeType==='suburban'?24:30)*100).toFixed(0)}%;background:var(--cyan);"></div></div>
+            <div class="lc-val" style="color:${d.gps.effectiveMph>T('t5')?'var(--green)':'var(--red)'}">${d.gps.effectiveMph.toFixed(1)} mph</div>
+            <div class="lc-sub">floor: ${T('t5')} mph</div>
           </div>
           <div class="layer-cell">
-            <div class="lc-name">Delivery Stops</div>
+            <div class="lc-name">Stops</div>
             <div class="lc-val" style="color:var(--text)">${d.gps.deliveryStops}</div>
-            <div class="lc-sub">baseline: ${d.routeType==='urban'?20:d.routeType==='suburban'?16:12}</div>
-            <div class="lc-bar"><div class="lc-bar-fill" style="width:${Math.min(100,d.gps.deliveryStops/(d.routeType==='urban'?20:d.routeType==='suburban'?16:12)*100).toFixed(0)}%;background:var(--green2);"></div></div>
+            <div class="lc-sub">${d.gps.unexplained.filter(s=>s.flagged).length} flagged</div>
           </div>
         </div>
-
-        <!-- FLAGS -->
         <div class="flag-list">
-          ${d.flags.length>0?`
-            <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px;">
-              ${d.flags.length} flag${d.flags.length!==1?'s':''} detected — total ${d.score}pts
-            </div>
-            ${flagsHtml}
-          `:'<div style="color:var(--green);font-family:var(--mono);font-size:11px;">✅ No flags detected — clean shift</div>'}
-          ${d.flags.length>0?`
-            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-              <button class="btn btn-sm btn-blue" onclick="openCam('${d.name}','${d.truck}','${d.clockIn}','Full Shift Review')">📹 Request Full Shift Video</button>
-              ${d.stolenHrs>0?`<span style="font-family:var(--mono);font-size:10px;color:var(--red2);">Est. ${d.stolenHrs.toFixed(1)}h stolen · $${d.stolenDollars.toFixed(0)} in wages</span>`:''}
-            </div>
-          `:''}
+          ${d.flags.length>0?`<div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.1em;margin-bottom:6px;">${d.flags.length} FLAGS — ${d.score}pts</div>${flagsHtml}`
+            :'<div style="color:var(--green);font-family:var(--mono);font-size:11px;">✅ Clean shift — no flags</div>'}
         </div>
-
-        <!-- TIMELINE -->
         <div class="timeline-wrap">
-          <div class="tl-title">// GPS Timeline — ${d.timeline.length} events</div>
+          <div class="tl-title">// GPS Timeline — ${(d.timeline||[]).length} events</div>
           <div class="tl-track">${timelineHtml}</div>
         </div>
-
-        <!-- PEER BARS -->
-        ${sameRouteDrivers.length>1?`
-        <div class="peer-bar-wrap">
-          <div class="tl-title">// Peer Comparison — ${d.routeType} route group</div>
-          <div class="peer-bars">${peerBarsHtml}</div>
-        </div>
-        `:''}
-
+        ${manifestHtml}
+        ${peerDrivers.length>1?`<div class="peer-bar-wrap"><div class="tl-title">// Peer Comparison</div><div class="peer-bars">${peerBarsHtml}</div></div>`:''}
       </div>
     `;
     stack.appendChild(card);
   });
 }
 
-function toggleCard(hd){
-  const body=hd.nextElementSibling;
-  const ico=hd.querySelector('.expand-ico');
-  body.classList.toggle('open');
-  ico.classList.toggle('open');
-}
+function toggleCard(hd){const body=hd.nextElementSibling;body.classList.toggle('open');const ico=hd.querySelector('.expand-ico');if(ico)ico.classList.toggle('open');}
 
 // ═══════════════════════════════════════════
 // REPORT
@@ -1871,209 +1313,108 @@ function toggleCard(hd){
 function renderReport(){
   document.getElementById('rptEmpty').style.display='none';
   document.getElementById('rptContent').style.display='block';
-
-  const flagged=results.filter(r=>r.risk!=='low');
-  const totalStolen=results.reduce((a,r)=>a+r.stolenHrs,0);
-  const totalDollars=results.reduce((a,r)=>a+r.stolenDollars,0);
-  const totalFlags=results.reduce((a,r)=>a+r.flags.length,0);
-
+  const dataResults=results.filter(r=>r.hasData);
+  const flagged=dataResults.filter(r=>r.risk!=='low');
+  const totalStolen=dataResults.reduce((a,r)=>a+r.stolenHrs,0);
+  const totalDollars=dataResults.reduce((a,r)=>a+r.stolenDollars,0);
   document.getElementById('rptKpis').innerHTML=`
-    <div class="kpi-card red">
-      <div class="kpi-name">Drivers Flagged</div>
-      <div class="kpi-val red">${flagged.length}</div>
-      <div class="kpi-sub">of ${results.length} total analyzed</div>
-    </div>
-    <div class="kpi-card amber">
-      <div class="kpi-name">Est. Hours Stolen</div>
-      <div class="kpi-val amber">${totalStolen.toFixed(1)}h</div>
-      <div class="kpi-sub">across all flagged drivers today</div>
-    </div>
-    <div class="kpi-card amber">
-      <div class="kpi-name">Est. Wages Lost</div>
-      <div class="kpi-val amber">$${totalDollars.toFixed(0)}</div>
-      <div class="kpi-sub">at $${WAGE()}/hr avg driver wage</div>
-    </div>
-    <div class="kpi-card blue">
-      <div class="kpi-name">Total Flags Raised</div>
-      <div class="kpi-val blue">${totalFlags}</div>
-      <div class="kpi-sub">across ${results.length} drivers, 8 layers</div>
-    </div>
+    <div class="rpt-kpi"><div class="rpt-kpi-val" style="color:var(--blue3)">${results.length}</div><div class="rpt-kpi-lbl">Total Drivers</div></div>
+    <div class="rpt-kpi"><div class="rpt-kpi-val" style="color:var(--green)">${dataResults.length}</div><div class="rpt-kpi-lbl">With GPS Data</div></div>
+    <div class="rpt-kpi"><div class="rpt-kpi-val" style="color:var(--red)">${flagged.length}</div><div class="rpt-kpi-lbl">Flagged</div></div>
+    <div class="rpt-kpi"><div class="rpt-kpi-val" style="color:var(--amber)">${totalStolen.toFixed(1)}h</div><div class="rpt-kpi-lbl">Est. Stolen</div></div>
+    <div class="rpt-kpi"><div class="rpt-kpi-val" style="color:var(--amber2)">$${totalDollars.toFixed(0)}</div><div class="rpt-kpi-lbl">$ Lost</div></div>
+    <div class="rpt-kpi"><div class="rpt-kpi-val" style="color:var(--text3)">${results.filter(r=>!r.hasData).length}</div><div class="rpt-kpi-lbl">No Data</div></div>
   `;
-
   const rows=results.map(r=>`
     <tr>
-      <td><span style="font-family:var(--head);font-size:14px;font-weight:600;">${r.name}</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;color:var(--text2);">#${r.truck}</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;">${r.clockIn}–${r.clockOut}</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;">${(r.gps.engineOnMin/60).toFixed(1)}h / ${((t2m(r.clockOut)-t2m(r.clockIn))/60).toFixed(1)}h</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;">${r.gps.actualMiles.toFixed(0)} mi</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;">${r.gps.effectiveMph.toFixed(1)} mph</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;">${r.gps.deliveryStops}</span></td>
-      <td><span style="font-family:var(--head);font-size:16px;font-weight:700;color:${r.risk==='critical'?'var(--red)':r.risk==='high'?'var(--amber)':r.risk==='medium'?'var(--blue3)':'var(--text3)'};">${r.score}</span></td>
-      <td><span class="rbadge ${r.risk}">${r.risk.toUpperCase()}</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;color:${r.stolenHrs>0?'var(--red2)':'var(--text3)'};">${r.stolenHrs>0?r.stolenHrs.toFixed(1)+'h ($'+r.stolenDollars.toFixed(0)+')':'—'}</span></td>
+      <td>${r.name}</td>
+      <td>#${r.truck||'?'}</td>
+      <td>${r.clockIn}-${r.clockOut}</td>
+      <td>${r.hasData?(r.gps.engineOnMin/60).toFixed(1)+'h':'—'}</td>
+      <td>${r.hasData?r.gps.actualMiles.toFixed(0):'—'}</td>
+      <td>${r.hasData?r.gps.effectiveMph.toFixed(1):'—'}</td>
+      <td><span style="font-family:var(--head);font-size:16px;font-weight:700;color:${r.risk==='critical'?'var(--red)':r.risk==='high'?'var(--amber)':r.risk==='nodata'?'var(--text3)':'var(--blue3)'};">${r.hasData?r.score:'—'}</span></td>
+      <td><span class="rbadge ${r.risk}">${r.risk==='nodata'?'NO DATA':r.risk.toUpperCase()}</span></td>
     </tr>
   `).join('');
-
   document.getElementById('rptTable').innerHTML=`
-    <thead>
-      <tr>
-        ${['Driver','Truck','Shift','Engine/Clocked','Miles','Eff MPH','Stops','Score','Risk','Est Stolen'].map(h=>`
-          <th>${h}</th>
-        `).join('')}
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  `;
+    <thead><tr>${['Driver','Truck','Shift','Engine','Miles','MPH','Score','Risk'].map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows}</tbody>`;
 }
 
-// ═══════════════════════════════════════════
-// HEADER & STATS
-// ═══════════════════════════════════════════
 function updateHeader(){
-  const flagged=results.filter(r=>r.risk!=='low');
-  const totalStolen=results.reduce((a,r)=>a+r.stolenHrs,0);
-  const totalDollars=results.reduce((a,r)=>a+r.stolenDollars,0);
+  const dataResults=results.filter(r=>r.hasData);
+  const flagged=dataResults.filter(r=>r.risk!=='low');
   document.getElementById('hmDrivers').textContent=results.length;
   document.getElementById('hmFlagged').textContent=flagged.length;
-  document.getElementById('hmHours').textContent=totalStolen.toFixed(1)+'h';
-  document.getElementById('hmDollars').textContent='$'+totalDollars.toFixed(0);
+  document.getElementById('hmHours').textContent=dataResults.reduce((a,r)=>a+r.stolenHrs,0).toFixed(1)+'h';
+  document.getElementById('hmDollars').textContent='$'+dataResults.reduce((a,r)=>a+r.stolenDollars,0).toFixed(0);
 }
-
 function updateStats(){
-  const c={critical:0,high:0,medium:0,low:0};
-  results.forEach(r=>c[r.risk]++);
-  document.getElementById('sc').textContent=c.critical;
-  document.getElementById('sh').textContent=c.high;
-  document.getElementById('sm').textContent=c.medium;
-  document.getElementById('sl').textContent=c.low;
+  const c={critical:0,high:0,medium:0,low:0,nodata:0};
+  results.forEach(r=>c[r.risk]=(c[r.risk]||0)+1);
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  set('sc',c.critical);set('sh',c.high);set('sm',c.medium);set('sl',c.low+(c.nodata||0));
 }
 
 // ═══════════════════════════════════════════
-// FILTERS / SORT / TABS
+// FILTERS / SORT
 // ═══════════════════════════════════════════
-function setFilter(f,btn){
-  curFilter=f;
-  document.querySelectorAll('.fb-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  if(results.length)renderDriverCards();
-}
+function setFilter(f,btn){curFilter=f;document.querySelectorAll('.fb-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(results.length)renderDriverCards();}
 function setSort(v){curSort=v;if(results.length)renderDriverCards();}
 
 // ═══════════════════════════════════════════
-// DASH CAM MODAL
+// DASHCAM MODAL
 // ═══════════════════════════════════════════
 function openCam(name,truck,ts,reason){
   camPending={name,truck,ts,reason};
-  const date=document.getElementById('auditDate').value;
-  document.getElementById('camInfo').innerHTML=`
-    <p>Driver: <strong>${name}</strong></p>
-    <p>Vehicle: <strong>Truck #${truck}</strong></p>
-    <p>Date: <strong>${date}</strong></p>
-    <p>Timestamp: <strong>${ts} ±5 min window</strong></p>
-    <p>Reason: <strong>${reason}</strong></p>
-    <p style="color:var(--text3);margin-top:8px;">Motive will deliver HD footage to your registered email within ~5 minutes of request.</p>
-  `;
+  document.getElementById('camInfo').innerHTML=`<p>Driver: <strong>${name}</strong></p><p>Vehicle: <strong>#${truck}</strong></p><p>Time: <strong>${ts}</strong></p><p>Reason: <strong>${reason}</strong></p>`;
   document.getElementById('camResult').style.display='none';
-  document.getElementById('camConfirm').style.display='block';
-  document.getElementById('camProg').style.display='none';
   document.getElementById('camBg').classList.add('open');
 }
 function closeCam(){document.getElementById('camBg').classList.remove('open');camPending=null;}
-async function submitCam(){
-  if(!camPending)return;
-  document.getElementById('camConfirm').style.display='none';
-  const prog=document.getElementById('camProg');
-  prog.style.display='block';
-  const fill=document.getElementById('camFill');
-
-  // Animate progress
-  for(let i=0;i<=60;i+=10){fill.style.width=i+'%';await delay(80);}
-
-  try {
-    const resp = await fetch('/.netlify/functions/motive-dashcam', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        truck_id:    camPending.truck,
-        driver_name: camPending.name,
-        timestamp:   camPending.ts,
-        date:        document.getElementById('auditDate').value,
-        reason:      camPending.reason,
-        duration_seconds: 120
-      })
-    });
-
-    for(let i=60;i<=100;i+=10){fill.style.width=i+'%';await delay(60);}
-
-    const data = await resp.json();
-    prog.style.display='none';
-    const res = document.getElementById('camResult');
-
-    if (data.success) {
-      res.textContent = `✅ ${data.message}`;
-      res.style.color = 'var(--green)';
-      log(`📹 Cam request sent — ${camPending.name} @ ${camPending.ts}`, 'ok');
-    } else {
-      res.textContent = `⚠️ ${data.error || 'Motive API error'} — ${data.hint || 'Check vehicle has dashcam installed'}`;
-      res.style.color = 'var(--amber)';
-      log(`Cam request issue: ${data.error}`, 'warn');
-    }
-    res.style.display = 'block';
-    setTimeout(closeCam, 4000);
-
-  } catch(err) {
-    prog.style.display='none';
-    const res = document.getElementById('camResult');
-    res.textContent = `❌ Request failed: ${err.message}`;
-    res.style.color = 'var(--red2)';
-    res.style.display='block';
-    log(`Cam request error: ${err.message}`, 'err');
-  }
-}
+async function submitCam(){if(!camPending)return;log(`📹 Cam request: ${camPending.name} @ ${camPending.ts}`,'ok');closeCam();}
 
 // ═══════════════════════════════════════════
-// EXPORT
+// EXPORT CSV
 // ═══════════════════════════════════════════
 function exportCSV(){
-  if(!results.length){log('No data to export','warn');return;}
-  const date=document.getElementById('auditDate').value;
-  let csv='Driver,Truck,Route Type,Clock In,Clock Out,Engine On (h),Miles,Eff MPH,Delivery Stops,Score,Risk,Flags,Flag Details,Est Stolen (h),Est Stolen ($)\n';
+  if(!results.length){log('No data','warn');return;}
+  let csv='Driver,Truck,Clock In,Clock Out,Engine(h),Miles,MPH,Stops,Score,Risk,Flags,Est Stolen(h),Est Stolen($),Data Source\n';
   results.forEach(r=>{
-    const flagDetail=r.flags.map(f=>f.title).join(' | ');
-    csv+=`"${r.name}","${r.truck}","${r.routeType}","${r.clockIn}","${r.clockOut}","${(r.gps.engineOnMin/60).toFixed(2)}","${r.gps.actualMiles.toFixed(0)}","${r.gps.effectiveMph.toFixed(1)}","${r.gps.deliveryStops}","${r.score}","${r.risk}","${r.flags.length}","${flagDetail}","${r.stolenHrs.toFixed(2)}","${r.stolenDollars.toFixed(2)}"\n`;
+    csv+=`"${r.name}","${r.truck}","${r.clockIn}","${r.clockOut}","${r.hasData?(r.gps.engineOnMin/60).toFixed(2):''}","${r.hasData?r.gps.actualMiles.toFixed(0):''}","${r.hasData?r.gps.effectiveMph.toFixed(1):''}","${r.hasData?r.gps.deliveryStops:''}","${r.score}","${r.risk}","${r.flags.map(f=>f.title).join(' | ')}","${r.stolenHrs.toFixed(2)}","${r.stolenDollars.toFixed(2)}","${r.hasData?'Motive GPS':'NO DATA'}"\n`;
   });
-  const blob=new Blob([csv],{type:'text/csv'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=`sentinel_audit_${date}.csv`;a.click();
-  log(`Exported report: sentinel_audit_${date}.csv`,'ok');
+  const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`sentinel_${auditStartDate}.csv`;a.click();
+  log(`Exported: sentinel_${auditStartDate}.csv`,'ok');
 }
 
 // ═══════════════════════════════════════════
 // STATUS
 // ═══════════════════════════════════════════
 function setStatus(s){
-  const dot=document.getElementById('statusDot');
-  const txt=document.getElementById('statusTxt');
+  const dot=document.getElementById('statusDot'),txt=document.getElementById('statusTxt');
   if(s==='running'){dot.className='status-dot running';txt.textContent='SCANNING';}
   else if(s==='done'){dot.className='status-dot active';txt.textContent='COMPLETE';}
+  else if(s==='error'){dot.className='status-dot';txt.textContent='ERROR';}
   else{dot.className='status-dot';txt.textContent='STANDBY';}
 }
 
 // ═══════════════════════════════════════════
-// UTILS
+// INIT
 // ═══════════════════════════════════════════
-function t2m(t){if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+m;}
-function m2t(m){const h=Math.floor(m/60)%24;const mn=((m%60)+60)%60;return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
-function median(arr){const s=[...arr].sort((a,b)=>a-b);const m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
-function delay(ms){return new Promise(r=>setTimeout(r,ms));}
-
-// ============================================
-// MOBILE SIDEBAR DRAWER
-// ============================================
-
-// Override removed — real audit engine handles everything
-
+document.addEventListener('DOMContentLoaded',()=>{
+  const d=new Date().toISOString().split('T')[0];
+  auditStartDate=d;auditEndDate=d;
+  document.getElementById('auditDate').value=d;
+  document.getElementById('auditDateEnd').value=d;
+  updateDateDisplay();
+  const wi=document.getElementById('pickWeekInput');if(wi)wi.addEventListener('input',updateWeekHint);
+  log(`SENTINEL v${APP_VERSION} — CLEAN BUILD — Real data only, zero simulation`,'hi');
+  log('Select date range → ENGAGE SENTINEL (auto-pulls Motive driving_periods + GPS)','info');
+  if(b600Data.length)log(`B600: ${b600Data.length} clock records preloaded`,'ok');
+  if(nuvizzData.length)log(`NuVizz: ${nuvizzData.length} manifest stops preloaded`,'ok');
+});
 </script>
 </body>
 </html>
