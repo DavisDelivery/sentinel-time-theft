@@ -621,6 +621,7 @@ const WAREHOUSE = { lat: 34.1477, lng: -83.9610, radiusFt: 1000, name: 'Davis De
 const ULINE = { lat: 34.0980, lng: -83.7786, radiusFt: 1500, name: 'Uline Braselton' };
 
 const KNOWN_LOCATIONS = [WAREHOUSE, ULINE];
+const MIN_SHIFT_MIN = 30;
 // ── DRIVER ROSTER (from Fleet Management) ──
 const DRIVER_ROSTER = {
   // Uline Shuttle — stops at Warehouse+Uline are their JOB. Almost never flag.
@@ -1203,8 +1204,6 @@ function detectStopsFromGPS(locs){
 // ═══════════════════════════════════════════
 // SCORE ENGINE (8 layers — real data only)
 // ═══════════════════════════════════════════
-const MIN_SHIFT_MIN = 30;
-
 function scoreDriver(driver, gps, allDriverGPS){
   const flags=[];let score=0;
   const ciMin=gps.gpsClockIn?t2m(gps.gpsClockIn):t2m(driver.clockIn);
