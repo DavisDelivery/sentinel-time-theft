@@ -556,10 +556,11 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 
 <script>
 // ═══════════════════════════════════════════
-// SENTINEL v1.0.0 — CLEAN BUILD
+// SENTINEL v1.5.0 — CLEAN BUILD
 // REAL DATA ONLY. ZERO SIMULATION.
+// v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -616,12 +617,20 @@ const T = (id) => parseInt(document.getElementById(id).value);
 
 // ── KNOWN LOCATIONS (geofenced — stops here are NOT flagged) ──
 // 943 Gainesville Hwy, Buford GA 30518
-const WAREHOUSE = { lat: 34.1477, lng: -83.9610, radiusFt: 1000, name: 'Davis Delivery Warehouse' };
+// v1.5.0: Expanded to 2000ft to cover full yard + staging area
+const WAREHOUSE = { lat: 34.1477, lng: -83.9610, radiusFt: 2000, name: 'Davis Delivery Warehouse' };
 // 705 Braselton Industrial Blvd, Braselton GA 30517
 const ULINE = { lat: 34.0980, lng: -83.7786, radiusFt: 1500, name: 'Uline Braselton' };
 
 const KNOWN_LOCATIONS = [WAREHOUSE, ULINE];
 const MIN_SHIFT_MIN = 30;
+
+// ── GPS SHIFT WINDOW FILTER ──
+// v1.5.0: Only analyze GPS points within driver's shift ± buffer
+// Eliminates loader/yard activity contaminating route driver analysis
+const SHIFT_BUFFER_BEFORE = 30;  // minutes before clock-in to include
+const SHIFT_BUFFER_AFTER = 90;   // minutes after clock-out (preserves GPS-after-clockout detection)
+
 // ── DRIVER ROSTER (from Fleet Management) ──
 const DRIVER_ROSTER = {
   // Uline Shuttle — stops at Warehouse+Uline are their JOB. Almost never flag.
@@ -1109,15 +1118,41 @@ function buildDriverData(periods){
 
 // ═══════════════════════════════════════════
 // GPS PROCESSING: Real Motive data → metrics
+// v1.5.0: Now applies SHIFT WINDOW FILTER before analysis
 // ═══════════════════════════════════════════
-function processGPSData(locations, clockInMin, clockOutMin){
+function processGPSData(locations, clockInMin, clockOutMin, driverName){
   if(!locations||locations.length===0)return null;
-  const locs=locations.map(l=>{
+
+  // Step 1: Convert all locations to Eastern time
+  let locs=locations.map(l=>{
     const raw=l.located_at||l.timestamp||l.recorded_at;
     const et=toEastern(raw);
     return {...l, _et:et, _etMin:et?(et.getHours()*60+et.getMinutes()):null};
   }).filter(l=>l._et).sort((a,b)=>a._et-b._et);
   if(locs.length===0)return null;
+
+  // ── v1.5.0: SHIFT WINDOW FILTER ──
+  // Only keep GPS points within [clockIn - BUFFER_BEFORE, clockOut + BUFFER_AFTER]
+  // This eliminates loader/yard worker activity that happens on the same truck
+  // outside the driver's actual shift window
+  const totalBeforeFilter = locs.length;
+  const windowStart = clockInMin - SHIFT_BUFFER_BEFORE;
+  const windowEnd = clockOutMin + SHIFT_BUFFER_AFTER;
+  locs = locs.filter(l => {
+    // Handle midnight wraparound: if windowEnd > 1440, allow points in next day
+    if (windowEnd > 1440) {
+      return l._etMin >= windowStart || l._etMin <= (windowEnd - 1440);
+    }
+    return l._etMin >= windowStart && l._etMin <= windowEnd;
+  });
+  const dropped = totalBeforeFilter - locs.length;
+  if (dropped > 0) {
+    log(`GPS filter: ${totalBeforeFilter} total → ${locs.length} within shift window (${m2t(windowStart)}-${m2t(Math.min(windowEnd,1440))})${driverName ? ' ['+driverName+']' : ''}`,'info');
+  }
+  if(locs.length===0){
+    log(`${driverName||'Driver'}: all ${totalBeforeFilter} GPS points fell outside shift window — no data to analyze`,'warn');
+    return null;
+  }
 
   let totalMiles=0, engineOnMin=0;
   for(let i=1;i<locs.length;i++){
@@ -1171,7 +1206,12 @@ function processGPSData(locations, clockInMin, clockOutMin){
     warehouseDwellExtra:Math.max(0,firstMoveMin-effectiveClockIn-10),
     shiftMin, rawLocations:locs.length,
     gpsClockIn:m2t(effectiveClockIn),
-    gpsClockOut:m2t(effectiveClockOut)
+    gpsClockOut:m2t(effectiveClockOut),
+    // v1.5.0: diagnostic fields
+    _totalGpsPoints:totalBeforeFilter,
+    _filteredGpsPoints:locs.length,
+    _droppedGpsPoints:dropped,
+    _shiftWindow:`${m2t(windowStart)}-${m2t(Math.min(windowEnd,1440))}`
   };
 }
 
@@ -1339,6 +1379,8 @@ async function runAudit(){
   const dates=getAuditDates();
   const startDate=dates[0], endDate=dates[dates.length-1];
   log(`SENTINEL v${APP_VERSION} — ${dates.length} day(s): ${startDate} → ${endDate}`,'hi');
+  log(`Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng}`,'info');
+  log(`Shift window filter: -${SHIFT_BUFFER_BEFORE}min / +${SHIFT_BUFFER_AFTER}min`,'info');
 
   try{
     // Step 1: Fetch all vehicles (builds cache for ID lookups)
@@ -1363,7 +1405,7 @@ async function runAudit(){
     // Step 4: For each driver's truck, fetch GPS breadcrumbs
     log(`Fetching GPS breadcrumbs for ${drivers.length} drivers...`,'hi');
     const driverGPSData=[];
-    let gpsOk=0, gpsFail=0;
+    let gpsOk=0, gpsFail=0, totalDropped=0;
     for(let i=0;i<drivers.length;i++){
       const d=drivers[i];
       await delay(150); // rate limit — Motive throttles fast requests
@@ -1374,8 +1416,12 @@ async function runAudit(){
           log(`[${i+1}/${drivers.length}] ${d.name} → truck #${d.truck} (vID: ${d.vehicleId})...`,'info');
           const locs=await fetchVehicleLocations(d.vehicleId, startDate, endDate);
           if(locs.length>0){
-            gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut));
-            if(gps){log(`✅ ${d.name}: ${locs.length} pts, ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`,'ok');gpsOk++;}
+            gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut), d.name);
+            if(gps){
+              log(`✅ ${d.name}: ${gps._filteredGpsPoints} pts (${gps._droppedGpsPoints} dropped), ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`,'ok');
+              gpsOk++;
+              totalDropped+=gps._droppedGpsPoints;
+            }
           }
         } else if(d.truck){
           const cached=vehicleCache[d.truck];
@@ -1383,8 +1429,12 @@ async function runAudit(){
             log(`[${i+1}/${drivers.length}] ${d.name} → truck #${d.truck} (cache)...`,'info');
             const locs=await fetchVehicleLocations(cached.id, startDate, endDate);
             if(locs.length>0){
-              gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut));
-              if(gps){log(`✅ ${d.name}: ${locs.length} pts via cache`,'ok');gpsOk++;}
+              gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut), d.name);
+              if(gps){
+                log(`✅ ${d.name}: ${gps._filteredGpsPoints} pts via cache (${gps._droppedGpsPoints} dropped)`,'ok');
+                gpsOk++;
+                totalDropped+=gps._droppedGpsPoints;
+              }
             }
           }
         }
@@ -1399,12 +1449,12 @@ async function runAudit(){
 
       driverGPSData.push({...d, gps});
     }
-    log(`GPS complete: ${gpsOk} with data, ${drivers.length-gpsOk} without`,'ok');
+    log(`GPS complete: ${gpsOk} with data, ${drivers.length-gpsOk} without, ${totalDropped} total points dropped by shift filter`,'ok');
 
     // Step 5: Score only drivers WITH sufficient GPS data
     const noDataGPS={engineOnMin:0,actualMiles:0,effectiveMph:0,engineFactor:0,lateStart:0,earlyStop:0,
       gpsAfterClockout:false,gpsAfterMin:0,unexplained:[],warehouseStops:[],deliveryStops:0,microStopCount:0,
-      warehouseDwellExtra:0,shiftMin:0,rawLocations:0};
+      warehouseDwellExtra:0,shiftMin:0,rawLocations:0,_totalGpsPoints:0,_filteredGpsPoints:0,_droppedGpsPoints:0,_shiftWindow:''};
     for(let i=0;i<driverGPSData.length;i++){
       const d=driverGPSData[i];
       try{
@@ -1547,6 +1597,9 @@ function renderDriverCards(){
       </div>
     `).join('');
 
+    // v1.5.0: Show shift window filter stats in card metadata
+    const filterInfo = d.gps._droppedGpsPoints > 0 ? ` · FILTERED <b>${d.gps._filteredGpsPoints}/${d.gps._totalGpsPoints}</b>` : '';
+
     card.innerHTML=`
       <div class="dc-hd" onclick="toggleCard(this)">
         <div class="dc-rank">${String(i+1).padStart(2,'0')}</div>
@@ -1562,6 +1615,7 @@ function renderDriverCards(){
             <span class="dc-tag">GPS <b>${d.gps.rawLocations} pts</b></span>
             <span class="dc-tag">FLAGS <b>${d.flags.length}</b></span>
             ${d.stolenHrs>0?`<span class="dc-tag" style="color:var(--red2);">EST <b>${d.stolenHrs.toFixed(1)}h/$${d.stolenDollars.toFixed(0)}</b></span>`:''}
+            ${filterInfo?`<span class="dc-tag" style="color:var(--cyan);">${filterInfo}</span>`:''}
           </div>
         </div>
         <div class="score-ring">
@@ -1605,7 +1659,7 @@ function renderDriverCards(){
             :'<div style="color:var(--green);font-family:var(--mono);font-size:11px;">✅ Clean shift — no flags</div>'}
         </div>
         <div class="timeline-wrap">
-          <div class="tl-title">// GPS Timeline — ${(d.timeline||[]).length} events</div>
+          <div class="tl-title">// GPS Timeline — ${(d.timeline||[]).length} events${d.gps._shiftWindow?' · Window: '+d.gps._shiftWindow:''}</div>
           <div class="tl-track">${timelineHtml}</div>
         </div>
         ${manifestHtml}
@@ -1723,7 +1777,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   loadSettings();
   loadAuditHistory();
   const wi=document.getElementById('pickWeekInput');if(wi)wi.addEventListener('input',updateWeekHint);
-  log(`SENTINEL v${APP_VERSION} — Real data only | Warehouse geofence: 1000ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng} | Timezone: Eastern`,'hi');
+  log(`SENTINEL v${APP_VERSION} — Real data only | Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng} | Shift filter: -${SHIFT_BUFFER_BEFORE}min/+${SHIFT_BUFFER_AFTER}min | Timezone: Eastern`,'hi');
 });
 
 // ═══════════════════════════════════════════
