@@ -417,7 +417,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <div class="empty" id="emptyState">
       <div class="empty-icon">⬡</div>
       <h2>SENTINEL ONLINE</h2>
-      <p>Initialize clock data source (Motive HOS, B600, or CSV), then engage SENTINEL. The 8-layer threat matrix cross-references GPS telemetry against clock records to identify time theft vectors.</p>
+      <p>Select a date, then hit ENGAGE SENTINEL. Pulls driving_periods + GPS breadcrumbs directly from Motive. Upload B600 CSV for clock times, NuVizz CSV for manifest comparison.</p>
     </div>
     <div id="flagsContent" style="display:none;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -781,11 +781,21 @@ async function fetchDrivingPeriods(startDate, endDate){
 // ═══════════════════════════════════════════
 async function fetchVehicleLocations(vehicleId, startDate, endDate){
   const url=`/.netlify/functions/motive-gps?action=vehicle_history&vehicle_id=${vehicleId}&start_date=${startDate}&end_date=${endDate}`;
-  const resp=await fetch(url);
-  if(!resp.ok){log(`v2/vehicle_locations/${vehicleId}: ${resp.status}`,'warn');return[];}
-  const data=await resp.json();
-  const locs=(data.vehicle_locations||data.locations||data.data||[]).map(l=>l.vehicle_location||l);
-  return locs;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),15000); // 15s timeout
+  try{
+    const resp=await fetch(url,{signal:controller.signal});
+    clearTimeout(timeout);
+    if(!resp.ok){log(`v2/vehicle_locations/${vehicleId}: ${resp.status}`,'warn');return[];}
+    const data=await resp.json();
+    const locs=(data.vehicle_locations||data.locations||data.data||[]).map(l=>l.vehicle_location||l);
+    return locs;
+  }catch(err){
+    clearTimeout(timeout);
+    if(err.name==='AbortError')log(`v2/vehicle_locations/${vehicleId}: timeout after 15s`,'warn');
+    else throw err;
+    return[];
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -1090,56 +1100,70 @@ async function runAudit(){
     }
 
     // Step 4: For each driver's truck, fetch GPS breadcrumbs
-    log('Fetching GPS breadcrumbs per vehicle...','hi');
+    log(`Fetching GPS breadcrumbs for ${drivers.length} drivers...`,'hi');
     const driverGPSData=[];
+    let gpsOk=0, gpsFail=0;
     for(let i=0;i<drivers.length;i++){
       const d=drivers[i];
-      await delay(50); // rate limit
+      await delay(150); // rate limit — Motive throttles fast requests
       let gps=null;
 
-      if(d.vehicleId){
-        log(`GPS: ${d.name} → vehicle ${d.truck} (ID: ${d.vehicleId})...`,'info');
-        const locs=await fetchVehicleLocations(d.vehicleId, startDate, endDate);
-        if(locs.length>0){
-          const ciMin=t2m(d.clockIn),coMin=t2m(d.clockOut);
-          gps=processGPSData(locs, ciMin, coMin);
-          if(gps)log(`✅ ${d.name}: ${locs.length} GPS points, ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`,'ok');
-        }
-      } else {
-        // Try looking up vehicle by truck number
-        const cached=vehicleCache[d.truck];
-        if(cached){
-          const locs=await fetchVehicleLocations(cached.id, startDate, endDate);
+      try{
+        if(d.vehicleId){
+          log(`[${i+1}/${drivers.length}] ${d.name} → truck #${d.truck} (vID: ${d.vehicleId})...`,'info');
+          const locs=await fetchVehicleLocations(d.vehicleId, startDate, endDate);
           if(locs.length>0){
             gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut));
-            if(gps)log(`✅ ${d.name}: ${locs.length} GPS points via cache lookup`,'ok');
+            if(gps){log(`✅ ${d.name}: ${locs.length} pts, ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`,'ok');gpsOk++;}
+          }
+        } else if(d.truck){
+          const cached=vehicleCache[d.truck];
+          if(cached){
+            log(`[${i+1}/${drivers.length}] ${d.name} → truck #${d.truck} (cache)...`,'info');
+            const locs=await fetchVehicleLocations(cached.id, startDate, endDate);
+            if(locs.length>0){
+              gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut));
+              if(gps){log(`✅ ${d.name}: ${locs.length} pts via cache`,'ok');gpsOk++;}
+            }
           }
         }
+      }catch(err){
+        log(`⚠️ GPS fetch failed for ${d.name}: ${err.message} — marking NO DATA`,'warn');
+        gpsFail++;
       }
 
       if(!gps){
-        log(`${d.name}: NO GPS DATA — will show as NO DATA (not flagged)`,'warn');
+        if(gpsFail===0)log(`${d.name}: no GPS data for this date`,'warn');
       }
 
       driverGPSData.push({...d, gps});
     }
+    log(`GPS complete: ${gpsOk} with data, ${drivers.length-gpsOk} without`,'ok');
 
     // Step 5: Score only drivers WITH GPS data
     for(let i=0;i<driverGPSData.length;i++){
       const d=driverGPSData[i];
-      if(d.gps){
-        const scored=scoreDriver(d, d.gps, driverGPSData);
-        results.push(scored);
-      } else {
-        // NO DATA card — never flagged
-        results.push({
-          ...d, score:0, risk:'nodata', flags:[], layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0},
+      try{
+        if(d.gps){
+          const scored=scoreDriver(d, d.gps, driverGPSData);
+          results.push(scored);
+        } else {
+          results.push({
+            ...d, score:0, risk:'nodata', flags:[], layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0},
+            gps:{engineOnMin:0,actualMiles:0,effectiveMph:0,engineFactor:0,lateStart:0,earlyStop:0,
+              gpsAfterClockout:false,gpsAfterMin:0,unexplained:[],deliveryStops:0,microStopCount:0,
+              warehouseDwellExtra:0,shiftMin:0,rawLocations:0},
+            stolenHrs:0, stolenDollars:0, timeline:[], engineGapMin:0, manifestStops:[],
+            hasData:false
+          });
+        }
+      }catch(err){
+        log(`Score error for ${d.name}: ${err.message}`,'err');
+        results.push({...d,score:0,risk:'nodata',flags:[],layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0},
           gps:{engineOnMin:0,actualMiles:0,effectiveMph:0,engineFactor:0,lateStart:0,earlyStop:0,
             gpsAfterClockout:false,gpsAfterMin:0,unexplained:[],deliveryStops:0,microStopCount:0,
             warehouseDwellExtra:0,shiftMin:0,rawLocations:0},
-          stolenHrs:0, stolenDollars:0, timeline:[], engineGapMin:0, manifestStops:[],
-          hasData:false
-        });
+          stolenHrs:0,stolenDollars:0,timeline:[],engineGapMin:0,manifestStops:[],hasData:false});
       }
     }
 
