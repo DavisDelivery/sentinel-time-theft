@@ -529,8 +529,8 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <input type="range" min="5" max="45" value="20" id="t4" oninput="document.getElementById('tv4').textContent=this.value+' min'">
     <label><div class="thresh-row"><span>Velocity Floor</span><span class="thresh-val" id="tv5">12 mph</span></div></label>
     <input type="range" min="5" max="30" value="12" id="t5" oninput="document.getElementById('tv5').textContent=this.value+' mph'">
-    <label><div class="thresh-row"><span>Micro-Stop Cluster</span><span class="thresh-val" id="tv6">3 stops</span></div></label>
-    <input type="range" min="2" max="8" value="3" id="t6" oninput="document.getElementById('tv6').textContent=this.value+' stops'">
+    <label><div class="thresh-row"><span>Micro-Stop Cluster</span><span class="thresh-val" id="tv6">5 stops</span></div></label>
+    <input type="range" min="2" max="8" value="5" id="t6" oninput="document.getElementById('tv6').textContent=this.value+' stops'">
     <label><div class="thresh-row"><span>Peer Deviation</span><span class="thresh-val" id="tv7">25%</span></div></label>
     <input type="range" min="10" max="60" value="25" id="t7" oninput="document.getElementById('tv7').textContent=this.value+'%'">
     <button class="modal-close" onclick="closeSettings()">DONE</button>
@@ -559,7 +559,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // SENTINEL v1.0.0 — CLEAN BUILD
 // REAL DATA ONLY. ZERO SIMULATION.
 // ═══════════════════════════════════════════
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.4.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -614,10 +614,141 @@ let vehicleCache = {}; // {vehicleNumber: {id, make, model, year, ...}}
 const WAGE = () => parseFloat(document.getElementById('wageRate').value)||23;
 const T = (id) => parseInt(document.getElementById(id).value);
 
-// ── WAREHOUSE GEOFENCE ──
+// ── KNOWN LOCATIONS (geofenced — stops here are NOT flagged) ──
 // 943 Gainesville Hwy, Buford GA 30518
 const WAREHOUSE = { lat: 34.1477, lng: -83.9610, radiusFt: 1000, name: 'Davis Delivery Warehouse' };
-const MIN_SHIFT_MIN = 30; // Shifts under 30min = "insufficient data", not scored
+// 705 Braselton Industrial Blvd, Braselton GA 30517
+const ULINE = { lat: 34.0980, lng: -83.7786, radiusFt: 1500, name: 'Uline Braselton' };
+
+const KNOWN_LOCATIONS = [WAREHOUSE, ULINE];
+// ── DRIVER ROSTER (from Fleet Management) ──
+const DRIVER_ROSTER = {
+  // Uline Shuttle — stops at Warehouse+Uline are their JOB. Almost never flag.
+  'james davis':{role:'shuttle',type:'tractor',co:'davis'},
+  'jew williams':{role:'shuttle',type:'tractor',co:'davis'},
+  'jonathan sailors':{role:'shuttle',type:'tractor',co:'davis'},
+  'johnathan sailers':{role:'shuttle',type:'tractor',co:'davis'},
+  'leslie thomas':{role:'shuttle',type:'tractor',co:'davis'},
+  // Load/Shift — yard work, not route drivers
+  'brad goodroe':{role:'loadshift',type:'tractor',co:'davis'},
+  // Davis Tractor Drivers — longer routes, fewer stops, more highway
+  'allen council':{role:'tractor',type:'tractor',co:'davis'},
+  'anthony kostner':{role:'tractor',type:'tractor',co:'davis'},
+  'brent bryd':{role:'tractor',type:'tractor',co:'davis'},
+  'brett spradley':{role:'tractor',type:'tractor',co:'davis'},
+  'brian worley':{role:'tractor',type:'tractor',co:'davis'},
+  'che roberts':{role:'tractor',type:'tractor',co:'davis'},
+  'chris head':{role:'tractor',type:'tractor',co:'davis'},
+  'darvin cepeda':{role:'tractor',type:'tractor',co:'davis'},
+  'denis salkic':{role:'tractor',type:'tractor',co:'davis'},
+  'garry pitts':{role:'tractor',type:'tractor',co:'davis'},
+  'jim pallette':{role:'tractor',type:'tractor',co:'davis'},
+  'junior thomas':{role:'tractor',type:'tractor',co:'davis'},
+  'marcus young':{role:'tractor',type:'tractor',co:'davis'},
+  'mareese johnson':{role:'tractor',type:'tractor',co:'davis'},
+  'montel bishop':{role:'tractor',type:'tractor',co:'davis'},
+  'rasko suljic':{role:'tractor',type:'tractor',co:'davis'},
+  'robert best':{role:'tractor',type:'tractor',co:'davis'},
+  'terrance hawk':{role:'tractor',type:'tractor',co:'davis'},
+  'victor fernandez':{role:'tractor',type:'tractor',co:'davis'},
+  'william goodwin':{role:'tractor',type:'tractor',co:'davis'},
+  'andre murphy':{role:'tractor',type:'tractor',co:'davis'},
+  // Davis Straight/Box Drivers — local routes, more stops
+  'aaron mitchell':{role:'straight',type:'straight',co:'davis'},
+  'brent dixon':{role:'straight',type:'straight',co:'davis'},
+  'enock akyea':{role:'straight',type:'straight',co:'davis'},
+  'john thompson':{role:'straight',type:'straight',co:'davis'},
+  'leroy smith':{role:'straight',type:'straight',co:'davis'},
+  'mandi malbrough':{role:'straight',type:'straight',co:'davis'},
+  'mandi malborough':{role:'straight',type:'straight',co:'davis'},
+  'marcus crumpton':{role:'straight',type:'straight',co:'davis'},
+  'michael frye':{role:'straight',type:'straight',co:'davis'},
+  'michael tharp':{role:'straight',type:'straight',co:'davis'},
+  'rasheed davis':{role:'straight',type:'straight',co:'davis'},
+  'scott hart':{role:'straight',type:'straight',co:'davis'},
+  'tariq hammou':{role:'straight',type:'straight',co:'davis'},
+  'terrence taylor':{role:'straight',type:'straight',co:'davis'},
+  'terry gambrell':{role:'straight',type:'straight',co:'davis'},
+  'tobias johnson':{role:'straight',type:'straight',co:'davis'},
+  'trevarr howard':{role:'straight',type:'straight',co:'davis'},
+  'william kidd':{role:'straight',type:'straight',co:'davis'},
+  'trevor syers':{role:'straight',type:'straight',co:'davis'},
+  // Owner Operators
+  'alfred morgan':{role:'straight',type:'straight',co:'owner'},
+  'anthony bennett':{role:'straight',type:'straight',co:'owner'},
+  'ben paintsil':{role:'straight',type:'straight',co:'owner'},
+  'colin calhoun':{role:'straight',type:'straight',co:'owner'},
+  'dj mccrary':{role:'straight',type:'straight',co:'owner'},
+  'frank okine':{role:'straight',type:'straight',co:'owner'},
+  'fred andi':{role:'straight',type:'straight',co:'owner'},
+  'george leonard':{role:'tractor',type:'tractor',co:'owner'},
+  'jean delsion':{role:'tractor',type:'tractor',co:'owner'},
+  'ken watkins':{role:'straight',type:'straight',co:'owner'},
+  'kobe kawakabe':{role:'straight',type:'straight',co:'owner'},
+  'martin wyatt':{role:'straight',type:'straight',co:'owner'},
+  'mone watkins':{role:'straight',type:'straight',co:'owner'},
+  'nana owusu':{role:'straight',type:'straight',co:'owner'},
+  'olamide kazeem':{role:'straight',type:'straight',co:'owner'},
+  'oyieke nelson':{role:'straight',type:'straight',co:'owner'},
+  'richard mawuenyega':{role:'straight',type:'straight',co:'owner'},
+  'ronald gates':{role:'straight',type:'straight',co:'owner'},
+  'samuel osei':{role:'straight',type:'straight',co:'owner'},
+  'theo afunyah':{role:'straight',type:'straight',co:'owner'},
+  'vincent bonzo':{role:'straight',type:'straight',co:'owner'},
+  'pierre adeaban':{role:'straight',type:'straight',co:'owner'},
+  'jovenski gibbs':{role:'straight',type:'straight',co:'owner'},
+};
+
+function getDriverProfile(name) {
+  const key = name.toLowerCase().trim();
+  // Try exact match first, then first+last partial
+  if (DRIVER_ROSTER[key]) return DRIVER_ROSTER[key];
+  // Try matching on first name + partial last
+  for (const [k, v] of Object.entries(DRIVER_ROSTER)) {
+    if (key.includes(k.split(' ')[0]) && k.includes(key.split(' ').pop())) return v;
+  }
+  return { role: 'unknown', type: 'unknown', co: 'unknown' };
+}
+
+// Role-based scoring thresholds — shuttle drivers need much more tolerance
+function getRoleThresholds(role) {
+  if (role === 'shuttle') return {
+    stopMin: 120,    // 2hr stops normal at Uline
+    engineGap: 180,  // lots of idle waiting for loads
+    lateStart: 60,   // may wait for load assignment
+    earlyStop: 60,
+    velocityFloor: 5,  // lots of sitting
+    microCluster: 10,  // irrelevant for shuttles
+    peerDev: 50,
+    skipFlags: ['Excessive Warehouse Dwell', 'Late First Movement'] // never flag these
+  };
+  if (role === 'loadshift') return {
+    stopMin: 90, engineGap: 150, lateStart: 45, earlyStop: 45,
+    velocityFloor: 5, microCluster: 10, peerDev: 50,
+    skipFlags: ['Excessive Warehouse Dwell', 'Late First Movement']
+  };
+  if (role === 'tractor') return {
+    stopMin: 35,      // tractor stops take longer (dock time, waiting)
+    engineGap: 90,    // more idle at docks
+    lateStart: 30,
+    earlyStop: 30,
+    velocityFloor: 10, // highway + dock mix
+    microCluster: 6,
+    peerDev: 30,
+    skipFlags: []
+  };
+  // straight/box truck — tightest thresholds
+  return {
+    stopMin: T('t1'),  // default from settings slider
+    engineGap: T('t2'),
+    lateStart: T('t3'),
+    earlyStop: T('t4'),
+    velocityFloor: T('t5'),
+    microCluster: T('t6'),
+    peerDev: T('t7'),
+    skipFlags: []
+  };
+}
 
 // Haversine distance in feet between two lat/lng points
 function distFt(lat1, lng1, lat2, lng2) {
@@ -631,6 +762,14 @@ function distFt(lat1, lng1, lat2, lng2) {
 function isAtWarehouse(lat, lng) {
   if (!lat || !lng) return false;
   return distFt(lat, lng, WAREHOUSE.lat, WAREHOUSE.lng) <= WAREHOUSE.radiusFt;
+}
+
+function isAtKnownLocation(lat, lng) {
+  if (!lat || !lng) return null;
+  for (const loc of KNOWN_LOCATIONS) {
+    if (distFt(lat, lng, loc.lat, loc.lng) <= loc.radiusFt) return loc.name;
+  }
+  return null;
 }
 
 // ── UTC → EASTERN TIME CONVERSION ──
@@ -989,11 +1128,11 @@ function processGPSData(locations, clockInMin, clockOutMin){
   }
   locs.forEach(l=>{if(l.distance_miles)totalMiles=Math.max(totalMiles,l.distance_miles);});
 
-  // Filter to NON-warehouse moving locations for first/last movement
+  // Filter to NON-known-location moving points for first/last movement
   const movingNonWH=locs.filter(l=>{
     const lat=l.lat||l.latitude||0;
     const lng=l.lng||l.lon||l.longitude||0;
-    return (l.speed||0)>2 && !isAtWarehouse(lat, lng);
+    return (l.speed||0)>2 && !isAtKnownLocation(lat, lng);
   });
 
   let firstMoveMin=clockInMin, lastMoveMin=clockOutMin;
@@ -1002,30 +1141,36 @@ function processGPSData(locations, clockInMin, clockOutMin){
     lastMoveMin=movingNonWH[movingNonWH.length-1]._etMin;
   }
 
+  // Use GPS to establish real shift boundaries
+  const effectiveClockIn=Math.min(clockInMin, firstMoveMin);
+  const effectiveClockOut=Math.max(clockOutMin, lastMoveMin);
+  const shiftMin=Math.max(effectiveClockOut-effectiveClockIn,1);
+
   const stops=detectStopsFromGPS(locs);
-  const shiftMin=Math.max(clockOutMin-clockInMin,1);
   const effectiveMph=totalMiles/(shiftMin/60);
 
-  // GPS after clock-out (exclude warehouse — returning truck is normal)
+  // GPS after effective clock-out (exclude known locations)
   const afterClockout=locs.filter(l=>{
     const lat=l.lat||l.latitude||0;
     const lng=l.lng||l.lon||l.longitude||0;
-    return l._etMin>clockOutMin+5 && (l.speed||0)>2 && !isAtWarehouse(lat,lng);
+    return l._etMin>effectiveClockOut+5 && (l.speed||0)>2 && !isAtKnownLocation(lat,lng);
   });
 
   return{
     isLive:true, engineOnMin, actualMiles:totalMiles, effectiveMph,
     engineFactor:engineOnMin/shiftMin,
-    lateStart:Math.max(0,firstMoveMin-clockInMin),
-    earlyStop:Math.max(0,clockOutMin-lastMoveMin),
+    lateStart:Math.max(0,firstMoveMin-effectiveClockIn),
+    earlyStop:Math.max(0,effectiveClockOut-lastMoveMin),
     gpsAfterClockout:afterClockout.length>0,
     gpsAfterMin:afterClockout.length*2,
-    unexplained:stops.filter(s=>!s.isWarehouse), // Only non-warehouse stops get flagged
+    unexplained:stops.filter(s=>!s.isWarehouse),
     warehouseStops:stops.filter(s=>s.isWarehouse),
     deliveryStops:stops.filter(s=>!s.isWarehouse).length,
     microStopCount:stops.filter(s=>!s.isWarehouse&&s.dur<T('t1')&&s.dur>=5).length,
-    warehouseDwellExtra:Math.max(0,firstMoveMin-clockInMin-10),
-    shiftMin, rawLocations:locs.length
+    warehouseDwellExtra:Math.max(0,firstMoveMin-effectiveClockIn-10),
+    shiftMin, rawLocations:locs.length,
+    gpsClockIn:m2t(effectiveClockIn),
+    gpsClockOut:m2t(effectiveClockOut)
   };
 }
 
@@ -1041,11 +1186,11 @@ function detectStopsFromGPS(locs){
       if(stopStart!==null){
         const dur=tsMin-stopStart;
         if(dur>=5){
-          const atWH=isAtWarehouse(stopLat,stopLng);
+          const knownName=isAtKnownLocation(stopLat,stopLng);
           stops.push({time:m2t(stopStart),timeMin:stopStart,dur,
-            location:atWH?'🏭 WAREHOUSE':loc.description||`${stopLat?.toFixed(4)},${stopLng?.toFixed(4)}`,
-            flagged:!atWH && dur>=stopThresh,
-            isWarehouse:atWH,
+            location:knownName?('🏭 '+knownName):loc.description||`${stopLat?.toFixed(4)},${stopLng?.toFixed(4)}`,
+            flagged:!knownName && dur>=stopThresh,
+            isWarehouse:!!knownName,
             lat:stopLat,lng:stopLng});
         }
         stopStart=null;
@@ -1058,79 +1203,92 @@ function detectStopsFromGPS(locs){
 // ═══════════════════════════════════════════
 // SCORE ENGINE (8 layers — real data only)
 // ═══════════════════════════════════════════
+const MIN_SHIFT_MIN = 30;
+
 function scoreDriver(driver, gps, allDriverGPS){
   const flags=[];let score=0;
-  const ciMin=t2m(driver.clockIn),coMin=t2m(driver.clockOut);
+  const ciMin=gps.gpsClockIn?t2m(gps.gpsClockIn):t2m(driver.clockIn);
+  const coMin=gps.gpsClockOut?t2m(gps.gpsClockOut):t2m(driver.clockOut);
   const layers={timeMotion:0,stopPattern:0,baseline:0,peer:0};
+
+  // Get role-based thresholds
+  const profile=getDriverProfile(driver.name);
+  const th=getRoleThresholds(profile.role);
+  const skip=new Set(th.skipFlags||[]);
 
   // L1a: Clock vs Engine gap
   const engineGapMin=(coMin-ciMin)-gps.engineOnMin;
-  if(engineGapMin>T('t2')){
+  if(engineGapMin>th.engineGap){
     const pts=35;score+=pts;layers.timeMotion+=pts;
     flags.push({ico:'⏱️',sev:'critical',title:'Clock/Engine Time Gap',
       detail:`Clocked ${((coMin-ciMin)/60).toFixed(1)}h but engine on ${(gps.engineOnMin/60).toFixed(1)}h — ${engineGapMin.toFixed(0)}min gap`,pts,time:driver.clockIn});
   }
 
   // L1b: Velocity floor
-  if(gps.effectiveMph<T('t5')&&gps.actualMiles>5){
+  if(gps.effectiveMph<th.velocityFloor&&gps.actualMiles>5){
     const pts=25;score+=pts;layers.timeMotion+=pts;
     flags.push({ico:'🐢',sev:'high',title:'Low Route Velocity',
-      detail:`${gps.effectiveMph.toFixed(1)} mph effective vs ${T('t5')} mph floor`,pts,time:null});
+      detail:`${gps.effectiveMph.toFixed(1)} mph effective vs ${th.velocityFloor} mph floor`,pts,time:null});
   }
 
-  // L1c: Late first movement
-  if(gps.lateStart>T('t3')){
+  // L1c: Late first movement (skip for shuttle/loadshift)
+  if(!skip.has('Late First Movement')&&gps.lateStart>th.lateStart){
     const pts=20;score+=pts;layers.timeMotion+=pts;
     flags.push({ico:'🌅',sev:'high',title:'Late First Movement',
-      detail:`Clocked in at ${driver.clockIn} but no movement for ${gps.lateStart}min`,pts,time:driver.clockIn});
+      detail:`No movement for ${gps.lateStart}min after clock-in`,pts,time:driver.clockIn});
   }
 
   // L1d: Early last movement
-  if(gps.earlyStop>T('t4')){
+  if(gps.earlyStop>th.earlyStop){
     const pts=20;score+=pts;layers.timeMotion+=pts;
     flags.push({ico:'🏁',sev:'high',title:'Stopped Before Clock-Out',
-      detail:`Last movement ${gps.earlyStop}min before ${driver.clockOut} clock-out`,pts,time:m2t(coMin-gps.earlyStop)});
+      detail:`Last movement ${gps.earlyStop}min before clock-out`,pts,time:m2t(coMin-gps.earlyStop)});
   }
 
-  // L1e: GPS after clock-out
+  // L1e: GPS after clock-out (already excludes known locations)
   if(gps.gpsAfterClockout){
     const pts=45;score+=pts;layers.timeMotion+=pts;
     flags.push({ico:'🚨',sev:'critical',title:'VEHICLE MOVED AFTER CLOCK-OUT',
-      detail:`Movement detected ${gps.gpsAfterMin}min after ${driver.clockOut} clock-out`,pts,time:m2t(coMin+gps.gpsAfterMin)});
+      detail:`Movement detected ${gps.gpsAfterMin}min after clock-out — NOT at warehouse or Uline`,pts,time:m2t(coMin+gps.gpsAfterMin)});
   }
 
-  // L5: Unexplained stops
+  // L5: Unexplained stops — only flag stops ABOVE role threshold
   gps.unexplained.forEach(stop=>{
-    if(stop.flagged){
+    if(stop.dur>=th.stopMin){
       const pts=25;score+=pts;layers.stopPattern+=pts;
       flags.push({ico:'🅿️',sev:'high',title:`Stop — ${stop.dur}min`,
-        detail:`${stop.time} at ${stop.location} — ${stop.dur}min exceeds ${T('t1')}min threshold`,pts,time:stop.time});
+        detail:`${stop.time} at ${stop.location} — ${stop.dur}min exceeds ${th.stopMin}min threshold for ${profile.role}`,pts,time:stop.time});
     }
   });
 
-  // L5b: Micro-stop cluster
-  if(gps.microStopCount>=T('t6')){
+  // L5b: Micro-stop cluster — only for route drivers, not shuttle/loadshift
+  const microCount=gps.unexplained.filter(s=>!s.isWarehouse&&s.dur<th.stopMin&&s.dur>=5).length;
+  if(microCount>=th.microCluster){
     const pts=20;score+=pts;layers.stopPattern+=pts;
     flags.push({ico:'🔁',sev:'high',title:'Micro-Stop Cluster',
-      detail:`${gps.microStopCount} short stops under threshold — classic evasion pattern`,pts,time:null});
+      detail:`${microCount} short stops under ${th.stopMin}min threshold`,pts,time:null});
   }
 
-  // L5c: Warehouse dwell
-  if(gps.warehouseDwellExtra>25){
+  // L5c: Warehouse dwell (skip for shuttle/loadshift)
+  if(!skip.has('Excessive Warehouse Dwell')&&gps.warehouseDwellExtra>25){
     const pts=25;score+=pts;layers.stopPattern+=pts;
     flags.push({ico:'🏭',sev:'high',title:'Excessive Warehouse Dwell',
-      detail:`${gps.warehouseDwellExtra}min stationary at start before departing`,pts,time:driver.clockIn});
+      detail:`${gps.warehouseDwellExtra}min stationary before departing`,pts,time:driver.clockIn});
   }
 
-  // L8: Peer comparison
-  const peerGPS=allDriverGPS.filter(p=>p&&p.gps&&p.gps.effectiveMph>0);
-  if(peerGPS.length>1){
+  // L8: Peer comparison — only compare within same role
+  const peerGPS=allDriverGPS.filter(p=>{
+    if(!p||!p.gps||p.gps.effectiveMph<=0)return false;
+    const pProfile=getDriverProfile(p.name);
+    return pProfile.role===profile.role; // only compare tractor vs tractor, straight vs straight
+  });
+  if(peerGPS.length>2){
     const peerMedian=median(peerGPS.map(p=>p.gps.effectiveMph));
     const dev=(peerMedian-gps.effectiveMph)/Math.max(peerMedian,1);
-    if(dev>T('t7')/100){
+    if(dev>th.peerDev/100){
       const pts=Math.min(25,Math.floor(dev*60));score+=pts;layers.peer+=pts;
-      flags.push({ico:'👥',sev:pts>15?'high':'medium',title:'Below Peer Group',
-        detail:`${gps.effectiveMph.toFixed(1)} mph vs peer median ${peerMedian.toFixed(1)} mph — ${(dev*100).toFixed(0)}% below`,pts,time:null});
+      flags.push({ico:'👥',sev:pts>15?'high':'medium',title:`Below ${profile.role} Peers`,
+        detail:`${gps.effectiveMph.toFixed(1)} mph vs ${profile.role} median ${peerMedian.toFixed(1)} mph — ${(dev*100).toFixed(0)}% below`,pts,time:null});
     }
   }
 
@@ -1144,29 +1302,30 @@ function scoreDriver(driver, gps, allDriverGPS){
   if(score>=80)risk='critical';else if(score>=50)risk='high';else if(score>=25)risk='medium';
 
   const stolenMin=Math.max(0,
-    Math.max(0,engineGapMin-15)*0.7+
-    gps.unexplained.filter(s=>s.flagged).reduce((a,s)=>a+s.dur,0)+
-    (gps.lateStart>T('t3')?gps.lateStart-T('t3'):0)+
-    (gps.earlyStop>T('t4')?gps.earlyStop-T('t4'):0)+
+    Math.max(0,engineGapMin-th.engineGap)*0.7+
+    gps.unexplained.filter(s=>s.dur>=th.stopMin).reduce((a,s)=>a+s.dur,0)+
+    (!skip.has('Late First Movement')&&gps.lateStart>th.lateStart?gps.lateStart-th.lateStart:0)+
+    (gps.earlyStop>th.earlyStop?gps.earlyStop-th.earlyStop:0)+
     (gps.gpsAfterClockout?gps.gpsAfterMin:0)+
-    (gps.warehouseDwellExtra>25?gps.warehouseDwellExtra-10:0)
+    (!skip.has('Excessive Warehouse Dwell')&&gps.warehouseDwellExtra>25?gps.warehouseDwellExtra-10:0)
   );
 
   const timeline=[];
-  if(driver.clockIn)timeline.push({t:driver.clockIn,type:'move',txt:'Clock-in'});
-  if(gps.lateStart>0)timeline.push({t:m2t(ciMin+gps.lateStart),type:'move',txt:`First movement (+${gps.lateStart}min)`});
+  if(driver.clockIn)timeline.push({t:gps.gpsClockIn||driver.clockIn,type:'move',txt:'Clock-in'});
+  if(gps.lateStart>0)timeline.push({t:m2t(ciMin+gps.lateStart),type:gps.lateStart>th.lateStart?'flag':'move',txt:`First movement (+${gps.lateStart}min)`});
   gps.unexplained.slice(0,5).forEach(s=>{
-    timeline.push({t:s.time,type:s.flagged?'flag':'stop',txt:`${s.flagged?'⚠️ ':''}${s.dur}min at ${s.location}`});
+    timeline.push({t:s.time,type:s.dur>=th.stopMin?'flag':'stop',txt:`${s.dur>=th.stopMin?'⚠️ ':''}${s.dur}min at ${s.location}`});
   });
-  if(gps.earlyStop>T('t4'))timeline.push({t:m2t(coMin-gps.earlyStop),type:'flag',txt:`Truck stopped ${gps.earlyStop}min before clock-out`});
-  if(driver.clockOut)timeline.push({t:driver.clockOut,type:'move',txt:'Clock-out'});
+  if(gps.earlyStop>th.earlyStop)timeline.push({t:m2t(coMin-gps.earlyStop),type:'flag',txt:`Truck stopped ${gps.earlyStop}min before clock-out`});
+  if(driver.clockOut)timeline.push({t:gps.gpsClockOut||driver.clockOut,type:'move',txt:'Clock-out'});
   if(gps.gpsAfterClockout)timeline.push({t:m2t(coMin+gps.gpsAfterMin),type:'flag',txt:`🚨 Movement ${gps.gpsAfterMin}min after clock-out`});
   timeline.sort((a,b)=>t2m(a.t)-t2m(b.t));
 
   return{
     ...driver, score, risk, flags, layers, gps,
     stolenHrs:stolenMin/60, stolenDollars:(stolenMin/60)*WAGE(),
-    timeline, engineGapMin, manifestStops, hasData:true
+    timeline, engineGapMin, manifestStops, hasData:true,
+    driverRole:profile.role, driverType:profile.type, driverCo:profile.co
   };
 }
 
@@ -1393,11 +1552,11 @@ function renderDriverCards(){
       <div class="dc-hd" onclick="toggleCard(this)">
         <div class="dc-rank">${String(i+1).padStart(2,'0')}</div>
         <div class="dc-info">
-          <h3>${d.name}${d.b600Matched?' <span style="color:var(--green);font-size:9px;">●B600</span>':''}</h3>
+          <h3>${d.name}${d.b600Matched?' <span style="color:var(--green);font-size:9px;">●B600</span>':''}${d.driverRole?` <span style="font-size:9px;color:var(--text2);font-weight:400;font-family:var(--mono);">${d.driverRole}${d.driverCo==='owner'?' (OO)':''}</span>`:''}</h3>
           <div class="dc-meta">
             <span class="dc-tag">TRK <b>#${d.truck}</b></span>
-            <span class="dc-tag">IN <b>${d.clockIn}</b></span>
-            <span class="dc-tag">OUT <b>${d.clockOut}</b></span>
+            <span class="dc-tag">IN <b>${d.gps?.gpsClockIn||d.clockIn}</b></span>
+            <span class="dc-tag">OUT <b>${d.gps?.gpsClockOut||d.clockOut}</b></span>
             <span class="dc-tag">ENGINE <b>${(d.gps.engineOnMin/60).toFixed(1)}h</b></span>
             <span class="dc-tag">MILES <b>${d.gps.actualMiles.toFixed(0)}</b></span>
             <span class="dc-tag">MPH <b>${d.gps.effectiveMph.toFixed(1)}</b></span>
