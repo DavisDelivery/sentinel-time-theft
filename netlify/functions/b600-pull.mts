@@ -249,6 +249,5 @@ export default async (req: Request) => {
 
 // ── Schedule: 2am ET daily ──────────────────────────────────────────
 export const config: Config = {
-  schedule: "0 6 * * *",  // 6am UTC = 2am ET
-  path: "/api/b600-pull",
+  schedule: "0 6 * * *", // 6am UTC = 2am ET
 };
