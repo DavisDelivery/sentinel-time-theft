@@ -1,0 +1,12 @@
+{
+  "name": "sentinel",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@netlify/functions": "^4.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
