@@ -560,7 +560,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -899,23 +899,53 @@ function parseB600CSV(e){
   const reader=new FileReader();
   reader.onload=ev=>{
     try{
-      const lines=ev.target.result.split('\n').filter(l=>l.trim());
-      const header=lines[0].toLowerCase();
+      const text=ev.target.result.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+      const lines=text.split('\n').filter(l=>l.trim());
+      const headers=lines[0].split(',').map(h=>h.trim().replace(/"/g,'').toLowerCase());
+
+      // Smart column detection
+      const nameCol=headers.findIndex(h=>h.includes('display name')||h.includes('employee')||h.includes('name'));
+      const dateCol=headers.findIndex(h=>h==='date'||h.includes('punch date'));
+      const inTimeCol=headers.findIndex(h=>h==='in time'||h==='time in'||h==='clock in');
+      const outTimeCol=headers.findIndex(h=>h==='out time'||h==='time out'||h==='clock out');
+      // Fallback: if no header match, try positional (name=0, in=5, out=7 for standard B600 export)
+      const ni=nameCol>=0?nameCol:0;
+      const ii=inTimeCol>=0?inTimeCol:5;
+      const oi=outTimeCol>=0?outTimeCol:7;
+      const di=dateCol>=0?dateCol:3;
+
+      log(`B600 columns: name=${ni}(${headers[ni]}), date=${di}(${headers[di]}), in=${ii}(${headers[ii]}), out=${oi}(${headers[oi]})`,'info');
+
       b600Data=lines.slice(1).map(l=>{
+        if(!l.trim())return null;
         const c=l.split(',').map(x=>x.trim().replace(/"/g,''));
-        return{name:c[0]||'',clockIn:extractTime(c[1]||c[2]||''),clockOut:extractTime(c[2]||c[3]||'')};
-      }).filter(r=>r.name&&r.clockIn);
+        const name=c[ni]||'';
+        const clockIn=extractTime(c[ii]||'');
+        const clockOut=extractTime(c[oi]||'');
+        const date=c[di]||'';
+        return{name,clockIn,clockOut,date};
+      }).filter(r=>r&&r.name&&r.clockIn);
       document.getElementById('upB600').classList.add('loaded');
-      document.getElementById('upLabel').textContent=`✅ B600: ${b600Data.length} records`;
+      const dates=new Set(b600Data.map(r=>r.date));
+      document.getElementById('upLabel').textContent=`✅ B600: ${b600Data.length} punches, ${dates.size} day(s)`;
       log(`Parsed ${b600Data.length} B600 clock records from ${file.name}`,'ok');
+      // Show sample to verify
+      if(b600Data.length>0){
+        const s=b600Data[0];
+        log(`  Sample: ${s.name} — IN ${s.clockIn}, OUT ${s.clockOut} (${s.date})`,'info');
+      }
     }catch(err){log(`B600 CSV parse error: ${err.message}`,'err');}
   };
   reader.readAsText(file);
 }
 
 function extractTime(str){
-  if(!str)return'';const m=str.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?/);if(!m)return'';
-  let h=parseInt(m[1]);if(m[3]&&m[3].toUpperCase()==='PM'&&h<12)h+=12;if(m[3]&&m[3].toUpperCase()==='AM'&&h===12)h=0;
+  if(!str)return'';
+  // Handle B600 format "05:52a"/"03:11p" AND standard "05:52 AM"/"3:11 PM"
+  const m=str.match(/(\d{1,2}):(\d{2})\s*(AM?|PM?|am?|pm?)?/);if(!m)return'';
+  let h=parseInt(m[1]);const ap=(m[3]||'').toUpperCase();
+  if(ap.startsWith('P')&&h<12)h+=12;
+  if(ap.startsWith('A')&&h===12)h=0;
   return String(h).padStart(2,'0')+':'+m[2];
 }
 
@@ -927,14 +957,56 @@ function parseNuVizzCSV(e){
   const reader=new FileReader();
   reader.onload=ev=>{
     try{
-      const lines=ev.target.result.split('\n').filter(l=>l.trim());
+      const text=ev.target.result.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+      const lines=text.split('\n').filter(l=>l.trim());
+
+      // Proper CSV parse (handles commas inside quotes)
+      function csvSplit(line){
+        const cols=[];let cur='',inQ=false;
+        for(let i=0;i<line.length;i++){
+          const ch=line[i];
+          if(ch==='"'){inQ=!inQ;continue;}
+          if(ch===','&&!inQ){cols.push(cur.trim());cur='';continue;}
+          cur+=ch;
+        }
+        cols.push(cur.trim());
+        return cols;
+      }
+
+      const headers=csvSplit(lines[0]).map(h=>h.toLowerCase());
+      // Smart detect columns
+      const driverCol=headers.findIndex(h=>h.includes('driver name')||h==='driver');
+      const addrCol=headers.findIndex(h=>h==='ship to'||h.includes('ship to address')||h.includes('address'));
+      const cityCol=headers.findIndex(h=>h.includes('city'));
+      const zipCol=headers.findIndex(h=>h.includes('zip'));
+      const statusCol=headers.findIndex(h=>h.includes('status'));
+      const delivCol=headers.findIndex(h=>h.includes('delivery end')||h.includes('completed')||h.includes('delivery date'));
+      const custCol=headers.findIndex(h=>h.includes('ship to name')||h.includes('customer'));
+      const stopNumCol=headers.findIndex(h=>h.includes('stop number')||h.includes('order'));
+
+      log(`NuVizz columns: driver=${driverCol}, addr=${addrCol}, city=${cityCol}, deliv=${delivCol}, status=${statusCol}`,'info');
+
       nuvizzData=lines.slice(1).map(l=>{
-        const c=l.split(',').map(x=>x.trim().replace(/"/g,''));
-        return{driver:c[0]||'',address:c[1]||'',city:c[2]||'',windowStart:c[3]||'',windowEnd:c[4]||'',stopType:c[5]||'delivery'};
-      }).filter(r=>r.driver&&r.address);
+        if(!l.trim())return null;
+        const c=csvSplit(l);
+        const driver=c[driverCol>=0?driverCol:3]||'';
+        const address=c[addrCol>=0?addrCol:5]||'';
+        const city=c[cityCol>=0?cityCol:6]||'';
+        const deliveryEnd=c[delivCol>=0?delivCol:0]||'';
+        const status=c[statusCol>=0?statusCol:2]||'';
+        const customer=c[custCol>=0?custCol:4]||'';
+        const zipCode=c[zipCol>=0?zipCol:7]||'';
+        const stopNumber=c[stopNumCol>=0?stopNumCol:1]||'';
+        return{driver,address,city,deliveryEnd,status,customer,zipCode,stopNumber,stopType:'delivery'};
+      }).filter(r=>r&&r.driver);
       document.getElementById('upNuVizz').classList.add('loaded');
-      document.getElementById('nuvLabel').textContent=`✅ NuVizz: ${nuvizzData.length} stops`;
-      log(`Parsed ${nuvizzData.length} NuVizz manifest stops from ${file.name}`,'ok');
+      const drivers=new Set(nuvizzData.map(r=>r.driver));
+      document.getElementById('nuvLabel').textContent=`✅ NuVizz: ${nuvizzData.length} stops, ${drivers.size} drivers`;
+      log(`Parsed ${nuvizzData.length} NuVizz stops from ${file.name} (${drivers.size} drivers)`,'ok');
+      if(nuvizzData.length>0){
+        const s=nuvizzData[0];
+        log(`  Sample: ${s.driver} → ${s.customer}, ${s.city} (${s.deliveryEnd})`,'info');
+      }
     }catch(err){log(`NuVizz CSV parse error: ${err.message}`,'err');}
   };
   reader.readAsText(file);
@@ -1094,12 +1166,26 @@ function buildDriverData(periods){
       return(!isNaN(s)&&!isNaN(e))?sum+(e-s)/1000:sum;
     },0);
 
-    // Check B600 for override clock times
+    // Check B600 for matching clock times (both first AND last name)
     let b600Match=null;
     if(b600Data.length){
-      b600Match=b600Data.find(b=>b.name.toLowerCase().includes(d.name.split(' ')[0].toLowerCase()));
+      const parts=d.name.toLowerCase().split(/\s+/);
+      const first=parts[0]||'';
+      const last=parts[parts.length-1]||'';
+      b600Match=b600Data.find(b=>{
+        const bn=b.name.toLowerCase();
+        // Try last name match (more unique) + first name confirmation
+        if(last.length>2 && bn.includes(last) && bn.includes(first)) return true;
+        // Fallback: last name only (handles "C HEAD" vs "Chris Head")
+        if(last.length>2 && bn.includes(last)) return true;
+        return false;
+      });
+      if(b600Match) log(`B600 matched: ${d.name} → ${b600Match.name} (IN ${b600Match.clockIn}, OUT ${b600Match.clockOut})`,'info');
     }
 
+    // Store GPS-derived times separately so scoring can compare B600 vs GPS
+    const gpsClockIn=clockIn;  // from Motive driving_periods
+    const gpsClockOut=clockOut;
     const derivedIn=b600Match?.clockIn||clockIn;
     const derivedOut=b600Match?.clockOut||clockOut;
     const shiftMin=t2m(derivedOut)-t2m(derivedIn);
@@ -1107,9 +1193,11 @@ function buildDriverData(periods){
     return{
       name:d.name, driverId:d.driverId, truck, vehicleId,
       clockIn:derivedIn, clockOut:derivedOut,
+      gpsClockIn, gpsClockOut,  // original Motive times for cross-reference
       drivingMin:totalDriveSec/60,
       periodCount:d.periods.length,
       b600Matched:!!b600Match,
+      b600Name:b600Match?.name||'',
       hasData:true,
       insufficientData:shiftMin<MIN_SHIFT_MIN && !b600Match
     };
@@ -1246,14 +1334,38 @@ function detectStopsFromGPS(locs){
 // ═══════════════════════════════════════════
 function scoreDriver(driver, gps, allDriverGPS){
   const flags=[];let score=0;
-  const ciMin=gps.gpsClockIn?t2m(gps.gpsClockIn):t2m(driver.clockIn);
-  const coMin=gps.gpsClockOut?t2m(gps.gpsClockOut):t2m(driver.clockOut);
+  // When B600 matched: B600 is the OFFICIAL clock time (ground truth)
+  // GPS times are what we compare AGAINST to detect theft
+  const ciMin=t2m(driver.clockIn);  // B600 time if matched, else Motive period start
+  const coMin=t2m(driver.clockOut);
   const layers={timeMotion:0,stopPattern:0,baseline:0,peer:0};
 
   // Get role-based thresholds
   const profile=getDriverProfile(driver.name);
   const th=getRoleThresholds(profile.role);
   const skip=new Set(th.skipFlags||[]);
+
+  // NEW: B600 vs GPS cross-reference (only when B600 matched)
+  if(driver.b600Matched && driver.gpsClockIn && driver.gpsClockOut){
+    const b600In=t2m(driver.clockIn);
+    const gpsIn=t2m(driver.gpsClockIn);
+    const b600Out=t2m(driver.clockOut);
+    const gpsOut=t2m(driver.gpsClockOut);
+    const inGap=Math.abs(gpsIn-b600In);
+    const outGap=Math.abs(b600Out-gpsOut);
+    // Flag if GPS first movement is >30min after B600 clock-in
+    if(gpsIn-b600In>30){
+      const pts=30;score+=pts;layers.timeMotion+=pts;
+      flags.push({ico:'🔴',sev:'critical',title:'B600→GPS Clock-In Gap',
+        detail:`Punched B600 at ${driver.clockIn} but GPS first movement at ${driver.gpsClockIn} — ${(gpsIn-b600In).toFixed(0)}min gap`,pts,time:driver.clockIn});
+    }
+    // Flag if GPS last movement is >30min before B600 clock-out
+    if(b600Out-gpsOut>30){
+      const pts=30;score+=pts;layers.timeMotion+=pts;
+      flags.push({ico:'🔴',sev:'critical',title:'GPS→B600 Clock-Out Gap',
+        detail:`GPS last movement at ${driver.gpsClockOut} but punched B600 out at ${driver.clockOut} — ${(b600Out-gpsOut).toFixed(0)}min gap`,pts,time:driver.gpsClockOut});
+    }
+  }
 
   // L1a: Clock vs Engine gap
   const engineGapMin=(coMin-ciMin)-gps.engineOnMin;
@@ -1331,10 +1443,18 @@ function scoreDriver(driver, gps, allDriverGPS){
     }
   }
 
-  // NuVizz manifest check
+  // NuVizz manifest check — match by first AND last name
   let manifestStops=[];
   if(nuvizzData.length){
-    manifestStops=nuvizzData.filter(n=>n.driver.toLowerCase().includes(driver.name.split(' ')[0].toLowerCase()));
+    const parts=driver.name.toLowerCase().split(/\s+/);
+    const first=parts[0]||'';
+    const last=parts[parts.length-1]||'';
+    manifestStops=nuvizzData.filter(n=>{
+      const nd=n.driver.toLowerCase().trim();
+      if(last.length>2 && nd.includes(last) && nd.includes(first)) return true;
+      if(last.length>2 && nd.includes(last)) return true;
+      return false;
+    });
   }
 
   let risk='low';
@@ -1580,7 +1700,7 @@ function renderDriverCards(){
     if(d.manifestStops&&d.manifestStops.length>0){
       manifestHtml=`<div class="tl-title" style="margin-top:12px;">// NuVizz Manifest — ${d.manifestStops.length} expected stops</div>
         <div style="font-family:var(--mono);font-size:10px;color:var(--text2);">
-          ${d.manifestStops.map(s=>`<div style="padding:2px 0;">${s.windowStart||'?'}-${s.windowEnd||'?'} · ${s.address}, ${s.city} · ${s.stopType}</div>`).join('')}
+          ${d.manifestStops.map(s=>`<div style="padding:2px 0;">${s.deliveryEnd||'?'} · ${s.customer||s.address||''}, ${s.city} ${s.zipCode||''} · ${s.status||s.stopType}</div>`).join('')}
         </div>`;
     } else if(nuvizzData.length>0){
       manifestHtml=`<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:8px;">No NuVizz manifest match for this driver</div>`;
@@ -1747,7 +1867,8 @@ function exportCSV(){
   if(!results.length){log('No data','warn');return;}
   let csv='Driver,Truck,Clock In,Clock Out,Engine(h),Miles,MPH,Stops,Score,Risk,Flags,Est Stolen(h),Est Stolen($),Data Source\n';
   results.forEach(r=>{
-    csv+=`"${r.name}","${r.truck}","${r.clockIn}","${r.clockOut}","${r.hasData?(r.gps.engineOnMin/60).toFixed(2):''}","${r.hasData?r.gps.actualMiles.toFixed(0):''}","${r.hasData?r.gps.effectiveMph.toFixed(1):''}","${r.hasData?r.gps.deliveryStops:''}","${r.score}","${r.risk}","${r.flags.map(f=>f.title).join(' | ')}","${r.stolenHrs.toFixed(2)}","${r.stolenDollars.toFixed(2)}","${r.hasData?'Motive GPS':'NO DATA'}"\n`;
+    const sources=[r.hasData?'Motive GPS':null, r.b600Matched?'B600':null, (r.manifestStops&&r.manifestStops.length>0)?'NuVizz':null].filter(Boolean).join('+');
+    csv+=`"${r.name}","${r.truck}","${r.clockIn}","${r.clockOut}","${r.hasData?(r.gps.engineOnMin/60).toFixed(2):''}","${r.hasData?r.gps.actualMiles.toFixed(0):''}","${r.hasData?r.gps.effectiveMph.toFixed(1):''}","${r.hasData?r.gps.deliveryStops:''}","${r.score}","${r.risk}","${r.flags.map(f=>f.title).join(' | ')}","${r.stolenHrs.toFixed(2)}","${r.stolenDollars.toFixed(2)}","${sources||'NO DATA'}"\n`;
   });
   const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download=`sentinel_${auditStartDate}.csv`;a.click();
