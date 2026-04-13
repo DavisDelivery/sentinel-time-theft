@@ -245,14 +245,52 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 
 /* ── RESPONSIVE ── */
 @media(max-width:600px){
-  .action-bar{flex-direction:column;align-items:stretch;}
-  .date-display{width:100%;}
-  .run-btn{width:100%;}
+  .action-bar{flex-direction:column;align-items:stretch;padding:8px 10px;gap:6px;}
+  .period-group{width:100%;display:grid;grid-template-columns:repeat(4,1fr);}
+  .period-group button{padding:10px 6px;font-size:10px;}
+  .date-display{width:100%;min-width:0;font-size:13px;padding:10px;}
+  .run-btn{width:100%;font-size:13px;padding:12px 16px;}
+  /* Source buttons - stack vertically, full width */
+  .data-bar{flex-direction:column;align-items:stretch;padding:8px 10px;gap:6px;}
+  .data-bar .lbl{display:none;}
+  .data-bar .upload-wrap,.data-bar .src-btn{width:100%;display:block;box-sizing:border-box;}
+  .src-btn{font-size:14px;padding:10px 14px;text-align:center;}
+  .data-bar span[id]{font-size:11px;text-align:center;display:block;padding:2px 0;}
+  /* KPIs */
+  .kpi-row{grid-template-columns:repeat(2,1fr);}
+  .kpi-val{font-size:20px;}
+  .kpi{padding:10px 8px;}
+  /* Content */
+  .content-area{padding:8px;}
+  .tab-bar button{font-size:10px;padding:10px 10px;}
+  /* Driver cards */
+  .dc-hd{padding:10px;gap:8px;}
+  .dc-info h3{font-size:13px;white-space:normal;}
+  .dc-meta{gap:3px;}
+  .dc-tag{font-size:8px;padding:2px 4px;}
+  .score-ring{width:44px;height:44px;}
+  .score-ring-num{font-size:14px;}
+  .rbadge{font-size:8px;padding:3px 6px;}
+  .dc-body{padding:8px 10px 12px;}
+  .dcard-body{padding-left:8px;}
+  .layer-grid{grid-template-columns:repeat(2,1fr);gap:6px;}
+  .lc-val{font-size:16px;}
+  .flag-row{padding:4px 0;gap:4px;}
+  .flag-ico{font-size:12px;width:18px;}
+  .flag-label{font-size:10px;min-width:60px;}
+  .flag-txt{font-size:10px;}
+  .flag-pts{font-size:9px;}
+  /* Timeline */
+  .tl-time{font-size:10px;min-width:32px;}
+  .tl-text{font-size:10px;}
+  /* Algorithm tab */
   .algo-grid{grid-template-columns:1fr;}
-  .content-area{padding:12px;}
-  .dcard-body{padding-left:16px;}
-  .rpt-kpis{grid-template-columns:repeat(2,1fr);}
   .brand-title{font-size:15px;}
+  /* Report tab */
+  .rpt-kpis{grid-template-columns:repeat(2,1fr);}
+  /* Modals */
+  .modal{width:96%;padding:16px;}
+  .cam-box{width:96%;padding:16px;}
 }
 .content-area{padding-bottom:180px;}
 /* ── DRIVER CARD RENDERING ── */
@@ -560,7 +598,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
