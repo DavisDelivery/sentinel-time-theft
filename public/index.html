@@ -560,7 +560,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1528,9 +1528,16 @@ async function runAudit(){
       loadB600ForDates(dates);
     }
 
-    // Step 0b: Auto-load NuVizz stop data for selected dates (from stored history)
+    // Step 0b: Auto-load NuVizz stop data — try stored history first, then API
     nuvizzData=[]; // clear previous
-    loadNuVizzForDates(dates);
+    const hadStoredNuvizz = loadNuVizzForDates(dates);
+    if(!hadStoredNuvizz){
+      log(`NuVizz: no stored data for selected dates — trying live API...`,'info');
+      await fetchNuVizzAPI(dates);
+    }
+    if(!nuvizzData.length){
+      log(`NuVizz: no data available — upload CSV manually or skip`,'warn');
+    }
 
     // Step 1: Fetch all vehicles (builds cache for ID lookups)
     await fetchAllVehicles();
@@ -1964,7 +1971,7 @@ function loadB600ForDates(dates){
 }
 
 function loadNuVizzForDates(dates){
-  if(!window._nuvizzHistory) return;
+  if(!window._nuvizzHistory) return false;
   const dateSet=new Set(dates);
   // records are arrays: [date, time, driver, customer, city, zip, stopNum]
   const matching=window._nuvizzHistory.filter(r=>dateSet.has(r[0]));
@@ -1977,46 +1984,43 @@ function loadNuVizzForDates(dates){
     log(`✅ NuVizz auto-loaded: ${nuvizzData.length} stops for ${dates.length} day(s) (${new Set(nuvizzData.map(r=>r.driver)).size} drivers)`,'ok');
     document.getElementById('nuvLabel').textContent=`✅ NuVizz: ${nuvizzData.length} stops (auto)`;
     document.getElementById('upNuVizz').classList.add('loaded');
-  } else {
-    log(`NuVizz: no stored data for selected dates — upload CSV or skip`,'warn');
+    return true;
   }
+  return false;
 }
 
-async function fetchNuVizzForDates(dates){
+async function fetchNuVizzAPI(dates){
   try{
     for(const date of dates){
       log(`📡 NuVizz API: fetching routes for ${date}...`,'info');
       const res=await fetch(`/api/nuvizz-loads-by-date?date=${date}`);
-      if(!res.ok){ log(`NuVizz API: ${res.status} for ${date}`,'warn'); continue; }
+      if(!res.ok){ log(`NuVizz API: HTTP ${res.status} for ${date}`,'warn'); continue; }
       const data=await res.json();
-      if(!data.success || !data.auditRecords){ log(`NuVizz: no data for ${date}`,'warn'); continue; }
-      // Convert API records to nuvizzData format the scoring engine expects
+      if(!data.success || !data.auditRecords || data.auditRecords.length===0){
+        log(`NuVizz API: no routes for ${date} (method: ${data.method||'unknown'})`,'warn');
+        continue;
+      }
+      log(`✅ NuVizz API: ${data.auditRecords.length} routes for ${date} (via ${data.method})`,'ok');
       for(const rec of data.auditRecords){
         if(!rec.stopDetail) continue;
         for(const s of rec.stopDetail){
           nuvizzData.push({
-            driver: rec.driver || '',
-            address: s.addr1 || '',
-            city: s.city || '',
-            deliveryEnd: s.completionTime || s.actualArrival || '',
-            status: s.stopStatus || 'COMPLETED',
-            customer: s.businessName || '',
-            zipCode: s.zip || '',
-            stopNumber: s.stopNbr || String(s.seq || ''),
-            stopType: s.stopType === 'PU' ? 'pickup' : 'delivery'
+            driver: rec.driver||'', address: s.addr1||'',
+            city: s.city||'', deliveryEnd: s.completionTime||s.actualArrival||'',
+            status: s.stopStatus||'COMPLETED', customer: s.businessName||'',
+            zipCode: s.zip||'', stopNumber: s.stopNbr||String(s.seq||''),
+            stopType: s.stopType==='PU'?'pickup':'delivery'
           });
         }
       }
     }
     if(nuvizzData.length){
-      log(`✅ NuVizz API: ${nuvizzData.length} stops loaded for ${new Set(nuvizzData.map(r=>r.driver)).size} drivers`,'ok');
+      log(`✅ NuVizz API total: ${nuvizzData.length} stops, ${new Set(nuvizzData.map(r=>r.driver)).size} drivers`,'ok');
       document.getElementById('nuvLabel').textContent=`✅ NuVizz: ${nuvizzData.length} stops (API)`;
       document.getElementById('upNuVizz').classList.add('loaded');
-    } else {
-      log(`NuVizz API: no stop data returned — NuVizz layer skipped`,'warn');
     }
   }catch(e){
-    log(`NuVizz API error: ${e.message} — NuVizz layer skipped`,'warn');
+    log(`NuVizz API error: ${e.message}`,'warn');
   }
 }
 
