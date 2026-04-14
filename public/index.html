@@ -406,6 +406,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 <!-- TABS -->
 <div class="tab-bar">
   <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
+  <button class="tab" onclick="showTab('driver',this)">👤 Driver Intel</button>
   <button class="tab" onclick="showTab('report',this)">📊 Report</button>
   <button class="tab" onclick="showTab('history',this)">📈 History</button>
   <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
@@ -443,6 +444,29 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       </div>
       <div class="driver-stack" id="driverStack"></div>
     </div>
+  </div>
+
+  <!-- REPORT -->
+  <!-- DRIVER INTEL -->
+  <div id="tab-driver" class="content">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+      <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">DRIVER INTEL</div>
+      <select id="diDriverPick" onchange="renderDriverIntel(this.value)" style="flex:1;min-width:200px;background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:8px 12px;font-family:var(--mono);font-size:12px;outline:none;">
+        <option value="">— Select Driver —</option>
+      </select>
+      <div style="display:flex;gap:6px;">
+        <button onclick="diSetRange('week')" class="fb-btn" id="diWeek">7d</button>
+        <button onclick="diSetRange('month')" class="fb-btn active" id="diMonth">30d</button>
+        <button onclick="diSetRange('quarter')" class="fb-btn" id="diQtr">Q1</button>
+        <button onclick="diSetRange('all')" class="fb-btn" id="diAll">All</button>
+      </div>
+    </div>
+    <div id="diEmpty" style="text-align:center;padding:40px 0;color:var(--text2);">
+      <div style="font-size:32px;margin-bottom:10px;">👤</div>
+      <p style="font-family:var(--ui);font-size:14px;">Select a driver to see their detailed analytics.</p>
+      <p style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;">Data from B600 timeclock + NuVizz stops (Jan–Apr 2026)</p>
+    </div>
+    <div id="diContent" style="display:none;"></div>
   </div>
 
   <!-- REPORT -->
@@ -560,7 +584,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2025,6 +2049,294 @@ async function fetchNuVizzAPI(dates){
 }
 
 // ═══════════════════════════════════════════
+// DRIVER INTEL
+// ═══════════════════════════════════════════
+let diRange = 'month'; // week, month, quarter, all
+
+function diSetRange(r){
+  diRange=r;
+  document.querySelectorAll('#tab-driver .fb-btn').forEach(b=>b.classList.remove('active'));
+  const el=document.getElementById('di'+r.charAt(0).toUpperCase()+r.slice(1));
+  if(el) el.classList.add('active');
+  const pick=document.getElementById('diDriverPick');
+  if(pick.value) renderDriverIntel(pick.value);
+}
+
+function populateDriverPicker(){
+  const pick=document.getElementById('diDriverPick');
+  if(!pick) return;
+  const drivers=new Set();
+  // From B600 history
+  if(window._b600History) window._b600History.forEach(r=>drivers.add(r.name));
+  // From NuVizz history
+  if(window._nuvizzHistory) window._nuvizzHistory.forEach(r=>drivers.add(r[2]));
+  // From driver roster
+  Object.values(DRIVER_ROSTER).forEach(r=>{ if(r.name) drivers.add(r.name); });
+
+  const sorted=[...drivers].sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
+  pick.innerHTML='<option value="">— Select Driver ('+sorted.length+' available) —</option>';
+  sorted.forEach(d=>{
+    pick.innerHTML+=`<option value="${d.replace(/"/g,'&quot;')}">${d}</option>`;
+  });
+}
+
+function diDateRange(){
+  const now=new Date();
+  if(diRange==='week') return new Date(now-7*864e5);
+  if(diRange==='month') return new Date(now-30*864e5);
+  if(diRange==='quarter') return new Date('2026-01-01');
+  return new Date('2020-01-01');
+}
+
+function diMatchDriver(a, b){
+  if(!a||!b) return false;
+  const al=a.toLowerCase().trim(), bl=b.toLowerCase().trim();
+  if(al===bl) return true;
+  // Fuzzy: match last name + first initial
+  const ap=al.split(/\s+/), bp=bl.split(/\s+/);
+  const aLast=ap[ap.length-1], bLast=bp[bp.length-1];
+  if(aLast.length>2 && bLast.length>2 && aLast===bLast) return true;
+  // Match first+last regardless of case differences
+  if(ap.length>=2 && bp.length>=2 && ap[0]===bp[0] && aLast===bLast) return true;
+  return false;
+}
+
+function renderDriverIntel(driverName){
+  if(!driverName){ document.getElementById('diContent').style.display='none'; document.getElementById('diEmpty').style.display=''; return; }
+  document.getElementById('diEmpty').style.display='none';
+  document.getElementById('diContent').style.display='block';
+
+  const cutoff=diDateRange();
+
+  // Gather B600 data for this driver
+  const b600=[];
+  if(window._b600History){
+    window._b600History.forEach(r=>{
+      if(!diMatchDriver(r.name, driverName)) return;
+      const d=new Date(r.date);
+      if(d>=cutoff) b600.push(r);
+    });
+  }
+
+  // Gather NuVizz stops for this driver
+  const stops=[];
+  if(window._nuvizzHistory){
+    window._nuvizzHistory.forEach(r=>{
+      // r = [date, time, driver, customer, city, zip, stopNum]
+      if(!diMatchDriver(r[2], driverName)) return;
+      const d=new Date(r[0]);
+      if(d>=cutoff) stops.push({date:r[0], time:r[1], customer:r[3], city:r[4], zip:r[5], stopNum:r[6]});
+    });
+  }
+
+  // Compute B600 stats
+  const b600Days=b600.length;
+  const b600TotalHrs=b600.reduce((a,r)=>a+(r.totalHrs||0),0);
+  const b600AvgShift=b600Days? (b600TotalHrs/b600Days) : 0;
+
+  // Parse B600 clock-in times to decimal hours
+  function parseClk(t){
+    if(!t) return null;
+    t=t.trim().toLowerCase();
+    const m=t.match(/(\d+):(\d+)\s*(a|p)/);
+    if(!m) return null;
+    let h=parseInt(m[1]),mn=parseInt(m[2]);
+    if(m[3]==='p'&&h!==12) h+=12;
+    if(m[3]==='a'&&h===12) h=0;
+    return h+mn/60;
+  }
+  const clockIns=b600.map(r=>parseClk(r.clockIn)).filter(v=>v!==null);
+  const avgClockIn=clockIns.length? clockIns.reduce((a,v)=>a+v,0)/clockIns.length : null;
+
+  // Compute NuVizz stats
+  const byDate={};
+  stops.forEach(s=>{
+    if(!byDate[s.date]) byDate[s.date]=[];
+    byDate[s.date].push(s);
+  });
+  const stopDates=Object.keys(byDate).sort();
+  const totalStops=stops.length;
+  const daysWithStops=stopDates.length;
+  const avgStopsDay=daysWithStops? totalStops/daysWithStops : 0;
+
+  // First/last delivery per day + gaps
+  const firstDelTimes=[], lastDelTimes=[], allGaps=[];
+  const dailyRows=[];
+  stopDates.forEach(date=>{
+    const dayStops=byDate[date].sort((a,b)=>a.time.localeCompare(b.time));
+    const first=dayStops[0], last=dayStops[dayStops.length-1];
+    const fh=parseInt(first.time.split(':')[0])+parseInt(first.time.split(':')[1])/60;
+    const lh=parseInt(last.time.split(':')[0])+parseInt(last.time.split(':')[1])/60;
+    firstDelTimes.push(fh);
+    lastDelTimes.push(lh);
+    const spanHrs=lh-fh;
+    const stopsPerHr=spanHrs>0? dayStops.length/spanHrs : 0;
+
+    // Compute gaps
+    const dayGaps=[];
+    for(let i=1;i<dayStops.length;i++){
+      const t1=dayStops[i-1].time.split(':').map(Number), t2=dayStops[i].time.split(':').map(Number);
+      const gap=(t2[0]*60+t2[1])-(t1[0]*60+t1[1]);
+      if(gap>0 && gap<480){ dayGaps.push(gap); allGaps.push(gap); }
+    }
+    const avgGap=dayGaps.length? dayGaps.reduce((a,v)=>a+v,0)/dayGaps.length : 0;
+    const maxGap=dayGaps.length? Math.max(...dayGaps) : 0;
+
+    // Find B600 for this date
+    const b6=b600.find(r=>r.date===date);
+
+    dailyRows.push({date, stops:dayStops.length, first:first.time, last:last.time, spanHrs, stopsPerHr, avgGap, maxGap, clockIn:b6?.clockIn||'—', clockOut:b6?.clockOut||'—', totalHrs:b6?.totalHrs||0, cities:[...new Set(dayStops.map(s=>s.city))]});
+  });
+
+  const avgFirst=firstDelTimes.length? firstDelTimes.reduce((a,v)=>a+v,0)/firstDelTimes.length : 0;
+  const avgLast=lastDelTimes.length? lastDelTimes.reduce((a,v)=>a+v,0)/lastDelTimes.length : 0;
+  const avgGap=allGaps.length? allGaps.reduce((a,v)=>a+v,0)/allGaps.length : 0;
+  const medGap=allGaps.length? allGaps.sort((a,b)=>a-b)[Math.floor(allGaps.length/2)] : 0;
+  const p90Gap=allGaps.length? allGaps[Math.floor(allGaps.length*0.9)] : 0;
+
+  // Top customers
+  const custCount={};
+  stops.forEach(s=>{ const c=s.customer||s.city; custCount[c]=(custCount[c]||0)+1; });
+  const topCust=Object.entries(custCount).sort((a,b)=>b[1]-a[1]).slice(0,10);
+
+  // Top cities
+  const cityCount={};
+  stops.forEach(s=>{ if(s.city) cityCount[s.city]=(cityCount[s.city]||0)+1; });
+  const topCities=Object.entries(cityCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+  // Fleet comparison
+  const FB=FLEET_BENCH;
+
+  function fmt(h){ const hh=Math.floor(h); const mm=Math.round((h-hh)*60); return `${hh}:${String(mm).padStart(2,'0')}`; }
+  function compare(val,bench,lower){
+    if(!val||!bench) return '';
+    const pct=((val-bench)/bench*100);
+    const bad=lower? pct<-10 : pct>10;
+    const good=lower? pct>10 : pct<-10;
+    const col=bad?'var(--red2)':good?'var(--green)':'var(--text)';
+    return `<span style="color:${col};font-size:9px;margin-left:4px;">(${pct>0?'+':''}${pct.toFixed(0)}% vs fleet)</span>`;
+  }
+
+  // Render
+  const el=document.getElementById('diContent');
+  el.innerHTML=`
+    <div style="font-family:var(--head);font-size:16px;color:var(--text);margin-bottom:16px;letter-spacing:1px;">${driverName}</div>
+
+    <!-- KPI CARDS -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;">
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Days Worked</div>
+        <div style="font-family:var(--head);font-size:22px;color:var(--cyan);margin-top:4px;">${Math.max(b600Days,daysWithStops)}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Total Stops</div>
+        <div style="font-family:var(--head);font-size:22px;color:var(--blue3);margin-top:4px;">${totalStops}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Stops/Day</div>
+        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${avgStopsDay.toFixed(1)}${compare(avgStopsDay,FB.stopsDay.median,false)}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Shift</div>
+        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${b600AvgShift?b600AvgShift.toFixed(1)+'h':'—'}${b600AvgShift?compare(b600AvgShift,FB.shift.mean,false):''}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg 1st Delivery</div>
+        <div style="font-family:var(--head);font-size:22px;color:${avgFirst>FB.firstDel.p90?'var(--red2)':'var(--green)'};margin-top:4px;">${avgFirst?fmt(avgFirst):'—'}${avgFirst?compare(avgFirst,FB.firstDel.median,true):''}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Last Delivery</div>
+        <div style="font-family:var(--head);font-size:18px;color:var(--text);margin-top:4px;">${avgLast?fmt(avgLast):'—'}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Gap</div>
+        <div style="font-family:var(--head);font-size:22px;color:${avgGap>FB.gapFlag?'var(--red2)':avgGap>FB.gapWarn?'var(--amber)':'var(--green)'};margin-top:4px;">${avgGap?avgGap.toFixed(0)+'m':'—'}${avgGap?compare(avgGap,FB.gap.median,true):''}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Clock-In</div>
+        <div style="font-family:var(--head);font-size:18px;color:var(--text);margin-top:4px;">${avgClockIn?fmt(avgClockIn):'—'}</div>
+      </div>
+    </div>
+
+    <!-- PACE METRICS -->
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
+      <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;margin-bottom:12px;">DELIVERY PACE vs FLEET</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-family:var(--mono);font-size:11px;">
+        <div>
+          <div style="color:var(--text3);font-size:9px;">MEDIAN GAP</div>
+          <div style="color:${medGap>FB.gap.p75?'var(--amber)':'var(--green)'};font-size:16px;font-weight:700;">${medGap}m</div>
+          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.median}m</div>
+        </div>
+        <div>
+          <div style="color:var(--text3);font-size:9px;">P90 GAP</div>
+          <div style="color:${p90Gap>FB.gap.p90?'var(--red2)':'var(--text)'};font-size:16px;font-weight:700;">${p90Gap}m</div>
+          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.p90}m</div>
+        </div>
+        <div>
+          <div style="color:var(--text3);font-size:9px;">STOPS/HR</div>
+          <div style="font-size:16px;font-weight:700;color:var(--blue3);">${dailyRows.length?( dailyRows.reduce((a,r)=>a+r.stopsPerHr,0)/dailyRows.length ).toFixed(1):'—'}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOP CUSTOMERS + CITIES -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;">
+        <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">TOP CUSTOMERS</div>
+        ${topCust.map(([c,n])=>`<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--b1);font-family:var(--mono);font-size:10px;"><span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${c}</span><span style="color:var(--text2);">${n}</span></div>`).join('')}
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;">
+        <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">CITIES SERVED</div>
+        ${topCities.map(([c,n])=>`<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--b1);font-family:var(--mono);font-size:10px;"><span style="color:var(--text);">${c}</span><span style="color:var(--text2);">${n}</span></div>`).join('')}
+      </div>
+    </div>
+
+    <!-- DAY-BY-DAY TABLE -->
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;overflow-x:auto;">
+      <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">DAY-BY-DAY BREAKDOWN</div>
+      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;">
+            <th style="padding:6px 8px;">DATE</th>
+            <th style="padding:6px 8px;">CLOCK IN</th>
+            <th style="padding:6px 8px;">1ST DEL</th>
+            <th style="padding:6px 8px;">LAST DEL</th>
+            <th style="padding:6px 8px;">CLOCK OUT</th>
+            <th style="padding:6px 8px;">STOPS</th>
+            <th style="padding:6px 8px;">SPAN</th>
+            <th style="padding:6px 8px;">ST/HR</th>
+            <th style="padding:6px 8px;">AVG GAP</th>
+            <th style="padding:6px 8px;">MAX GAP</th>
+            <th style="padding:6px 8px;">HRS</th>
+            <th style="padding:6px 8px;">CITIES</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dailyRows.sort((a,b)=>b.date.localeCompare(a.date)).map(r=>{
+            const gapCol=r.avgGap>FB.gapFlag?'var(--red2)':r.avgGap>FB.gapWarn?'var(--amber)':'var(--text)';
+            const maxCol=r.maxGap>FB.gapCrit?'var(--red2)':r.maxGap>FB.gapFlag?'var(--amber)':'var(--text)';
+            return `<tr style="border-bottom:1px solid rgba(255,255,255,.04);">
+              <td style="padding:5px 8px;color:var(--text2);">${r.date}</td>
+              <td style="padding:5px 8px;">${r.clockIn}</td>
+              <td style="padding:5px 8px;color:var(--green);">${r.first}</td>
+              <td style="padding:5px 8px;color:var(--amber);">${r.last}</td>
+              <td style="padding:5px 8px;">${r.clockOut}</td>
+              <td style="padding:5px 8px;color:var(--blue3);font-weight:700;">${r.stops}</td>
+              <td style="padding:5px 8px;">${r.spanHrs.toFixed(1)}h</td>
+              <td style="padding:5px 8px;color:var(--cyan);">${r.stopsPerHr.toFixed(1)}</td>
+              <td style="padding:5px 8px;color:${gapCol};">${r.avgGap.toFixed(0)}m</td>
+              <td style="padding:5px 8px;color:${maxCol};font-weight:${r.maxGap>FB.gapFlag?'700':'400'};">${r.maxGap}m</td>
+              <td style="padding:5px 8px;">${r.totalHrs?r.totalHrs.toFixed(1):''}</td>
+              <td style="padding:5px 8px;font-size:9px;color:var(--text3);">${r.cities.join(', ')}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',()=>{
@@ -2038,8 +2350,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const wi=document.getElementById('pickWeekInput');if(wi)wi.addEventListener('input',updateWeekHint);
   log(`SENTINEL v${APP_VERSION} — Real data only | Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng} | Shift filter: -${SHIFT_BUFFER_BEFORE}min/+${SHIFT_BUFFER_AFTER}min | Timezone: Eastern`,'hi');
   document.getElementById('versionBadge').textContent='v'+APP_VERSION;
-  loadB600History();
-  loadNuVizzHistory();
+  Promise.all([loadB600History(), loadNuVizzHistory()]).then(()=>populateDriverPicker());
 });
 
 // ═══════════════════════════════════════════
