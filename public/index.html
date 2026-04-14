@@ -584,7 +584,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2194,6 +2194,24 @@ function renderDriverIntel(driverName){
   const medGap=allGaps.length? allGaps.sort((a,b)=>a-b)[Math.floor(allGaps.length/2)] : 0;
   const p90Gap=allGaps.length? allGaps[Math.floor(allGaps.length*0.9)] : 0;
 
+  // CLOCK-IN → FIRST DELIVERY GAP (the key metric)
+  const clockToFirst=[];
+  dailyRows.forEach(r=>{
+    if(r.clockIn==='—'||!r.first) return;
+    const ci=parseClk(r.clockIn);
+    const fh=parseInt(r.first.split(':')[0])+parseInt(r.first.split(':')[1])/60;
+    if(ci===null||!fh) return;
+    const gapMin=Math.round((fh-ci)*60);
+    if(gapMin<0||gapMin>600) return; // skip nonsense
+    clockToFirst.push({date:r.date, clockIn:r.clockIn, firstDel:r.first, gapMin, stops:r.stops, clockInH:ci, firstDelH:fh});
+  });
+  clockToFirst.sort((a,b)=>b.gapMin-a.gapMin);
+  const avgC2F=clockToFirst.length? clockToFirst.reduce((a,r)=>a+r.gapMin,0)/clockToFirst.length : 0;
+  const medC2F=clockToFirst.length? clockToFirst.sort((a,b)=>a.gapMin-b.gapMin)[Math.floor(clockToFirst.length/2)].gapMin : 0;
+  const critC2F=clockToFirst.filter(r=>r.gapMin>=240).length;
+  const warnC2F=clockToFirst.filter(r=>r.gapMin>=180&&r.gapMin<240).length;
+  clockToFirst.sort((a,b)=>b.gapMin-a.gapMin); // re-sort worst first
+
   // Top customers
   const custCount={};
   stops.forEach(s=>{ const c=s.customer||s.city; custCount[c]=(custCount[c]||0)+1; });
@@ -2255,6 +2273,79 @@ function renderDriverIntel(driverName){
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Clock-In</div>
         <div style="font-family:var(--head);font-size:18px;color:var(--text);margin-top:4px;">${avgClockIn?fmt(avgClockIn):'—'}</div>
+      </div>
+    </div>
+
+    <!-- PACE METRICS -->
+
+    <!-- CLOCK-IN → FIRST DELIVERY (KEY METRIC) -->
+    <div style="background:var(--s2);border:1px solid ${avgC2F>180?'var(--red)':avgC2F>120?'var(--amber)':'var(--b1)'};border-radius:var(--radius);padding:16px;margin-bottom:16px;${avgC2F>180?'box-shadow:0 0 12px rgba(255,26,26,.15);':''}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div style="font-family:var(--head);font-size:11px;color:${avgC2F>180?'var(--red2)':'var(--energon)'};letter-spacing:1px;">⏱ CLOCK-IN → FIRST DELIVERY</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">${clockToFirst.length} days with both data sources</div>
+      </div>
+
+      <!-- Summary stats -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:14px;">
+        <div style="text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">AVG GAP</div>
+          <div style="font-family:var(--head);font-size:20px;color:${avgC2F>180?'var(--red2)':avgC2F>120?'var(--amber)':'var(--green)'};">${avgC2F?Math.round(avgC2F)+'m':'—'}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">${avgC2F?(avgC2F/60).toFixed(1)+'h':''}</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">MEDIAN</div>
+          <div style="font-family:var(--head);font-size:20px;color:${medC2F>180?'var(--red2)':medC2F>120?'var(--amber)':'var(--green)'};">${medC2F}m</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Fleet: ${Math.round(FLEET_BENCH.firstDel.median*60-360)}m</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">4+ HRS</div>
+          <div style="font-family:var(--head);font-size:20px;color:${critC2F>0?'var(--red2)':'var(--green)'};">${critC2F}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">critical days</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">3+ HRS</div>
+          <div style="font-family:var(--head);font-size:20px;color:${warnC2F>0?'var(--amber)':'var(--green)'};">${warnC2F}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">warning days</div>
+        </div>
+      </div>
+
+      <!-- Every instance table -->
+      <div style="max-height:320px;overflow-y:auto;border-top:1px solid var(--b1);padding-top:8px;">
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;position:sticky;top:0;background:var(--s2);">
+              <th style="padding:5px 8px;">DATE</th>
+              <th style="padding:5px 8px;">CLOCK IN</th>
+              <th style="padding:5px 8px;">1ST DELIVERY</th>
+              <th style="padding:5px 8px;">GAP</th>
+              <th style="padding:5px 8px;">VISUAL</th>
+              <th style="padding:5px 8px;">STOPS</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${clockToFirst.map(r=>{
+              const sev=r.gapMin>=240?'crit':r.gapMin>=180?'high':r.gapMin>=120?'med':'ok';
+              const col=sev==='crit'?'var(--red2)':sev==='high'?'var(--amber)':sev==='med'?'var(--amber2)':'var(--green)';
+              const barPct=Math.min(100, r.gapMin/360*100);
+              const accPct=120/360*100; // 2hr acceptable line
+              return `<tr style="border-bottom:1px solid rgba(255,255,255,.04);">
+                <td style="padding:5px 8px;color:var(--text2);">${r.date}</td>
+                <td style="padding:5px 8px;color:var(--text);">${r.clockIn}</td>
+                <td style="padding:5px 8px;color:var(--cyan);font-weight:600;">${r.firstDel}</td>
+                <td style="padding:5px 8px;font-weight:700;color:${col};">${r.gapMin}m <span style="font-weight:400;font-size:9px;">(${(r.gapMin/60).toFixed(1)}h)</span></td>
+                <td style="padding:5px 8px;min-width:120px;">
+                  <div style="position:relative;height:14px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden;border:1px solid rgba(255,255,255,.06);">
+                    <div style="position:absolute;left:${accPct}%;top:0;height:100%;width:1px;background:var(--text3);z-index:1;"></div>
+                    <div style="height:100%;width:${barPct}%;background:linear-gradient(90deg,${col}80,${col});border-radius:2px;box-shadow:0 0 6px ${col}30;"></div>
+                  </div>
+                  <div style="font-size:7px;color:var(--text3);margin-top:1px;">|— 2hr —|</div>
+                </td>
+                <td style="padding:5px 8px;color:var(--blue3);">${r.stops}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        ${clockToFirst.length===0?'<div style="text-align:center;padding:16px;color:var(--text3);font-size:11px;">No days with both B600 clock-in and NuVizz delivery data in this range.</div>':''}
       </div>
     </div>
 
