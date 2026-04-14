@@ -560,7 +560,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -762,6 +762,25 @@ function getRoleThresholds(role) {
 }
 
 // Haversine distance in feet between two lat/lng points
+// ── FLEET BENCHMARKS (derived from 40,582 NuVizz stops + 3,354 B600 punches, Jan-Apr 2026) ──
+const FLEET_BENCH = {
+  // Inter-delivery gap (minutes between consecutive stops)
+  gap: { p10:7, p25:12, median:18, mean:23, p75:28, p90:42, p95:56, max:349 },
+  // First delivery time (decimal hours, e.g. 8.55 = 8:33 AM)
+  firstDel: { p10:6.48, p25:7.42, median:8.55, mean:8.7, p75:10.0, p90:11.08 },
+  // Stops per driver per day
+  stopsDay: { p10:7, p25:10, median:13, mean:13.1, p75:16, p90:19 },
+  // Route span (first to last delivery, minutes)
+  routeSpan: { p10:148, p25:202, median:266, mean:275, p75:342, p90:416 },
+  // B600 shift hours
+  shift: { mean:8.9, median:9.1 },
+  // Thresholds for scoring
+  gapWarn: 28,   // P75 — flag as warning
+  gapFlag: 42,   // P90 — flag as suspicious
+  gapCrit: 56,   // P95 — flag as critical
+  firstDelLate: 11.08, // P90 — unusually late first delivery
+  sampleSize: { stops:40582, b600Punches:3354, days:63, drivers:63 }
+};
 function distFt(lat1, lng1, lat2, lng2) {
   const R = 20902231; // Earth radius in feet
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -1509,9 +1528,9 @@ async function runAudit(){
       loadB600ForDates(dates);
     }
 
-    // Step 0b: Fetch NuVizz stop data from API for selected dates
+    // Step 0b: Auto-load NuVizz stop data for selected dates (from stored history)
     nuvizzData=[]; // clear previous
-    await fetchNuVizzForDates(dates);
+    loadNuVizzForDates(dates);
 
     // Step 1: Fetch all vehicles (builds cache for ID lookups)
     await fetchAllVehicles();
@@ -1916,6 +1935,22 @@ async function loadB600History(){
   }catch(e){ /* silent — history file is optional */ }
 }
 
+async function loadNuVizzHistory(){
+  try{
+    const res=await fetch('/nuvizz-history.json');
+    if(!res.ok) return;
+    const records=await res.json();
+    if(records.length){
+      // records are arrays: [date, time, driver, customer, city, zip, stopNum]
+      window._nuvizzHistory=records;
+      const dates=new Set(records.map(r=>r[0]));
+      const drivers=new Set(records.map(r=>r[2]));
+      log(`📂 NuVizz history loaded: ${records.length} stops (auto)`, 'ok');
+      log(`   ${drivers.size} drivers, ${dates.size} days (${[...dates].sort()[0]} → ${[...dates].sort().pop()})`, 'info');
+    }
+  }catch(e){ /* silent */ }
+}
+
 function loadB600ForDates(dates){
   if(!window._b600History) return;
   const dateSet=new Set(dates);
@@ -1925,6 +1960,25 @@ function loadB600ForDates(dates){
     log(`✅ B600 auto-loaded: ${matching.length} punches for ${dates.length} day(s)`,'ok');
     document.getElementById('upLabel').textContent=`✅ B600: ${matching.length} punches (auto)`;
     document.getElementById('upB600').classList.add('loaded');
+  }
+}
+
+function loadNuVizzForDates(dates){
+  if(!window._nuvizzHistory) return;
+  const dateSet=new Set(dates);
+  // records are arrays: [date, time, driver, customer, city, zip, stopNum]
+  const matching=window._nuvizzHistory.filter(r=>dateSet.has(r[0]));
+  if(matching.length){
+    nuvizzData=matching.map(r=>({
+      driver:r[2], deliveryEnd:r[1], customer:r[3],
+      city:r[4], zipCode:r[5], stopNumber:r[6],
+      address:'', status:'Completed', stopType:'delivery'
+    }));
+    log(`✅ NuVizz auto-loaded: ${nuvizzData.length} stops for ${dates.length} day(s) (${new Set(nuvizzData.map(r=>r.driver)).size} drivers)`,'ok');
+    document.getElementById('nuvLabel').textContent=`✅ NuVizz: ${nuvizzData.length} stops (auto)`;
+    document.getElementById('upNuVizz').classList.add('loaded');
+  } else {
+    log(`NuVizz: no stored data for selected dates — upload CSV or skip`,'warn');
   }
 }
 
@@ -1981,6 +2035,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   log(`SENTINEL v${APP_VERSION} — Real data only | Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng} | Shift filter: -${SHIFT_BUFFER_BEFORE}min/+${SHIFT_BUFFER_AFTER}min | Timezone: Eastern`,'hi');
   document.getElementById('versionBadge').textContent='v'+APP_VERSION;
   loadB600History();
+  loadNuVizzHistory();
 });
 
 // ═══════════════════════════════════════════
