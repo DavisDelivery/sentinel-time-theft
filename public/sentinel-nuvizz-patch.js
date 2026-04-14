@@ -1,624 +1,364 @@
-// sentinel-nuvizz-patch.js
-// Drop this script tag into SENTINEL's index.html AFTER the main React bundle.
-// It injects a "Load from NuVizz" panel that fetches live route data and
-// merges it into the existing SENTINEL audit table — no CSV required.
-//
-// <script src="/sentinel-nuvizz-patch.js"></script>
+// sentinel-nuvizz-patch.js  v3
+// Stop-level detail is the primary SENTINEL view.
+// Business name, full address, planned ETA, actual arrival,
+// completion time, dwell, and inter-stop gap are all front and center.
 
 (function () {
   'use strict';
 
-  const API = '/api/nuvizz-route-audit';
+  const API = '/api/nuvizz-loads-by-date';
+  const AUDIT_API = '/api/nuvizz-route-audit';
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  let nuvizzRecords = [];   // scored audit records from NuVizz API
-  let loadingLoads = {};    // loadNbr -> true while fetching
-  let errorMap = {};        // loadNbr -> error string
+  let currentDate = null;
+  let scanInProgress = false;
 
-  // ── Inject the NuVizz panel into the DOM ───────────────────────────────────
-  function injectPanel() {
-    // Don't double-inject
-    if (document.getElementById('nv-panel')) return;
+  const RC = { critical: '#ff4444', high: '#ff8800', medium: '#ffcc00', low: '#00ff88' };
 
-    const panel = document.createElement('div');
-    panel.id = 'nv-panel';
-    panel.style.cssText = `
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      width: 360px;
-      background: linear-gradient(135deg, #0a1628 0%, #0d2040 100%);
-      border: 1px solid #00d4ff55;
-      border-radius: 12px;
-      padding: 18px 20px;
-      z-index: 9999;
-      font-family: 'Orbitron', 'Courier New', monospace;
-      box-shadow: 0 0 30px #00d4ff22;
-    `;
-
-    panel.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <span style="color:#00d4ff;font-size:12px;font-weight:700;letter-spacing:2px;">◈ NUVIZZ LIVE FEED</span>
-        <button id="nv-collapse" style="background:none;border:none;color:#8899aa;cursor:pointer;font-size:16px;">−</button>
-      </div>
-
-      <div id="nv-body">
-        <!-- Load number input -->
-        <div style="display:flex;gap:8px;margin-bottom:10px;">
-          <input
-            id="nv-load-input"
-            placeholder="Load / Route #"
-            style="
-              flex:1;
-              background:#0a1628;
-              border:1px solid #00d4ff44;
-              border-radius:6px;
-              color:#fff;
-              padding:8px 10px;
-              font-family:inherit;
-              font-size:11px;
-              outline:none;
-            "
-          />
-          <button id="nv-fetch-btn" style="
-            background:#00d4ff22;
-            border:1px solid #00d4ff55;
-            border-radius:6px;
-            color:#00d4ff;
-            padding:8px 14px;
-            cursor:pointer;
-            font-family:inherit;
-            font-size:11px;
-            font-weight:700;
-            white-space:nowrap;
-          ">FETCH</button>
-        </div>
-
-        <!-- Batch input -->
-        <div style="margin-bottom:12px;">
-          <textarea
-            id="nv-batch-input"
-            placeholder="Batch: one load # per line"
-            rows="3"
-            style="
-              width:100%;
-              box-sizing:border-box;
-              background:#0a1628;
-              border:1px solid #00d4ff33;
-              border-radius:6px;
-              color:#aabbcc;
-              padding:8px 10px;
-              font-family:inherit;
-              font-size:10px;
-              resize:vertical;
-              outline:none;
-            "
-          ></textarea>
-          <button id="nv-batch-btn" style="
-            width:100%;
-            margin-top:6px;
-            background:#00d4ff11;
-            border:1px solid #00d4ff33;
-            border-radius:6px;
-            color:#00d4ff99;
-            padding:6px;
-            cursor:pointer;
-            font-family:inherit;
-            font-size:10px;
-            font-weight:700;
-          ">BATCH FETCH ALL</button>
-        </div>
-
-        <!-- Status -->
-        <div id="nv-status" style="
-          color:#ffcc00;
-          font-size:10px;
-          min-height:16px;
-          margin-bottom:8px;
-          letter-spacing:1px;
-        "></div>
-
-        <!-- Loaded routes list -->
-        <div id="nv-loaded-list" style="
-          max-height:220px;
-          overflow-y:auto;
-          border-top:1px solid #00d4ff22;
-          padding-top:10px;
-        "></div>
-
-        <!-- Clear button -->
-        <button id="nv-clear-btn" style="
-          width:100%;
-          margin-top:10px;
-          background:transparent;
-          border:1px solid #ff444433;
-          border-radius:6px;
-          color:#ff444499;
-          padding:6px;
-          cursor:pointer;
-          font-family:inherit;
-          font-size:10px;
-        ">CLEAR NUVIZZ DATA</button>
-      </div>
-    `;
-
-    document.body.appendChild(panel);
-
-    // Wire events
-    document.getElementById('nv-fetch-btn').addEventListener('click', () => {
-      const val = document.getElementById('nv-load-input').value.trim();
-      if (val) fetchRoute(val);
+  function waitForApp(cb) {
+    if (document.getElementById('root')?.children?.length > 0) { cb(); return; }
+    const obs = new MutationObserver(() => {
+      if (document.getElementById('root')?.children?.length > 0) { obs.disconnect(); cb(); }
     });
-
-    document.getElementById('nv-load-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const val = e.target.value.trim();
-        if (val) fetchRoute(val);
-      }
-    });
-
-    document.getElementById('nv-batch-btn').addEventListener('click', () => {
-      const lines = document.getElementById('nv-batch-input').value
-        .split('\n').map(l => l.trim()).filter(Boolean);
-      if (lines.length) fetchBatch(lines);
-    });
-
-    document.getElementById('nv-clear-btn').addEventListener('click', () => {
-      nuvizzRecords = [];
-      errorMap = {};
-      renderLoadedList();
-      mergeIntoSentinel();
-      setStatus('');
-    });
-
-    document.getElementById('nv-collapse').addEventListener('click', () => {
-      const body = document.getElementById('nv-body');
-      const btn = document.getElementById('nv-collapse');
-      if (body.style.display === 'none') {
-        body.style.display = '';
-        btn.textContent = '−';
-      } else {
-        body.style.display = 'none';
-        btn.textContent = '+';
-      }
-    });
+    obs.observe(document.body, { childList: true, subtree: true });
   }
 
-  // ── Fetch a single route ───────────────────────────────────────────────────
-  async function fetchRoute(loadNbr) {
-    if (loadingLoads[loadNbr]) return;
-    loadingLoads[loadNbr] = true;
-    setStatus(`Fetching ${loadNbr}...`);
+  // ── Scan bar (bottom of screen) ────────────────────────────────────────────
+  function injectScanBar() {
+    if (document.getElementById('nv-scan-bar')) return;
+    const bar = document.createElement('div');
+    bar.id = 'nv-scan-bar';
+    bar.style.cssText = `
+      position:fixed;bottom:0;left:0;right:0;
+      background:linear-gradient(90deg,#060e1c,#0a1628);
+      border-top:1px solid #00d4ff44;padding:10px 20px;
+      display:flex;align-items:center;gap:12px;z-index:9999;
+      font-family:'Orbitron','Courier New',monospace;
+      box-shadow:0 -4px 20px #00d4ff11;
+    `;
+    bar.innerHTML = `
+      <span style="color:#00d4ff;font-size:11px;font-weight:700;letter-spacing:2px;white-space:nowrap;">◈ NUVIZZ LIVE</span>
+      <input type="date" id="nv-date-input" style="background:#0a1628;border:1px solid #00d4ff55;border-radius:6px;color:#fff;padding:6px 10px;font-family:inherit;font-size:11px;outline:none;cursor:pointer;"/>
+      <button id="nv-scan-btn" style="background:linear-gradient(135deg,#00d4ff22,#0066aa22);border:1px solid #00d4ff66;border-radius:6px;color:#00d4ff;padding:6px 16px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:1px;white-space:nowrap;">▶ RUN SCAN</button>
+      <div id="nv-scan-status" style="flex:1;color:#8899aa;font-size:10px;letter-spacing:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+      <div id="nv-scan-badges" style="display:flex;gap:6px;flex-shrink:0;"></div>
+      <button id="nv-clear-btn" style="background:transparent;border:1px solid #ff444433;border-radius:6px;color:#ff444466;padding:5px 10px;cursor:pointer;font-family:inherit;font-size:10px;white-space:nowrap;">CLEAR</button>
+    `;
+    document.body.appendChild(bar);
+    document.body.style.paddingBottom = '56px';
+
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('nv-date-input').value = today;
+    currentDate = today;
+
+    document.getElementById('nv-date-input').addEventListener('change', e => { currentDate = e.target.value; });
+    document.getElementById('nv-scan-btn').addEventListener('click', runScan);
+    document.getElementById('nv-clear-btn').addEventListener('click', clearScan);
+  }
+
+  // ── Run scan ───────────────────────────────────────────────────────────────
+  async function runScan() {
+    if (scanInProgress || !currentDate) return;
+    scanInProgress = true;
+    const btn = document.getElementById('nv-scan-btn');
+    btn.textContent = '⟳ SCANNING...';
+    btn.style.opacity = '0.6';
+    clearBadges();
+    setStatus(`Fetching all routes for ${currentDate}...`, '#ffcc00');
 
     try {
-      const res = await fetch(`${API}?loadNbr=${encodeURIComponent(loadNbr)}`);
+      const res = await fetch(`${API}?date=${currentDate}`);
       const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-
-      // Replace or add
-      const idx = nuvizzRecords.findIndex(r => r.loadNbr === loadNbr);
-      if (idx >= 0) {
-        nuvizzRecords[idx] = data.auditRecord;
+      if (data.auditRecords.length === 0) {
+        setStatus(`No routes found for ${currentDate}. Enter load numbers manually.`, '#ff8800');
+        injectFallback(currentDate);
       } else {
-        nuvizzRecords.push(data.auditRecord);
+        const s = data.summary;
+        setStatus(
+          `✓ ${s.totalRoutes} routes · ${s.totalStops} stops · ${s.totalMilesActual}mi · $${s.totalStolenDollars} est theft`,
+          '#00ff88'
+        );
+        renderBadges(s);
+        renderResults(data, currentDate);
       }
-
-      delete errorMap[loadNbr];
-      setStatus(`✓ ${data.auditRecord.driver} — ${data.auditRecord.stops} stops — Score: ${data.auditRecord.score} (${data.auditRecord.risk.toUpperCase()})`);
-
-      renderLoadedList();
-      mergeIntoSentinel();
-
     } catch (err) {
-      errorMap[loadNbr] = err.message;
-      setStatus(`✗ ${loadNbr}: ${err.message}`);
-      renderLoadedList();
+      setStatus(`✗ ${err.message}`, '#ff4444');
     } finally {
-      delete loadingLoads[loadNbr];
+      scanInProgress = false;
+      btn.textContent = '▶ RUN SCAN';
+      btn.style.opacity = '1';
     }
   }
 
-  // ── Batch fetch ────────────────────────────────────────────────────────────
-  async function fetchBatch(loadNbrs) {
-    setStatus(`Fetching ${loadNbrs.length} routes...`);
-    // 3 at a time to avoid rate limiting
-    for (let i = 0; i < loadNbrs.length; i += 3) {
-      const batch = loadNbrs.slice(i, i + 3);
-      setStatus(`Fetching ${i + 1}–${Math.min(i + 3, loadNbrs.length)} of ${loadNbrs.length}...`);
-      await Promise.all(batch.map(n => fetchRoute(n)));
-    }
-    setStatus(`✓ Done — ${nuvizzRecords.length} routes loaded`);
-  }
-
-  // ── Render loaded routes list in panel ─────────────────────────────────────
-  function renderLoadedList() {
-    const el = document.getElementById('nv-loaded-list');
-    if (!el) return;
-
-    if (nuvizzRecords.length === 0 && Object.keys(errorMap).length === 0) {
-      el.innerHTML = '<div style="color:#8899aa;font-size:10px;">No routes loaded yet.</div>';
-      return;
-    }
-
-    const riskColor = { critical: '#ff4444', high: '#ff8800', medium: '#ffcc00', low: '#00ff88' };
-
-    el.innerHTML = nuvizzRecords.map(r => `
-      <div style="
-        border-bottom:1px solid #ffffff11;
-        padding:8px 0;
-        display:flex;
-        justify-content:space-between;
-        align-items:flex-start;
-        gap:8px;
-      ">
-        <div style="flex:1;min-width:0;">
-          <div style="color:#fff;font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-            ${r.driver}
-          </div>
-          <div style="color:#8899aa;font-size:9px;">
-            ${r.loadNbr} · ${r.stops} stops · ${r.miles != null ? r.miles + ' mi' : '—'}
-          </div>
-          <div style="color:#8899aa;font-size:9px;">
-            ${r.firstDeliveryTime || '—'} → ${r.lastDeliveryTime || '—'}
-            ${r.firstDeliveryCity ? '· 1st: ' + r.firstDeliveryCity : ''}
-          </div>
-          ${r.flagCount > 0 ? `<div style="color:#ff8800;font-size:9px;">${r.flagCount} flag(s)</div>` : ''}
+  // ── Fallback manual entry ──────────────────────────────────────────────────
+  function injectFallback(date) {
+    let p = document.getElementById('nv-fallback');
+    if (!p) { p = document.createElement('div'); p.id = 'nv-fallback'; document.body.appendChild(p); }
+    p.innerHTML = `
+      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#0a1628;border:1px solid #00d4ff44;border-radius:12px;padding:24px;width:420px;z-index:99999;font-family:'Orbitron',monospace;box-shadow:0 0 40px #00d4ff22;">
+        <div style="color:#00d4ff;font-size:12px;font-weight:700;margin-bottom:6px;">◈ MANUAL LOAD ENTRY — ${date}</div>
+        <div style="color:#8899aa;font-size:10px;margin-bottom:10px;">Paste route/load numbers, one per line:</div>
+        <textarea id="nv-fb-input" rows="6" style="width:100%;box-sizing:border-box;background:#060e1c;border:1px solid #00d4ff33;border-radius:6px;color:#fff;padding:8px;font-family:inherit;font-size:11px;resize:vertical;outline:none;"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button onclick="window._nvFetch()" style="flex:1;background:#00d4ff22;border:1px solid #00d4ff55;border-radius:6px;color:#00d4ff;padding:8px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;">FETCH</button>
+          <button onclick="document.getElementById('nv-fallback').remove()" style="background:transparent;border:1px solid #ff444433;border-radius:6px;color:#ff444466;padding:8px 12px;cursor:pointer;font-family:inherit;font-size:10px;">✕</button>
         </div>
-        <div style="text-align:right;flex-shrink:0;">
-          <div style="color:${riskColor[r.risk] || '#fff'};font-size:12px;font-weight:700;">${r.score}</div>
-          <div style="color:${riskColor[r.risk] || '#fff'};font-size:9px;text-transform:uppercase;">${r.risk}</div>
-          <button onclick="window._nvRemove('${r.loadNbr}')" style="
-            background:none;border:none;color:#ff444466;cursor:pointer;font-size:9px;padding:2px 0;
-          ">remove</button>
-        </div>
-      </div>
-    `).join('') + Object.entries(errorMap).map(([nbr, err]) => `
-      <div style="padding:6px 0;border-bottom:1px solid #ffffff11;">
-        <div style="color:#ff4444;font-size:10px;">✗ ${nbr}</div>
-        <div style="color:#ff444488;font-size:9px;">${err}</div>
-      </div>
-    `).join('');
-  }
-
-  // ── Remove a single record ─────────────────────────────────────────────────
-  window._nvRemove = function (loadNbr) {
-    nuvizzRecords = nuvizzRecords.filter(r => r.loadNbr !== loadNbr);
-    delete errorMap[loadNbr];
-    renderLoadedList();
-    mergeIntoSentinel();
-  };
-
-  // ── Merge NuVizz records into the SENTINEL React app ──────────────────────
-  // SENTINEL uses a global SENTINEL_DATA array + an uploads state (setUploads).
-  // We reach into the React fiber to find setUploads and inject our data,
-  // so it appears seamlessly in the existing audit table.
-  function mergeIntoSentinel() {
-    // Strategy: expose nuvizzRecords on window so the React app can read them.
-    // The patched handleFileUpload (below) merges these in.
-    window.__NUVIZZ_AUDIT_RECORDS__ = nuvizzRecords;
-
-    // Also try to trigger a React re-render by dispatching a custom event
-    window.dispatchEvent(new CustomEvent('nuvizz-data-updated', {
-      detail: { records: nuvizzRecords }
-    }));
-
-    // Additionally inject directly into SENTINEL's uploads state via React fiber
-    tryInjectIntoReact();
-  }
-
-  function tryInjectIntoReact() {
-    // Walk React fiber tree to find the App component's state setter
-    try {
-      const root = document.getElementById('root');
-      if (!root) return;
-
-      // Find React fiber
-      const fiberKey = Object.keys(root).find(k =>
-        k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance')
-      );
-      if (!fiberKey) return;
-
-      let fiber = root[fiberKey];
-      let found = false;
-
-      // Walk up the fiber tree looking for the App component with setUploads
-      while (fiber && !found) {
-        const memoized = fiber.memoizedState;
-        if (memoized) {
-          // Walk the hook linked list
-          let hook = memoized;
-          while (hook) {
-            if (hook.queue && typeof hook.queue.dispatch === 'function') {
-              // Check if this is the uploads state by inspecting its current value
-              const val = hook.memoizedState;
-              if (val && typeof val === 'object' && ('motive' in val || 'nuvizz' in val || 'b600' in val || 'uploads' in val)) {
-                // Found it - dispatch new nuvizz data into this state
-                const newVal = { ...val, nuvizz: buildNuvizzUploadShape() };
-                hook.queue.dispatch({ type: 'nuvizz_merge', payload: newVal });
-                found = true;
-                break;
-              }
-            }
-            hook = hook.next;
-          }
-        }
-        fiber = fiber.return || fiber.child;
-        if (!fiber) break;
+        <div id="nv-fb-status" style="color:#ffcc00;font-size:9px;margin-top:8px;min-height:14px;"></div>
+      </div>`;
+    window._nvFetch = async () => {
+      const lines = document.getElementById('nv-fb-input').value.split('\n').map(l=>l.trim()).filter(Boolean);
+      if (!lines.length) return;
+      const fbStatus = document.getElementById('nv-fb-status');
+      const records = [], errors = [];
+      for (let i = 0; i < lines.length; i += 3) {
+        const batch = lines.slice(i, i+3);
+        fbStatus.textContent = `Fetching ${i+1}–${Math.min(i+3,lines.length)} of ${lines.length}...`;
+        const settled = await Promise.allSettled(batch.map(async n => {
+          const r = await fetch(`${AUDIT_API}?loadNbr=${encodeURIComponent(n)}`);
+          const d = await r.json();
+          if (!r.ok || !d.success) throw new Error(d.error);
+          return d.auditRecord;
+        }));
+        settled.forEach((r,idx) => {
+          if (r.status === 'fulfilled') records.push(r.value);
+          else errors.push({ loadNbr: batch[idx], error: r.reason?.message });
+        });
       }
-    } catch (e) {
-      // Silent fail — window event approach is the fallback
-    }
-  }
-
-  // Build the shape that SENTINEL's uploads state expects for NuVizz data
-  function buildNuvizzUploadShape() {
-    if (nuvizzRecords.length === 0) return null;
-
-    return {
-      source: 'nuvizz-live',
-      fetchedAt: new Date().toISOString(),
-      recordCount: nuvizzRecords.length,
-
-      // SENTINEL-compatible rows matching the existing CSV parsed shape
-      rows: nuvizzRecords.map(r => ({
-        // Original CSV fields SENTINEL expects
-        driver: r.driver,
-        truck: r.truck,
-        clockIn: r.clockIn,
-        clockOut: r.clockOut,
-        engineH: r.engineH,
-        miles: r.miles,
-        mph: r.mph,
-        stops: r.stops,
-        score: r.score,
-        risk: r.risk,
-        flags: r.flags,
-        stolenH: r.stolenH,
-        stolenD: r.stolenD,
-        source: r.source,
-
-        // NEW enriched fields
-        loadNbr: r.loadNbr,
-        routeName: r.routeName,
-        plannedMiles: r.plannedMiles,
-        actualMiles: r.miles,
-        stemOutMiles: r.stemOutMiles,
-        driveH: r.driveH,
-        routeSpanHrs: r.routeSpanHrs,
-        unaccountedMins: r.unaccountedMins,
-
-        // First/last delivery
-        firstDeliveryTime: r.firstDeliveryTime,
-        firstDeliveryCity: r.firstDeliveryCity,
-        firstDeliveryMinsAfterStart: r.firstDeliveryMinsAfterStart,
-        lastDeliveryTime: r.lastDeliveryTime,
-        lastDeliveryCity: r.lastDeliveryCity,
-
-        flagList: r.flagList,
-        flagCount: r.flagCount,
-        stopDetail: r.stopDetail,
-      })),
-
-      // Route-level summary table (new - displayed in SENTINEL route panel)
-      routeSummaries: nuvizzRecords.map(r => ({
-        loadNbr: r.loadNbr,
-        routeName: r.routeName,
-        driver: r.driver,
-        truck: r.truck,
-        score: r.score,
-        risk: r.risk,
-        stops: r.stops,
-        miles: r.miles,
-        plannedMiles: r.plannedMiles,
-        stemOutMiles: r.stemOutMiles,
-        routeSpanHrs: r.routeSpanHrs,
-        firstDeliveryTime: r.firstDeliveryTime,
-        firstDeliveryCity: r.firstDeliveryCity,
-        firstDeliveryMinsAfterStart: r.firstDeliveryMinsAfterStart,
-        lastDeliveryTime: r.lastDeliveryTime,
-        lastDeliveryCity: r.lastDeliveryCity,
-        unaccountedMins: r.unaccountedMins,
-        stolenH: r.stolenH,
-        stolenD: r.stolenD,
-        flagCount: r.flagCount,
-      })),
+      records.sort((a,b) => b.score - a.score);
+      setStatus(`✓ ${records.length} routes · ${errors.length} failed`, '#00ff88');
+      renderResults({ auditRecords: records, summary: buildSummary(records, date), errors }, date);
+      document.getElementById('nv-fallback').remove();
     };
   }
 
-  // ── Route analysis panel - inject below main SENTINEL table ───────────────
-  function injectRouteAnalysisPanel() {
-    // Listen for nuvizz data updates and inject a route-level analysis table
-    window.addEventListener('nuvizz-data-updated', (e) => {
-      const records = e.detail.records;
-      if (!records.length) {
-        const existing = document.getElementById('nv-route-table');
-        if (existing) existing.remove();
-        return;
-      }
-      renderRouteTable(records);
-    });
+  function buildSummary(records, date) {
+    return {
+      date, totalRoutes: records.length,
+      critical: records.filter(r=>r.risk==='critical').length,
+      high: records.filter(r=>r.risk==='high').length,
+      medium: records.filter(r=>r.risk==='medium').length,
+      low: records.filter(r=>r.risk==='low').length,
+      totalStops: records.reduce((a,r)=>a+(r.stops||0),0),
+      totalMilesActual: records.reduce((a,r)=>a+(r.miles||0),0).toFixed(1),
+      totalStolenHrs: records.reduce((a,r)=>a+(r.stolenH||0),0).toFixed(2),
+      totalStolenDollars: records.reduce((a,r)=>a+(r.stolenD||0),0).toFixed(2),
+    };
   }
 
-  function renderRouteTable(records) {
-    let panel = document.getElementById('nv-route-table');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'nv-route-table';
-      // Insert after the main SENTINEL table, or append to body
-      const mainTable = document.querySelector('table') || document.querySelector('[class*="table"]');
-      if (mainTable && mainTable.parentNode) {
-        mainTable.parentNode.insertBefore(panel, mainTable.nextSibling);
-      } else {
-        document.body.appendChild(panel);
-      }
+  function clearScan() {
+    ['nv-results','nv-fallback'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+    clearBadges(); setStatus('');
+  }
+
+  function setStatus(msg, color='#8899aa') {
+    const el = document.getElementById('nv-scan-status');
+    if (el) { el.textContent = msg; el.style.color = color; }
+  }
+
+  function clearBadges() {
+    const el = document.getElementById('nv-scan-badges');
+    if (el) el.innerHTML = '';
+  }
+
+  function renderBadges(s) {
+    const el = document.getElementById('nv-scan-badges');
+    if (!el) return;
+    el.innerHTML = ['critical','high','medium','low'].map(r =>
+      s[r] > 0 ? `<span style="background:${RC[r]}22;border:1px solid ${RC[r]}55;border-radius:4px;padding:2px 7px;color:${RC[r]};font-size:9px;font-weight:700;">${s[r]} ${r.toUpperCase()}</span>` : ''
+    ).join('');
+  }
+
+  // ── Main results renderer ──────────────────────────────────────────────────
+  function renderResults(data, date) {
+    let wrap = document.getElementById('nv-results');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.id = 'nv-results';
+      const mainTable = document.querySelector('table');
+      if (mainTable?.parentNode) mainTable.parentNode.insertBefore(wrap, mainTable);
+      else document.getElementById('root')?.appendChild(wrap);
     }
 
-    const riskColor = { critical: '#ff4444', high: '#ff8800', medium: '#ffcc00', low: '#00ff88' };
-    const sorted = [...records].sort((a, b) => b.score - a.score);
+    const { auditRecords, summary } = data;
 
-    panel.innerHTML = `
-      <div style="
-        margin: 24px 16px;
-        background: linear-gradient(135deg, #0a1628 0%, #0d2040 100%);
-        border: 1px solid #00d4ff44;
-        border-radius: 12px;
-        padding: 20px;
-        font-family: 'Orbitron', monospace;
-        overflow-x: auto;
-      ">
-        <div style="color:#00d4ff;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:16px;">
-          ◈ ROUTE INTELLIGENCE — ${records.length} ROUTE(S) — NUVIZZ LIVE
+    wrap.innerHTML = `
+      <div style="margin:0 0 24px;font-family:'Orbitron',monospace;">
+
+        <!-- Fleet summary bar -->
+        <div style="background:linear-gradient(135deg,#0a1628,#0d2040);border:1px solid #00d4ff44;border-radius:12px 12px 0 0;padding:16px 20px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
+          <div style="color:#00d4ff;font-size:12px;font-weight:700;letter-spacing:2px;">◈ ${date} — ${auditRecords.length} ROUTES</div>
+          ${['critical','high','medium','low'].map(r => summary[r] > 0 ?
+            `<span style="color:${RC[r]};font-size:11px;font-weight:700;">${summary[r]} ${r.toUpperCase()}</span>` : ''
+          ).join('')}
+          <div style="margin-left:auto;display:flex;gap:20px;">
+            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">TOTAL STOPS</div><div style="color:#fff;font-size:13px;font-weight:700;">${summary.totalStops}</div></div>
+            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">ACTUAL MILES</div><div style="color:#fff;font-size:13px;font-weight:700;">${summary.totalMilesActual}</div></div>
+            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">STOLEN HRS</div><div style="color:#ff4444;font-size:13px;font-weight:700;">${summary.totalStolenHrs}</div></div>
+            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">EST LOSS</div><div style="color:#ff4444;font-size:13px;font-weight:700;">$${summary.totalStolenDollars}</div></div>
+          </div>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:10px;color:#ccd;">
-          <thead>
-            <tr style="border-bottom:1px solid #00d4ff33;color:#8899aa;text-align:left;">
-              <th style="padding:8px 10px;">DRIVER</th>
-              <th style="padding:8px 10px;">ROUTE</th>
-              <th style="padding:8px 10px;">CLOCK IN/OUT</th>
-              <th style="padding:8px 10px;">1ST DEL</th>
-              <th style="padding:8px 10px;">LAST DEL</th>
-              <th style="padding:8px 10px;">SPAN HRS</th>
-              <th style="padding:8px 10px;">STOPS</th>
-              <th style="padding:8px 10px;">PLAN MI</th>
-              <th style="padding:8px 10px;">ACT MI</th>
-              <th style="padding:8px 10px;">STEM MI</th>
-              <th style="padding:8px 10px;">UNACCT MIN</th>
-              <th style="padding:8px 10px;">FLAGS</th>
-              <th style="padding:8px 10px;">SCORE</th>
-              <th style="padding:8px 10px;">RISK</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${sorted.map(r => `
-              <tr style="border-bottom:1px solid #ffffff0a;" onclick="window._nvExpandRoute('${r.loadNbr}')" style="cursor:pointer;">
-                <td style="padding:8px 10px;font-weight:700;color:#fff;">${r.driver}</td>
-                <td style="padding:8px 10px;color:#8899aa;">${r.loadNbr}<br><span style="font-size:9px;">${r.routeName || ''}</span></td>
-                <td style="padding:8px 10px;">${r.clockIn || '—'}<br>${r.clockOut || '—'}</td>
-                <td style="padding:8px 10px;color:#ffcc00;">
-                  ${r.firstDeliveryTime || '—'}<br>
-                  <span style="color:#8899aa;font-size:9px;">${r.firstDeliveryCity || ''}</span>
-                  ${r.firstDeliveryMinsAfterStart != null ? `<br><span style="color:${r.firstDeliveryMinsAfterStart > 90 ? '#ff4444' : '#8899aa'};font-size:9px;">+${r.firstDeliveryMinsAfterStart}min</span>` : ''}
-                </td>
-                <td style="padding:8px 10px;color:#ffcc00;">
-                  ${r.lastDeliveryTime || '—'}<br>
-                  <span style="color:#8899aa;font-size:9px;">${r.lastDeliveryCity || ''}</span>
-                </td>
-                <td style="padding:8px 10px;">${r.routeSpanHrs != null ? r.routeSpanHrs + 'h' : '—'}</td>
-                <td style="padding:8px 10px;">${r.stops}</td>
-                <td style="padding:8px 10px;">${r.plannedMiles != null ? r.plannedMiles : '—'}</td>
-                <td style="padding:8px 10px;color:${r.miles > r.plannedMiles * 1.15 ? '#ff4444' : '#ccd'};">${r.miles != null ? r.miles : '—'}</td>
-                <td style="padding:8px 10px;color:#8899aa;">${r.stemOutMiles != null ? r.stemOutMiles : '—'}</td>
-                <td style="padding:8px 10px;color:${r.unaccountedMins > 60 ? '#ff8800' : '#8899aa'};">${r.unaccountedMins != null ? r.unaccountedMins + 'min' : '—'}</td>
-                <td style="padding:8px 10px;color:#ff8800;">${r.flagCount}</td>
-                <td style="padding:8px 10px;font-weight:700;color:${riskColor[r.risk]};">${r.score}</td>
-                <td style="padding:8px 10px;font-weight:700;color:${riskColor[r.risk]};text-transform:uppercase;">${r.risk}</td>
-              </tr>
-              <tr id="nv-expand-${r.loadNbr}" style="display:none;">
-                <td colspan="14" style="padding:0 10px 12px;">
-                  ${renderStopDetail(r)}
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
+
+        <!-- Route accordion list -->
+        <div style="border:1px solid #00d4ff33;border-top:none;border-radius:0 0 12px 12px;overflow:hidden;">
+          ${auditRecords.map((r, i) => renderRouteRow(r, i)).join('')}
+        </div>
       </div>
     `;
+
+    window._nvRecords = auditRecords;
   }
 
-  function renderStopDetail(r) {
-    if (!r.stopDetail || !r.stopDetail.length) return '<div style="color:#8899aa;font-size:10px;padding:8px 0;">No stop detail available.</div>';
+  function renderRouteRow(r, i) {
+    const flagBadges = r.flags ? r.flags.slice(0, 4).map(f =>
+      `<span style="background:${RC[f.severity] || '#8899aa'}22;border:1px solid ${RC[f.severity] || '#8899aa'}44;border-radius:3px;padding:1px 5px;color:${RC[f.severity] || '#8899aa'};font-size:8px;white-space:nowrap;">${f.type?.replace(/_/g,' ')}</span>`
+    ).join('') : '';
 
     return `
-      <div style="
-        background:#060e1c;
-        border-radius:8px;
-        padding:12px;
-        margin-top:6px;
-        font-size:9px;
-        color:#8899aa;
-        overflow-x:auto;
-      ">
-        <div style="color:#00d4ff;font-size:10px;margin-bottom:8px;">STOP DETAIL — ${r.driver}</div>
-        <table style="width:100%;border-collapse:collapse;">
-          <thead>
-            <tr style="color:#556677;border-bottom:1px solid #ffffff11;">
-              <th style="padding:4px 8px;text-align:left;">SEQ</th>
-              <th style="padding:4px 8px;text-align:left;">STOP #</th>
-              <th style="padding:4px 8px;text-align:left;">CITY</th>
-              <th style="padding:4px 8px;text-align:left;">PLANNED ETA</th>
-              <th style="padding:4px 8px;text-align:left;">ACTUAL ARR</th>
-              <th style="padding:4px 8px;text-align:left;">DEP</th>
-              <th style="padding:4px 8px;text-align:left;">DWELL</th>
-              <th style="padding:4px 8px;text-align:left;">MI→NEXT</th>
-              <th style="padding:4px 8px;text-align:left;">ETA STATUS</th>
-              <th style="padding:4px 8px;text-align:left;">EXCEPTIONS</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${r.stopDetail.map(s => `
-              <tr style="border-bottom:1px solid #ffffff08;">
-                <td style="padding:4px 8px;">${s.seq}</td>
-                <td style="padding:4px 8px;">${s.stopNbr}</td>
-                <td style="padding:4px 8px;">${s.city}</td>
-                <td style="padding:4px 8px;">${s.plannedEta || '—'}</td>
-                <td style="padding:4px 8px;color:${s.dwellMins > 35 ? '#ff8800' : '#ccd'};">${s.actualArrival || '—'}</td>
-                <td style="padding:4px 8px;">${s.actualDeparture || '—'}</td>
-                <td style="padding:4px 8px;color:${s.dwellMins > 35 ? '#ff4444' : s.dwellMins < 3 ? '#ffcc00' : '#8899aa'};">
-                  ${s.dwellMins != null ? s.dwellMins + 'min' : '—'}
-                </td>
-                <td style="padding:4px 8px;">${s.milestoNext != null ? s.milestoNext.toFixed(1) : '—'}</td>
-                <td style="padding:4px 8px;color:${s.etaCode === 'DELAYED' ? '#ff4444' : s.etaCode === 'ONTIME' ? '#00ff88' : '#8899aa'};">
-                  ${s.etaCode || '—'}
-                </td>
-                <td style="padding:4px 8px;color:#ff4444;">${s.exceptions && s.exceptions.length ? s.exceptions.join(', ') : ''}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        ${r.flagList && r.flagList.length ? `
-          <div style="margin-top:10px;color:#ff8800;font-size:9px;">
-            <span style="color:#ff8800;font-weight:700;">FLAGS: </span>
-            ${r.flagList.map(f => `<span style="margin-right:10px;">▸ ${f}</span>`).join('')}
+      <div style="border-bottom:1px solid #ffffff0a;">
+        <!-- Route header row -->
+        <div onclick="window._nvToggle(${i})" style="
+          display:grid;grid-template-columns:200px 120px 140px 140px 80px 80px 80px 70px 100px auto;
+          gap:0;align-items:center;padding:10px 16px;cursor:pointer;
+          background:${i % 2 === 0 ? '#0a1628' : '#080f20'};
+          transition:background 0.15s;
+        " onmouseover="this.style.background='#0d1f38'" onmouseout="this.style.background='${i % 2 === 0 ? '#0a1628' : '#080f20'}'">
+          <div>
+            <div style="color:#fff;font-size:11px;font-weight:700;">${r.driver}</div>
+            <div style="color:#8899aa;font-size:9px;">${r.truck} · ${r.loadNbr}</div>
           </div>
-        ` : ''}
+          <div style="font-size:10px;color:#ccd;">
+            <div>${r.clockIn || '—'} in</div>
+            <div>${r.clockOut || '—'} out</div>
+          </div>
+          <div style="font-size:10px;">
+            <div style="color:#ffcc00;">${r.firstDeliveryTime || '—'}</div>
+            <div style="color:#8899aa;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;" title="${r.firstDeliveryBusiness || ''}">${r.firstDeliveryBusiness || '—'}</div>
+            ${r.firstDeliveryMinsAfterStart != null ? `<div style="color:${r.firstDeliveryMinsAfterStart > 90 ? '#ff4444' : '#8899aa'};font-size:8px;">+${r.firstDeliveryMinsAfterStart}min</div>` : ''}
+          </div>
+          <div style="font-size:10px;">
+            <div style="color:#ffcc00;">${r.lastDeliveryTime || '—'}</div>
+            <div style="color:#8899aa;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;" title="${r.lastDeliveryBusiness || ''}">${r.lastDeliveryBusiness || '—'}</div>
+          </div>
+          <div style="font-size:10px;color:#ccd;text-align:center;">${r.stops}<br><span style="color:#8899aa;font-size:8px;">${r.totalStops} total</span></div>
+          <div style="font-size:10px;text-align:center;">
+            <div style="color:${r.miles > r.plannedMiles * 1.15 ? '#ff4444' : '#ccd'};">${r.miles ?? '—'}</div>
+            <div style="color:#8899aa;font-size:8px;">${r.plannedMiles ?? '—'} plan</div>
+          </div>
+          <div style="font-size:10px;color:${r.unaccountedMins > 60 ? '#ff8800' : '#8899aa'};text-align:center;">${r.unaccountedMins != null ? r.unaccountedMins + 'min' : '—'}<br><span style="font-size:8px;">unacct</span></div>
+          <div style="font-size:10px;font-weight:700;color:${RC[r.risk]};text-align:center;">${r.score}<br><span style="font-size:8px;text-transform:uppercase;">${r.risk}</span></div>
+          <div style="font-size:9px;display:flex;flex-wrap:wrap;gap:3px;">${flagBadges}</div>
+          <div style="color:#8899aa;font-size:10px;text-align:right;">▾</div>
+        </div>
+
+        <!-- Stop detail (hidden by default) -->
+        <div id="nv-detail-${i}" style="display:none;background:#060e1c;padding:0 16px 16px;">
+          ${renderStopTable(r, i)}
+        </div>
       </div>
     `;
   }
 
-  // Toggle stop detail expand/collapse
-  window._nvExpandRoute = function (loadNbr) {
-    const row = document.getElementById(`nv-expand-${loadNbr}`);
-    if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
-  };
-
-  // ── Status helper ──────────────────────────────────────────────────────────
-  function setStatus(msg) {
-    const el = document.getElementById('nv-status');
-    if (el) el.textContent = msg;
-  }
-
-  // ── Init ───────────────────────────────────────────────────────────────────
-  function init() {
-    // Wait for React to mount
-    if (!document.getElementById('root')) {
-      setTimeout(init, 200);
-      return;
+  function renderStopTable(r, i) {
+    if (!r.stopDetail || !r.stopDetail.length) {
+      return '<div style="color:#8899aa;font-size:10px;padding:12px 0;">No stop detail available.</div>';
     }
 
-    injectPanel();
-    injectRouteAnalysisPanel();
-    renderLoadedList();
+    // Flag summary
+    const flagHtml = r.flags && r.flags.length ? `
+      <div style="padding:10px 0 6px;display:flex;flex-wrap:wrap;gap:6px;">
+        ${r.flags.map(f => `
+          <div style="background:${RC[f.severity] || '#555'}18;border:1px solid ${RC[f.severity] || '#555'}44;border-radius:4px;padding:4px 8px;max-width:400px;">
+            <span style="color:${RC[f.severity] || '#ccd'};font-size:9px;font-weight:700;">${f.type?.replace(/_/g,' ')} — </span>
+            <span style="color:#aabbcc;font-size:9px;">${f.message}</span>
+          </div>
+        `).join('')}
+      </div>
+    ` : '';
 
-    console.log('[SENTINEL NuVizz Patch] Loaded. Use the panel (top-right) to fetch live route data.');
+    const stopRows = r.stopDetail.map(s => {
+      const gapColor = s.interStopGapFlag ? RC.critical : '#8899aa';
+      const dwellColor = s.dwellMins > 60 ? RC.critical : s.dwellMins > 35 ? RC.high : s.dwellMins < 3 ? RC.medium : '#8899aa';
+      const etaColor = s.earlyLateMinutes > 30 ? RC.high : s.earlyLateMinutes < -10 ? '#00aaff' : '#00ff88';
+      const etaStr = s.earlyLateMinutes != null
+        ? (s.earlyLateMinutes > 0 ? `+${s.earlyLateMinutes}min late` : `${Math.abs(s.earlyLateMinutes)}min early`)
+        : '—';
+
+      return `
+        <tr style="border-bottom:1px solid #ffffff08;">
+          <td style="padding:6px 8px;color:#556677;font-size:9px;">${s.seq}</td>
+          <td style="padding:6px 8px;">
+            <div style="color:#fff;font-size:10px;font-weight:600;">${s.businessName || '—'}</div>
+            <div style="color:#8899aa;font-size:9px;">${s.addr1 || ''} ${s.city || ''}${s.state ? ', '+s.state : ''} ${s.zip || ''}</div>
+            ${s.customerAccount ? `<div style="color:#556677;font-size:8px;">Acct: ${s.customerAccount}</div>` : ''}
+          </td>
+          <td style="padding:6px 8px;font-size:9px;color:#8899aa;">${s.stopType === 'PU' ? '📦 Pickup' : '📍 Delivery'}</td>
+          <td style="padding:6px 8px;">
+            ${s.interStopGapMins != null ? `
+              <div style="color:${gapColor};font-size:10px;font-weight:${s.interStopGapFlag?'700':'400'};">${s.interStopGapMins}min gap</div>
+              ${s.prevStopBusiness ? `<div style="color:#556677;font-size:8px;">from ${s.prevStopBusiness}</div>` : ''}
+              ${s.interStopExcessMins != null && s.interStopGapFlag ? `<div style="color:${RC.high};font-size:8px;">+${s.interStopExcessMins}min over plan</div>` : ''}
+            ` : '<span style="color:#556677;font-size:9px;">—</span>'}
+          </td>
+          <td style="padding:6px 8px;">
+            <div style="color:#8899aa;font-size:9px;">${s.plannedEta || '—'} planned</div>
+            <div style="color:#ffcc00;font-size:10px;font-weight:600;">${s.actualArrival || '—'} arrived</div>
+          </td>
+          <td style="padding:6px 8px;">
+            <div style="color:#00ff88;font-size:10px;font-weight:600;">${s.completionTime || '—'}</div>
+            ${s.arrivalToConfirmMins != null ? `<div style="color:${s.arrivalToConfirmMins > 20 ? RC.high : '#556677'};font-size:8px;">${s.arrivalToConfirmMins}min arr→confirm</div>` : ''}
+          </td>
+          <td style="padding:6px 8px;">
+            <div style="color:${dwellColor};font-size:10px;font-weight:${s.dwellMins > 35 ? '700' : '400'};">${s.dwellMins != null ? s.dwellMins+'min' : '—'}</div>
+          </td>
+          <td style="padding:6px 8px;">
+            <div style="color:${etaColor};font-size:9px;">${etaStr}</div>
+          </td>
+          <td style="padding:6px 8px;">
+            <div style="color:#8899aa;font-size:9px;">${s.pallets != null ? s.pallets+' plt' : ''} ${s.weight != null ? s.weight+'lb' : ''}</div>
+            ${s.plannedMilesToNextStop != null ? `<div style="color:#556677;font-size:8px;">${parseFloat(s.plannedMilesToNextStop).toFixed(1)}mi→next</div>` : ''}
+          </td>
+          <td style="padding:6px 8px;">
+            ${s.exceptionPresent ? `<div style="color:${RC.high};font-size:9px;">⚠ ${s.exceptions?.map(e=>e.desc||e.code).join(', ')||'Exception'}</div>` : ''}
+            ${s.proNumber ? `<div style="color:#556677;font-size:8px;">PRO:${s.proNumber}</div>` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      ${flagHtml}
+      <div style="overflow-x:auto;margin-top:6px;">
+        <table style="width:100%;border-collapse:collapse;font-size:10px;">
+          <thead>
+            <tr style="border-bottom:1px solid #00d4ff22;color:#556677;font-size:9px;text-align:left;">
+              <th style="padding:5px 8px;">SEQ</th>
+              <th style="padding:5px 8px;">BUSINESS / ADDRESS</th>
+              <th style="padding:5px 8px;">TYPE</th>
+              <th style="padding:5px 8px;">INTER-STOP GAP</th>
+              <th style="padding:5px 8px;">ETA → ARRIVAL</th>
+              <th style="padding:5px 8px;">COMPLETION</th>
+              <th style="padding:5px 8px;">DWELL</th>
+              <th style="padding:5px 8px;">EARLY/LATE</th>
+              <th style="padding:5px 8px;">FREIGHT</th>
+              <th style="padding:5px 8px;">NOTES</th>
+            </tr>
+          </thead>
+          <tbody>${stopRows}</tbody>
+        </table>
+      </div>
+    `;
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  window._nvToggle = (i) => {
+    const row = document.getElementById(`nv-detail-${i}`);
+    if (!row) return;
+    row.style.display = row.style.display === 'none' ? 'block' : 'none';
+  };
+
+  waitForApp(() => {
+    injectScanBar();
+    console.log('[SENTINEL NuVizz v3] Ready — date scan active.');
+  });
 
 })();

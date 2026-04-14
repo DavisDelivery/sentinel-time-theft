@@ -2,6 +2,47 @@
   publish = "public"
   functions = "netlify/functions"
 
+# API redirects — patch scripts call /api/*, Netlify serves at /.netlify/functions/*
+[[redirects]]
+  from = "/api/nuvizz-loads-by-date"
+  to = "/.netlify/functions/nuvizz-loads-by-date"
+  status = 200
+
+[[redirects]]
+  from = "/api/nuvizz-route-audit"
+  to = "/.netlify/functions/nuvizz-route-audit"
+  status = 200
+
+[[redirects]]
+  from = "/api/nuvizz-stops"
+  to = "/.netlify/functions/nuvizz-stops"
+  status = 200
+
+[[redirects]]
+  from = "/api/nuvizz-load"
+  to = "/.netlify/functions/nuvizz-load"
+  status = 200
+
+[[redirects]]
+  from = "/api/nuvizz-events"
+  to = "/.netlify/functions/nuvizz-events"
+  status = 200
+
+[[redirects]]
+  from = "/api/motive-gps"
+  to = "/.netlify/functions/motive-gps"
+  status = 200
+
+[[redirects]]
+  from = "/api/motive-dashcam"
+  to = "/.netlify/functions/motive-dashcam"
+  status = 200
+
+[[redirects]]
+  from = "/api/totalpass-scraper"
+  to = "/.netlify/functions/totalpass-scraper"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]

@@ -1,71 +1,48 @@
 // netlify/functions/totalpass-scraper.js
 // Scrapes the TotalPass B600 web interface to pull punch data for a given date
-// The B600 has a built-in web UI accessible via IP — no official API exists
+// The B600 has a built-in web UI accessible via Cloudflare Tunnel — no official API exists
 // We log in via form POST, then hit the Reports/Timecard CSV export endpoint
 
-const https = require('https');
-const http = require('http');
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Content-Type': 'application/json'
+};
 
-// ─── CONFIG ───────────────────────────────────────────────────────────────────
-const CLOCK_IP       = process.env.TOTALPASS_IP       || 'b600.atlantafreightquotes.com';
-const CLOCK_PASSWORD = process.env.TOTALPASS_PASSWORD  || 'admin12345';
-const CLOCK_PORT     = parseInt(process.env.TOTALPASS_PORT || '443');
+async function fetchTimeclockData(targetDate, env) {
+  const CLOCK_IP = env.get('TOTALPASS_IP') || 'b600.atlantafreightquotes.com';
+  const CLOCK_PASSWORD = env.get('TOTALPASS_PASSWORD') || 'admin12345';
+  const CLOCK_PORT = parseInt(env.get('TOTALPASS_PORT') || '443');
+  const IS_TUNNEL = CLOCK_IP.includes('.') && !CLOCK_IP.match(/^\d+\.\d+\.\d+\.\d+$/);
+  const EFFECTIVE_PORT = IS_TUNNEL ? 443 : CLOCK_PORT;
+  const PROTO = (IS_TUNNEL || EFFECTIVE_PORT === 443) ? 'https' : 'http';
+  const BASE = `${PROTO}://${CLOCK_IP}${EFFECTIVE_PORT !== 443 && EFFECTIVE_PORT !== 80 ? ':' + EFFECTIVE_PORT : ''}`;
 
-// Detect if using Cloudflare Tunnel (hostname instead of IP)
-const IS_TUNNEL = CLOCK_IP.includes('.') && !CLOCK_IP.match(/^\d+\.\d+\.\d+\.\d+$/);
-const EFFECTIVE_PORT = IS_TUNNEL ? 443 : CLOCK_PORT;
-const USE_HTTPS = IS_TUNNEL || EFFECTIVE_PORT === 443;
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-function httpRequest(options, postBody = null) {
-  return new Promise((resolve, reject) => {
-    const lib = USE_HTTPS ? https : http;
-    const req = lib.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
-    });
-    req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timeout')); });
-    if (postBody) req.write(postBody);
-    req.end();
-  });
-}
-
-// ─── MAIN SCRAPER ─────────────────────────────────────────────────────────────
-
-async function fetchTimeclockData(targetDate) {
   const logs = [];
   function log(msg) { logs.push(msg); console.log(`[B600] ${msg}`); }
 
   log(`Connecting to ${CLOCK_IP}:${EFFECTIVE_PORT} (tunnel:${IS_TUNNEL})`);
 
   // Step 1: Login
-  const loginBody = `username=admin&password=${encodeURIComponent(CLOCK_PASSWORD)}`;
   let cookie = '';
   try {
-    const loginResp = await httpRequest({
-      hostname: CLOCK_IP,
-      port: EFFECTIVE_PORT,
-      path: '/login',
+    const loginResp = await fetch(`${BASE}/login`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(loginBody)
-      },
-      rejectUnauthorized: false
-    }, loginBody);
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `username=admin&password=${encodeURIComponent(CLOCK_PASSWORD)}`,
+      redirect: 'manual'
+    });
 
     log(`Login response: ${loginResp.status}`);
-    cookie = (loginResp.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
+    const setCookies = loginResp.headers.getSetCookie?.() || [];
+    cookie = setCookies.map(c => c.split(';')[0]).join('; ');
 
     if (loginResp.status === 302 || loginResp.status === 200) {
       log('Login successful');
     } else {
       log(`Login returned ${loginResp.status}`);
     }
-  } catch(err) {
+  } catch (err) {
     log(`Login failed: ${err.message}`);
     return { success: false, error: `Cannot reach B600: ${err.message}`, logs };
   }
@@ -80,42 +57,39 @@ async function fetchTimeclockData(targetDate) {
     '/api/timecard'
   ];
 
-  // Also try custom export path if set
-  const customPath = process.env.TOTALPASS_EXPORT_PATH;
+  const customPath = env.get('TOTALPASS_EXPORT_PATH');
   if (customPath) reportPaths.unshift(customPath);
 
   for (const path of reportPaths) {
     try {
       log(`Trying ${path}...`);
-      const resp = await httpRequest({
-        hostname: CLOCK_IP,
-        port: EFFECTIVE_PORT,
-        path: path + (path.includes('?') ? '&' : '?') + `date=${targetDate}`,
-        method: 'GET',
+      const sep = path.includes('?') ? '&' : '?';
+      const resp = await fetch(`${BASE}${path}${sep}date=${targetDate}`, {
         headers: { 'Cookie': cookie },
-        rejectUnauthorized: false
+        redirect: 'follow'
       });
 
-      log(`${path}: HTTP ${resp.status} (${resp.body.length} bytes)`);
+      const body = await resp.text();
+      log(`${path}: HTTP ${resp.status} (${body.length} bytes)`);
 
       // If we get CSV data, parse it
-      if (resp.body.includes(',') && (resp.body.includes('Name') || resp.body.includes('Employee') || resp.body.includes('In Time'))) {
+      if (body.includes(',') && (body.includes('Name') || body.includes('Employee') || body.includes('In Time'))) {
         log('Found CSV-like data!');
-        const records = parseCSV(resp.body);
+        const records = parseCSV(body);
         if (records.length > 0) {
           return { success: true, records, date: targetDate, source: 'B600 Live', logs };
         }
       }
 
       // If HTML with table, try to parse table
-      if (resp.body.includes('<table') && resp.body.includes('<tr')) {
+      if (body.includes('<table') && body.includes('<tr')) {
         log('Found HTML table, attempting parse...');
-        const records = parseHTMLTable(resp.body);
+        const records = parseHTMLTable(body);
         if (records.length > 0) {
           return { success: true, records, date: targetDate, source: 'B600 Live (HTML)', logs };
         }
       }
-    } catch(err) {
+    } catch (err) {
       log(`${path}: ${err.message}`);
     }
   }
@@ -142,7 +116,6 @@ function parseCSV(text) {
 }
 
 function parseHTMLTable(html) {
-  // Basic HTML table parser
   const rows = [];
   const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   const tdRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
@@ -166,35 +139,27 @@ function parseHTMLTable(html) {
 
 // ─── HANDLER ──────────────────────────────────────────────────────────────────
 
-exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Type': 'application/json'
-  };
-
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
-
-  let targetDate = new Date().toISOString().split('T')[0];
-  if (event.queryStringParameters?.date) {
-    targetDate = event.queryStringParameters.date;
+export default async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('', { status: 200, headers: CORS });
   }
+
+  const url = new URL(req.url);
+  const targetDate = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
 
   console.log(`[Sentinel] TotalPass scrape for: ${targetDate}`);
 
   try {
-    const result = await fetchTimeclockData(targetDate);
-    return {
-      statusCode: result.success ? 200 : 503,
-      headers,
-      body: JSON.stringify(result)
-    };
+    const result = await fetchTimeclockData(targetDate, Netlify.env);
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 503,
+      headers: CORS
+    });
   } catch (err) {
     console.error('[Sentinel] Scraper error:', err);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ success: false, error: err.message })
-    };
+    return new Response(JSON.stringify({ success: false, error: err.message }), {
+      status: 500,
+      headers: CORS
+    });
   }
 };

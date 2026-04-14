@@ -4,20 +4,22 @@
 // Used by: SENTINEL (timeline cross-ref), MarginIQ (dwell/service time analysis)
 
 const NUVIZZ_BASE = 'https://contact-support.nuvizz.com/deliverit/openapi/v7';
-const COMPANY_CODE = process.env.NUVIZZ_COMPANY_CODE || 'davis';
-const NUVIZZ_USER = process.env.NUVIZZ_USERNAME;
-const NUVIZZ_PASS = process.env.NUVIZZ_PASSWORD;
 
-function getAuthHeader() {
-  const token = Buffer.from(`${NUVIZZ_USER}:${NUVIZZ_PASS}`).toString('base64');
-  return `Basic ${token}`;
+function getAuth(env) {
+  const u = env.get('NUVIZZ_USERNAME');
+  const p = env.get('NUVIZZ_PASSWORD');
+  return 'Basic ' + btoa(`${u}:${p}`);
 }
 
-async function fetchNuVizz(path) {
+function getCompany(env) {
+  return env.get('NUVIZZ_COMPANY_CODE') || 'davis';
+}
+
+async function fetchNuVizz(path, env) {
   const url = `${NUVIZZ_BASE}${path}`;
   const res = await fetch(url, {
     headers: {
-      'Authorization': getAuthHeader(),
+      'Authorization': getAuth(env),
       'Content-Type': 'application/json',
     },
   });
@@ -44,7 +46,7 @@ function normalizeEvents(raw, entityType) {
     eventDttm: e.eventDttm || e.eventTime,
     eventTz: e.eventTz || e.timeZone,
     performedBy: e.performedBy || e.createdBy,
-    performedByType: e.performedByType,   // DRIVER, DISPATCHER, SYSTEM
+    performedByType: e.performedByType,
     location: e.location ? {
       lat: e.location.latitude,
       lng: e.location.longitude,
@@ -52,7 +54,6 @@ function normalizeEvents(raw, entityType) {
     comment: e.comment || e.remarks,
   }));
 
-  // Sort chronologically
   normalized.sort((a, b) => {
     const ta = a.eventDttm ? new Date(a.eventDttm) : 0;
     const tb = b.eventDttm ? new Date(b.eventDttm) : 0;
@@ -62,104 +63,83 @@ function normalizeEvents(raw, entityType) {
   return normalized;
 }
 
-exports.handler = async (event) => {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
-  };
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Content-Type': 'application/json',
+};
 
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: corsHeaders, body: '' };
+export default async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('', { status: 200, headers: CORS });
   }
 
-  if (event.httpMethod !== 'GET') {
-    return { statusCode: 405, headers: corsHeaders, body: JSON.stringify({ error: 'Method not allowed' }) };
+  if (req.method !== 'GET') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: CORS });
   }
 
-  if (!NUVIZZ_USER || !NUVIZZ_PASS) {
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: 'NuVizz credentials not configured' }),
-    };
+  const env = Netlify.env;
+  const user = env.get('NUVIZZ_USERNAME');
+  const pass = env.get('NUVIZZ_PASSWORD');
+  if (!user || !pass) {
+    return new Response(JSON.stringify({ error: 'NuVizz credentials not configured' }), { status: 500, headers: CORS });
   }
 
-  const params = event.queryStringParameters || {};
-  // entityType: STOP or ROUTE
-  // entityId: NuVizz system-generated ID (not the stop/load number)
-  const { entityType, entityId, stopNbr, loadNbr } = params;
+  const url = new URL(req.url);
+  const entityType = url.searchParams.get('entityType');
+  const entityId = url.searchParams.get('entityId');
+  const stopNbr = url.searchParams.get('stopNbr');
+  const loadNbr = url.searchParams.get('loadNbr');
+  const cc = getCompany(env);
 
   try {
-    // Direct entity ID lookup (fastest — use when you already have the system ID)
+    // Direct entity ID lookup
     if (entityType && entityId) {
       const validTypes = ['STOP', 'ROUTE'];
       if (!validTypes.includes(entityType.toUpperCase())) {
-        return {
-          statusCode: 400,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: 'entityType must be STOP or ROUTE' }),
-        };
+        return new Response(JSON.stringify({ error: 'entityType must be STOP or ROUTE' }), { status: 400, headers: CORS });
       }
 
-      const path = `/event/eventactivity/${COMPANY_CODE}?entityType=${entityType.toUpperCase()}&entityId=${encodeURIComponent(entityId)}`;
-      const raw = await fetchNuVizz(path);
+      const path = `/event/eventactivity/${cc}?entityType=${entityType.toUpperCase()}&entityId=${encodeURIComponent(entityId)}`;
+      const raw = await fetchNuVizz(path, env);
       const events = normalizeEvents(raw, entityType.toUpperCase());
 
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ success: true, entityType, entityId, eventCount: events.length, events }),
-      };
+      return new Response(JSON.stringify({ success: true, entityType, entityId, eventCount: events.length, events }), { status: 200, headers: CORS });
     }
 
-    // Lookup by stopNbr: first fetch stop to get stopId, then get events
+    // Lookup by stopNbr
     if (stopNbr) {
-      const stopRaw = await fetchNuVizz(`/stop/info/${encodeURIComponent(stopNbr)}/${COMPANY_CODE}`);
+      const stopRaw = await fetchNuVizz(`/stop/info/${encodeURIComponent(stopNbr)}/${cc}`, env);
       const stopId = stopRaw.Stop?.stop?.stopId;
       if (!stopId) {
-        return {
-          statusCode: 404,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: `Could not find stopId for stopNbr ${stopNbr}` }),
-        };
+        return new Response(JSON.stringify({ error: `Could not find stopId for stopNbr ${stopNbr}` }), { status: 404, headers: CORS });
       }
 
-      const path = `/event/eventactivity/${COMPANY_CODE}?entityType=STOP&entityId=${encodeURIComponent(stopId)}`;
-      const raw = await fetchNuVizz(path);
+      const path = `/event/eventactivity/${cc}?entityType=STOP&entityId=${encodeURIComponent(stopId)}`;
+      const raw = await fetchNuVizz(path, env);
       const events = normalizeEvents(raw, 'STOP');
 
-      // Also grab stop event info (legacy endpoint) for comparison
       let legacyEvents = [];
       try {
-        const legacyRaw = await fetchNuVizz(`/stop/eventinfo/${COMPANY_CODE}?stopNbr=${encodeURIComponent(stopNbr)}`);
+        const legacyRaw = await fetchNuVizz(`/stop/eventinfo/${cc}?stopNbr=${encodeURIComponent(stopNbr)}`, env);
         legacyEvents = normalizeEvents(legacyRaw, 'STOP');
       } catch (_) { /* not critical */ }
 
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ success: true, stopNbr, stopId, eventCount: events.length, events, legacyEvents }),
-      };
+      return new Response(JSON.stringify({ success: true, stopNbr, stopId, eventCount: events.length, events, legacyEvents }), { status: 200, headers: CORS });
     }
 
-    // Lookup by loadNbr: fetch load to get loadId, then get route events
+    // Lookup by loadNbr
     if (loadNbr) {
-      const loadRaw = await fetchNuVizz(`/load/info/${encodeURIComponent(loadNbr)}/${COMPANY_CODE}`);
+      const loadRaw = await fetchNuVizz(`/load/info/${encodeURIComponent(loadNbr)}/${cc}`, env);
       const loadId = loadRaw.Load?.loadHeader?.loadId;
       if (!loadId) {
-        return {
-          statusCode: 404,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: `Could not find loadId for loadNbr ${loadNbr}` }),
-        };
+        return new Response(JSON.stringify({ error: `Could not find loadId for loadNbr ${loadNbr}` }), { status: 404, headers: CORS });
       }
 
-      const path = `/event/eventactivity/${COMPANY_CODE}?entityType=ROUTE&entityId=${encodeURIComponent(loadId)}`;
-      const raw = await fetchNuVizz(path);
+      const path = `/event/eventactivity/${cc}?entityType=ROUTE&entityId=${encodeURIComponent(loadId)}`;
+      const raw = await fetchNuVizz(path, env);
       const events = normalizeEvents(raw, 'ROUTE');
 
-      // Derive key timestamps from the event stream for SENTINEL
       const routeEvents = {
         firstEvent: events[0] || null,
         lastEvent: events[events.length - 1] || null,
@@ -171,25 +151,13 @@ exports.handler = async (event) => {
         exceptionEvents: events.filter(e => e.eventDesc?.toLowerCase().includes('exception')),
       };
 
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ success: true, loadNbr, loadId, eventCount: events.length, routeEvents, events }),
-      };
+      return new Response(JSON.stringify({ success: true, loadNbr, loadId, eventCount: events.length, routeEvents, events }), { status: 200, headers: CORS });
     }
 
-    return {
-      statusCode: 400,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: 'Provide entityType+entityId, stopNbr, or loadNbr' }),
-    };
+    return new Response(JSON.stringify({ error: 'Provide entityType+entityId, stopNbr, or loadNbr' }), { status: 400, headers: CORS });
 
   } catch (err) {
     console.error('nuvizz-events error:', err.message);
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: err.message }),
-    };
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
   }
 };

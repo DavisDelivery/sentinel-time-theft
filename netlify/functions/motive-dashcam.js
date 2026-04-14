@@ -2,83 +2,62 @@
 // Fetches dashcam safety events and video recall from Motive API
 // Used by SENTINEL for visual verification of driver activity
 
-const https = require('https');
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Content-Type': 'application/json'
+};
 
-const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY || '';
-
-function motiveRequest(path) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.gomotive.com',
-      port: 443,
-      path,
-      method: 'GET',
-      headers: {
-        'X-Api-Key': MOTIVE_API_KEY,
-        'Authorization': `Bearer ${MOTIVE_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    };
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-        catch(e) { resolve({ status: res.statusCode, body: data }); }
-      });
-    });
-    req.on('error', reject);
-    req.setTimeout(20000, () => { req.destroy(); reject(new Error('Timeout')); });
-    req.end();
+async function motiveRequest(path, apiKey) {
+  const res = await fetch(`https://api.gomotive.com${path}`, {
+    headers: {
+      'X-Api-Key': apiKey,
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    }
   });
+  const body = await res.json().catch(() => res.text());
+  return { status: res.status, body };
 }
 
-exports.handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
-  };
+export default async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('', { status: 200, headers: CORS });
+  }
 
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+  const KEY = Netlify.env.get('MOTIVE_API_KEY');
+  if (!KEY) {
+    return new Response(JSON.stringify({ error: 'MOTIVE_API_KEY not set' }), { status: 500, headers: CORS });
+  }
 
-  const params = event.queryStringParameters || {};
-  const action = params.action || 'events';
+  const url = new URL(req.url);
+  const action = url.searchParams.get('action') || 'events';
 
   try {
     let result;
 
     if (action === 'events') {
-      const date = params.date || new Date().toISOString().split('T')[0];
-      const vehicleId = params.vehicle_id || '';
+      const date = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
+      const vehicleId = url.searchParams.get('vehicle_id') || '';
       let path = `/v1/safety_events?start_date=${date}&end_date=${date}&per_page=100`;
       if (vehicleId) path += `&vehicle_id=${vehicleId}`;
-      result = await motiveRequest(path);
+      result = await motiveRequest(path, KEY);
 
     } else if (action === 'video_request') {
-      // Request video recall for a specific time/vehicle
-      const vehicleId = params.vehicle_id;
-      const startTime = params.start_time;
+      const vehicleId = url.searchParams.get('vehicle_id');
+      const startTime = url.searchParams.get('start_time');
       if (!vehicleId || !startTime) {
-        return { statusCode: 400, headers, body: JSON.stringify({ error: 'vehicle_id and start_time required' }) };
+        return new Response(JSON.stringify({ error: 'vehicle_id and start_time required' }), { status: 400, headers: CORS });
       }
-      result = await motiveRequest(`/v1/vehicle_media_requests?vehicle_id=${vehicleId}&start_time=${startTime}`);
+      result = await motiveRequest(`/v1/vehicle_media_requests?vehicle_id=${vehicleId}&start_time=${startTime}`, KEY);
 
     } else {
-      result = await motiveRequest(`/v1/${action}?per_page=100`);
+      result = await motiveRequest(`/v1/${action}?per_page=100`, KEY);
     }
 
-    return {
-      statusCode: result.status || 200,
-      headers,
-      body: JSON.stringify(result.body)
-    };
+    return new Response(JSON.stringify(result.body), { status: result.status || 200, headers: CORS });
 
-  } catch(err) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: err.message })
-    };
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
   }
 };
