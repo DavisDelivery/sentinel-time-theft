@@ -560,7 +560,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -609,6 +609,7 @@ function showTab(id,btn){
 // ── STATE ──
 let results = [], curFilter='all', curSort='score', camPending=null;
 let b600Data = []; // B600 clock records: [{name, clockIn, clockOut}]
+let b600HistoryLoaded = false; // true once history JSON is loaded
 let nuvizzData = []; // NuVizz manifest: [{driver, address, city, window_start, window_end, stop_type}]
 let vehicleCache = {}; // {vehicleNumber: {id, make, model, year, ...}}
 
@@ -1503,6 +1504,15 @@ async function runAudit(){
   log(`Shift window filter: -${SHIFT_BUFFER_BEFORE}min / +${SHIFT_BUFFER_AFTER}min`,'info');
 
   try{
+    // Step 0a: Auto-load B600 data for selected dates (from stored history)
+    if(window._b600History && !b600Data.length){
+      loadB600ForDates(dates);
+    }
+
+    // Step 0b: Fetch NuVizz stop data from API for selected dates
+    nuvizzData=[]; // clear previous
+    await fetchNuVizzForDates(dates);
+
     // Step 1: Fetch all vehicles (builds cache for ID lookups)
     await fetchAllVehicles();
 
@@ -1887,6 +1897,76 @@ function setStatus(s){
 }
 
 // ═══════════════════════════════════════════
+// AUTO-LOAD B600 HISTORY + NUVIZZ API
+// ═══════════════════════════════════════════
+async function loadB600History(){
+  try{
+    const res=await fetch('/b600-history.json');
+    if(!res.ok) return;
+    const records=await res.json();
+    if(records.length){
+      b600HistoryLoaded=true;
+      log(`📂 B600 history loaded: ${records.length} punches (auto)`, 'ok');
+      const dates=new Set(records.map(r=>r.date));
+      const drivers=new Set(records.map(r=>r.name));
+      log(`   ${drivers.size} drivers, ${dates.size} days (${[...dates].sort()[0]} → ${[...dates].sort().pop()})`, 'info');
+      // Store globally — will be filtered per-audit by date
+      window._b600History=records;
+    }
+  }catch(e){ /* silent — history file is optional */ }
+}
+
+function loadB600ForDates(dates){
+  if(!window._b600History) return;
+  const dateSet=new Set(dates);
+  const matching=window._b600History.filter(r=>dateSet.has(r.date));
+  if(matching.length){
+    b600Data=matching;
+    log(`✅ B600 auto-loaded: ${matching.length} punches for ${dates.length} day(s)`,'ok');
+    document.getElementById('upLabel').textContent=`✅ B600: ${matching.length} punches (auto)`;
+    document.getElementById('upB600').classList.add('loaded');
+  }
+}
+
+async function fetchNuVizzForDates(dates){
+  try{
+    for(const date of dates){
+      log(`📡 NuVizz API: fetching routes for ${date}...`,'info');
+      const res=await fetch(`/api/nuvizz-loads-by-date?date=${date}`);
+      if(!res.ok){ log(`NuVizz API: ${res.status} for ${date}`,'warn'); continue; }
+      const data=await res.json();
+      if(!data.success || !data.auditRecords){ log(`NuVizz: no data for ${date}`,'warn'); continue; }
+      // Convert API records to nuvizzData format the scoring engine expects
+      for(const rec of data.auditRecords){
+        if(!rec.stopDetail) continue;
+        for(const s of rec.stopDetail){
+          nuvizzData.push({
+            driver: rec.driver || '',
+            address: s.addr1 || '',
+            city: s.city || '',
+            deliveryEnd: s.completionTime || s.actualArrival || '',
+            status: s.stopStatus || 'COMPLETED',
+            customer: s.businessName || '',
+            zipCode: s.zip || '',
+            stopNumber: s.stopNbr || String(s.seq || ''),
+            stopType: s.stopType === 'PU' ? 'pickup' : 'delivery'
+          });
+        }
+      }
+    }
+    if(nuvizzData.length){
+      log(`✅ NuVizz API: ${nuvizzData.length} stops loaded for ${new Set(nuvizzData.map(r=>r.driver)).size} drivers`,'ok');
+      document.getElementById('nuvLabel').textContent=`✅ NuVizz: ${nuvizzData.length} stops (API)`;
+      document.getElementById('upNuVizz').classList.add('loaded');
+    } else {
+      log(`NuVizz API: no stop data returned — NuVizz layer skipped`,'warn');
+    }
+  }catch(e){
+    log(`NuVizz API error: ${e.message} — NuVizz layer skipped`,'warn');
+  }
+}
+
+// ═══════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',()=>{
@@ -1900,6 +1980,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const wi=document.getElementById('pickWeekInput');if(wi)wi.addEventListener('input',updateWeekHint);
   log(`SENTINEL v${APP_VERSION} — Real data only | Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng} | Shift filter: -${SHIFT_BUFFER_BEFORE}min/+${SHIFT_BUFFER_AFTER}min | Timezone: Eastern`,'hi');
   document.getElementById('versionBadge').textContent='v'+APP_VERSION;
+  loadB600History();
 });
 
 // ═══════════════════════════════════════════
