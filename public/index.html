@@ -584,7 +584,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -804,6 +804,27 @@ const FLEET_BENCH = {
   gapCrit: 56,   // P95 — flag as critical
   firstDelLate: 11.08, // P90 — unusually late first delivery
   sampleSize: { stops:40582, b600Punches:3354, days:63, drivers:63 }
+};
+// Type-specific benchmarks (derived from same dataset, split by vehicle type)
+const TYPE_BENCH = {
+  tractor: {
+    gap: { median:19, mean:24, p75:30, p90:46, p95:62 },
+    firstDel: { median:8.6, p90:10.72 },
+    stopsDay: { median:13, mean:12.5, p75:16, p90:18 },
+    label: 'Tractor'
+  },
+  straight: {
+    gap: { median:18, mean:23, p75:27, p90:40, p95:53 },
+    firstDel: { median:8.57, p90:11.18 },
+    stopsDay: { median:12, mean:13.6, p75:16, p90:22 },
+    label: 'Box/Straight'
+  },
+  box: { // alias
+    gap: { median:18, mean:23, p75:27, p90:40, p95:53 },
+    firstDel: { median:8.57, p90:11.18 },
+    stopsDay: { median:12, mean:13.6, p75:16, p90:22 },
+    label: 'Box/Straight'
+  }
 };
 function distFt(lat1, lng1, lat2, lng2) {
   const R = 20902231; // Earth radius in feet
@@ -2065,18 +2086,40 @@ function diSetRange(r){
 function populateDriverPicker(){
   const pick=document.getElementById('diDriverPick');
   if(!pick) return;
-  const drivers=new Set();
-  // From B600 history
-  if(window._b600History) window._b600History.forEach(r=>drivers.add(r.name));
-  // From NuVizz history
-  if(window._nuvizzHistory) window._nuvizzHistory.forEach(r=>drivers.add(r[2]));
-  // From driver roster
-  Object.values(DRIVER_ROSTER).forEach(r=>{ if(r.name) drivers.add(r.name); });
 
-  const sorted=[...drivers].sort((a,b)=>a.toLowerCase().localeCompare(b.toLowerCase()));
-  pick.innerHTML='<option value="">— Select Driver ('+sorted.length+' available) —</option>';
-  sorted.forEach(d=>{
-    pick.innerHTML+=`<option value="${d.replace(/"/g,'&quot;')}">${d}</option>`;
+  // Build canonical list from DRIVER_ROSTER only
+  const byGroup={shuttle:[],loadshift:[],tractor:[],straight:[],owner_tractor:[],owner_straight:[]};
+  for(const [key,info] of Object.entries(DRIVER_ROSTER)){
+    // Deduplicate aliases (skip if same last name already added)
+    const name=key.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+    const group = info.co==='owner'
+      ? (info.type==='tractor'?'owner_tractor':'owner_straight')
+      : info.role==='shuttle'?'shuttle'
+      : info.role==='loadshift'?'loadshift'
+      : info.type==='tractor'?'tractor':'straight';
+    // Skip duplicates (same last name in same group)
+    const last=name.split(' ').pop().toLowerCase();
+    if(!byGroup[group].find(d=>d.name.split(' ').pop().toLowerCase()===last)){
+      byGroup[group].push({name,type:info.type,role:info.role,co:info.co});
+    }
+  }
+
+  pick.innerHTML='<option value="">— Select Driver —</option>';
+  const labels={tractor:'TRACTOR DRIVERS (Davis)',straight:'BOX/STRAIGHT DRIVERS (Davis)',
+    shuttle:'SHUTTLE DRIVERS',loadshift:'LOAD/SHIFT',
+    owner_tractor:'CONTRACTORS — TRACTOR',owner_straight:'CONTRACTORS — BOX/STRAIGHT'};
+  const order=['tractor','straight','shuttle','loadshift','owner_tractor','owner_straight'];
+
+  order.forEach(g=>{
+    const list=byGroup[g];
+    if(!list.length) return;
+    list.sort((a,b)=>a.name.localeCompare(b.name));
+    pick.innerHTML+=`<optgroup label="${labels[g]}">`;
+    list.forEach(d=>{
+      const tag=d.type==='tractor'?'🚛':'📦';
+      pick.innerHTML+=`<option value="${d.name.replace(/"/g,'&quot;')}" data-type="${d.type}" data-role="${d.role}" data-co="${d.co}">${tag} ${d.name}</option>`;
+    });
+    pick.innerHTML+=`</optgroup>`;
   });
 }
 
@@ -2224,6 +2267,10 @@ function renderDriverIntel(driverName){
 
   // Fleet comparison
   const FB=FLEET_BENCH;
+  const profile=getDriverProfile(driverName);
+  const TB=TYPE_BENCH[profile.type]||TYPE_BENCH.straight;
+  const typeLabel=TB.label||profile.type;
+  const coLabel=profile.co==='owner'?'Contractor':'Davis';
 
   function fmt(h){ const hh=Math.floor(h); const mm=Math.round((h-hh)*60); return `${hh}:${String(mm).padStart(2,'0')}`; }
   function compare(val,bench,lower){
@@ -2234,11 +2281,23 @@ function renderDriverIntel(driverName){
     const col=bad?'var(--red2)':good?'var(--green)':'var(--text)';
     return `<span style="color:${col};font-size:9px;margin-left:4px;">(${pct>0?'+':''}${pct.toFixed(0)}% vs fleet)</span>`;
   }
+  function compareType(val,bench,lower){
+    if(!val||!bench) return '';
+    const pct=((val-bench)/bench*100);
+    const bad=lower? pct<-10 : pct>10;
+    const good=lower? pct>10 : pct<-10;
+    const col=bad?'var(--red2)':good?'var(--green)':'var(--text2)';
+    return `<span style="color:${col};font-size:9px;margin-left:2px;">(${pct>0?'+':''}${pct.toFixed(0)}% vs ${typeLabel})</span>`;
+  }
 
   // Render
   const el=document.getElementById('diContent');
   el.innerHTML=`
-    <div style="font-family:var(--head);font-size:16px;color:var(--text);margin-bottom:16px;letter-spacing:1px;">${driverName}</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+      <div style="font-family:var(--head);font-size:16px;color:var(--text);letter-spacing:1px;">${driverName}</div>
+      <span style="background:${profile.type==='tractor'?'rgba(0,102,255,.15)':'rgba(0,230,118,.12)'};color:${profile.type==='tractor'?'var(--blue3)':'var(--green)'};border:1px solid ${profile.type==='tractor'?'rgba(0,102,255,.3)':'rgba(0,230,118,.25)'};padding:3px 10px;border-radius:3px;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">${profile.type==='tractor'?'🚛':'📦'} ${typeLabel.toUpperCase()}</span>
+      <span style="background:rgba(255,255,255,.04);color:var(--text2);border:1px solid var(--b1);padding:3px 10px;border-radius:3px;font-family:var(--mono);font-size:9px;">${coLabel} · ${profile.role}</span>
+    </div>
 
     <!-- KPI CARDS -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;">
@@ -2252,15 +2311,18 @@ function renderDriverIntel(driverName){
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Stops/Day</div>
-        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${avgStopsDay.toFixed(1)}${compare(avgStopsDay,FB.stopsDay.median,false)}</div>
+        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${avgStopsDay.toFixed(1)}</div>
+        <div>${compare(avgStopsDay,FB.stopsDay.median,false)}${compareType(avgStopsDay,TB.stopsDay.median,false)}</div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Shift</div>
-        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${b600AvgShift?b600AvgShift.toFixed(1)+'h':'—'}${b600AvgShift?compare(b600AvgShift,FB.shift.mean,false):''}</div>
+        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${b600AvgShift?b600AvgShift.toFixed(1)+'h':'—'}</div>
+        <div>${b600AvgShift?compare(b600AvgShift,FB.shift.mean,false):''}</div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg 1st Delivery</div>
-        <div style="font-family:var(--head);font-size:22px;color:${avgFirst>FB.firstDel.p90?'var(--red2)':'var(--green)'};margin-top:4px;">${avgFirst?fmt(avgFirst):'—'}${avgFirst?compare(avgFirst,FB.firstDel.median,true):''}</div>
+        <div style="font-family:var(--head);font-size:22px;color:${avgFirst>FB.firstDel.p90?'var(--red2)':'var(--green)'};margin-top:4px;">${avgFirst?fmt(avgFirst):'—'}</div>
+        <div>${avgFirst?compare(avgFirst,FB.firstDel.median,true):''}${avgFirst?compareType(avgFirst,TB.firstDel.median,true):''}</div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Last Delivery</div>
@@ -2268,7 +2330,8 @@ function renderDriverIntel(driverName){
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Gap</div>
-        <div style="font-family:var(--head);font-size:22px;color:${avgGap>FB.gapFlag?'var(--red2)':avgGap>FB.gapWarn?'var(--amber)':'var(--green)'};margin-top:4px;">${avgGap?avgGap.toFixed(0)+'m':'—'}${avgGap?compare(avgGap,FB.gap.median,true):''}</div>
+        <div style="font-family:var(--head);font-size:22px;color:${avgGap>FB.gapFlag?'var(--red2)':avgGap>FB.gapWarn?'var(--amber)':'var(--green)'};margin-top:4px;">${avgGap?avgGap.toFixed(0)+'m':'—'}</div>
+        <div>${avgGap?compare(avgGap,FB.gap.median,true):''}${avgGap?compareType(avgGap,TB.gap.median,true):''}</div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Clock-In</div>
@@ -2351,17 +2414,17 @@ function renderDriverIntel(driverName){
 
     <!-- PACE METRICS -->
     <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
-      <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;margin-bottom:12px;">DELIVERY PACE vs FLEET</div>
+      <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;margin-bottom:12px;">DELIVERY PACE — vs FLEET &amp; ${typeLabel.toUpperCase()} PEERS</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-family:var(--mono);font-size:11px;">
         <div>
           <div style="color:var(--text3);font-size:9px;">MEDIAN GAP</div>
-          <div style="color:${medGap>FB.gap.p75?'var(--amber)':'var(--green)'};font-size:16px;font-weight:700;">${medGap}m</div>
-          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.median}m</div>
+          <div style="color:${medGap>TB.gap.p75?'var(--amber)':'var(--green)'};font-size:16px;font-weight:700;">${medGap}m</div>
+          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.median}m · ${typeLabel}: ${TB.gap.median}m</div>
         </div>
         <div>
           <div style="color:var(--text3);font-size:9px;">P90 GAP</div>
-          <div style="color:${p90Gap>FB.gap.p90?'var(--red2)':'var(--text)'};font-size:16px;font-weight:700;">${p90Gap}m</div>
-          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.p90}m</div>
+          <div style="color:${p90Gap>TB.gap.p90?'var(--red2)':'var(--text)'};font-size:16px;font-weight:700;">${p90Gap}m</div>
+          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.p90}m · ${typeLabel}: ${TB.gap.p90}m</div>
         </div>
         <div>
           <div style="color:var(--text3);font-size:9px;">STOPS/HR</div>
