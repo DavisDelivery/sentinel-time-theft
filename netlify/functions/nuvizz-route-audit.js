@@ -5,14 +5,14 @@
 // GET /.netlify/functions/nuvizz-route-audit?loadNbr=XXXX
 // GET /.netlify/functions/nuvizz-route-audit?date=YYYY-MM-DD  (all loads for a date)
 
-const NUVIZZ_BASE = 'https://contact-support.nuvizz.com/deliverit/openapi/v7';
-const COMPANY_CODE = process.env.NUVIZZ_COMPANY_CODE || 'davis';
+const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
+const COMPANY_CODE = Netlify.env.get('NUVIZZ_COMPANY_CODE') || 'davis';
 
 function authHeader() {
-  const u = process.env.NUVIZZ_USERNAME;
-  const p = process.env.NUVIZZ_PASSWORD;
+  const u = Netlify.env.get('NUVIZZ_USERNAME');
+  const p = Netlify.env.get('NUVIZZ_PASSWORD');
   if (!u || !p) throw new Error('NUVIZZ_USERNAME / NUVIZZ_PASSWORD env vars not set');
-  return 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64');
+  return 'Basic ' + btoa(`${u}:${p}`);
 }
 
 async function nv(path) {

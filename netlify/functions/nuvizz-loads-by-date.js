@@ -5,7 +5,7 @@
 // GET /api/nuvizz-loads-by-date?date=2026-04-14
 // GET /api/nuvizz-loads-by-date?startDate=2026-04-14&endDate=2026-04-14
 
-const NUVIZZ_BASE = 'https://contact-support.nuvizz.com/deliverit/openapi/v7';
+const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
 const COMPANY_CODE = Netlify.env.get('NUVIZZ_COMPANY_CODE') || 'davis';
 
 function auth() {

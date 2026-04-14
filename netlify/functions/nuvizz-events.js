@@ -3,7 +3,7 @@
 // Returns: timestamped event stream (arrived, confirmed, departed, exceptions, status changes)
 // Used by: SENTINEL (timeline cross-ref), MarginIQ (dwell/service time analysis)
 
-const NUVIZZ_BASE = 'https://contact-support.nuvizz.com/deliverit/openapi/v7';
+const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
 
 function getAuth(env) {
   const u = env.get('NUVIZZ_USERNAME');

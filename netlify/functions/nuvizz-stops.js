@@ -1,7 +1,7 @@
 // netlify/functions/nuvizz-stops.js
 // Batch or single stop fetch — returns per-stop timestamps, dwell, ETA delta, exceptions
 
-const NUVIZZ_BASE = 'https://contact-support.nuvizz.com/deliverit/openapi/v7';
+const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
 const COMPANY_CODE = Netlify.env.get('NUVIZZ_COMPANY_CODE') || 'davis';
 
 function auth() {
