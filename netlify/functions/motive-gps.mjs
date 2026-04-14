@@ -86,7 +86,6 @@ export default async (req, context) => {
     const resp = await fetch(full, {
       headers: {
         "X-Api-Key": KEY,
-        "Authorization": `Bearer ${KEY}`,
         "Content-Type": "application/json"
       }
     });

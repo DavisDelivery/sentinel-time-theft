@@ -12,7 +12,6 @@ async function motiveRequest(path, apiKey) {
   const res = await fetch(`https://api.gomotive.com${path}`, {
     headers: {
       'X-Api-Key': apiKey,
-      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     }
   });
