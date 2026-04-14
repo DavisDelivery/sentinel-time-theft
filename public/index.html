@@ -2116,7 +2116,7 @@ function populateDriverPicker(){
     list.sort((a,b)=>a.name.localeCompare(b.name));
     pick.innerHTML+=`<optgroup label="${labels[g]}">`;
     list.forEach(d=>{
-      const tag=d.type==='tractor'?'🚛':'📦';
+      const tag=d.type==='tractor'?'🚛':'🚚';
       pick.innerHTML+=`<option value="${d.name.replace(/"/g,'&quot;')}" data-type="${d.type}" data-role="${d.role}" data-co="${d.co}">${tag} ${d.name}</option>`;
     });
     pick.innerHTML+=`</optgroup>`;
@@ -2295,7 +2295,7 @@ function renderDriverIntel(driverName){
   el.innerHTML=`
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
       <div style="font-family:var(--head);font-size:16px;color:var(--text);letter-spacing:1px;">${driverName}</div>
-      <span style="background:${profile.type==='tractor'?'rgba(0,102,255,.15)':'rgba(0,230,118,.12)'};color:${profile.type==='tractor'?'var(--blue3)':'var(--green)'};border:1px solid ${profile.type==='tractor'?'rgba(0,102,255,.3)':'rgba(0,230,118,.25)'};padding:3px 10px;border-radius:3px;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">${profile.type==='tractor'?'🚛':'📦'} ${typeLabel.toUpperCase()}</span>
+      <span style="background:${profile.type==='tractor'?'rgba(0,102,255,.15)':'rgba(0,230,118,.12)'};color:${profile.type==='tractor'?'var(--blue3)':'var(--green)'};border:1px solid ${profile.type==='tractor'?'rgba(0,102,255,.3)':'rgba(0,230,118,.25)'};padding:3px 10px;border-radius:3px;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">${profile.type==='tractor'?'🚛':'🚚'} ${typeLabel.toUpperCase()}</span>
       <span style="background:rgba(255,255,255,.04);color:var(--text2);border:1px solid var(--b1);padding:3px 10px;border-radius:3px;font-family:var(--mono);font-size:9px;">${coLabel} · ${profile.role}</span>
     </div>
 
