@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SENTINEL — Davis Delivery Time Theft Audit</title>
+<title>SENTINEL â Davis Delivery Time Theft Audit</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='4' fill='%231565c0'/><text x='16' y='24' font-size='22' font-weight='bold' text-anchor='middle' fill='white'>S</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -27,22 +27,22 @@ const {useState, useMemo, useCallback} = React;
 
 // ===== DATA =====
 const SENTINEL_DATA = [
-  {driver:"Chris Head",truck:"7750",clockIn:"05:37",clockOut:"16:18",engineH:3.3,miles:150,mph:14.1,stops:11,score:230,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop — 78min|Stop — 53min|Stop — 42min|Stop — 47min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:8.48,stolenD:195.15,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Montel Bishop",truck:"5078AT",clockIn:"06:09",clockOut:"20:03",engineH:6.78,miles:256,mph:18.4,stops:13,score:180,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop — 135min|Stop — 40min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:7.35,stolenD:169.14,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Aaron Mitchell",truck:"9445",clockIn:"08:09",clockOut:"15:45",engineH:2.32,miles:58,mph:7.6,stops:10,score:180,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Low Route Velocity|Late First Movement|Micro-Stop Cluster|Excessive Warehouse Dwell|Below straight Peers",stolenH:6.93,stolenD:159.34,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Anthony Bennett",truck:"5293",clockIn:"15:42",clockOut:"20:21",engineH:1.6,miles:22,mph:4.7,stops:9,score:175,risk:"critical",flags:"Clock/Engine Time Gap|Low Route Velocity|Stopped Before Clock-Out|Stop — 31min|Stop — 27min|Micro-Stop Cluster|Below straight Peers",stolenH:2.44,stolenD:56.05,source:"Motive GPS+NuVizz"},
-  {driver:"Victor Fernandez",truck:"1502",clockIn:"06:09",clockOut:"18:27",engineH:7.02,miles:250,mph:20.3,stops:15,score:160,risk:"critical",flags:"B600→GPS Clock-In Gap|GPS→B600 Clock-Out Gap|Clock/Engine Time Gap|Stopped Before Clock-Out|Stop — 61min|Micro-Stop Cluster",stolenH:4.08,stolenD:93.76,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Trevor Syers",truck:"0608",clockIn:"06:31",clockOut:"16:01",engineH:5.55,miles:195,mph:20.5,stops:6,score:155,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop — 37min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:3.95,stolenD:90.87,source:"Motive GPS+B600"},
-  {driver:"Scott Hart",truck:"2987",clockIn:"05:16",clockOut:"16:04",engineH:6.37,miles:247,mph:22.9,stops:20,score:155,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop — 26min|Stop — 39min|Micro-Stop Cluster",stolenH:3.5,stolenD:80.46,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Terrence Taylor",truck:"7569",clockIn:"05:41",clockOut:"15:15",engineH:4.84,miles:176,mph:18.4,stops:15,score:155,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop — 36min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:5.94,stolenD:136.61,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Garry Pitts",truck:"7608",clockIn:"05:42",clockOut:"13:45",engineH:4.69,miles:133,mph:14.4,stops:14,score:130,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop — 61min|Micro-Stop Cluster",stolenH:2.35,stolenD:54.05,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Darvin Cepeda",truck:"2617",clockIn:"05:36",clockOut:"11:54",engineH:4.56,miles:162,mph:20.9,stops:9,score:130,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:0.53,stolenD:12.27,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Leroy Smith",truck:"1972",clockIn:"08:06",clockOut:"15:37",engineH:3.69,miles:138,mph:18.3,stops:13,score:130,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:4.68,stolenD:107.56,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Chris Head",truck:"7750",clockIn:"05:37",clockOut:"16:18",engineH:3.3,miles:150,mph:14.1,stops:11,score:230,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop â 78min|Stop â 53min|Stop â 42min|Stop â 47min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:8.48,stolenD:195.15,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Montel Bishop",truck:"5078AT",clockIn:"06:09",clockOut:"20:03",engineH:6.78,miles:256,mph:18.4,stops:13,score:180,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop â 135min|Stop â 40min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:7.35,stolenD:169.14,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Aaron Mitchell",truck:"9445",clockIn:"08:09",clockOut:"15:45",engineH:2.32,miles:58,mph:7.6,stops:10,score:180,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Low Route Velocity|Late First Movement|Micro-Stop Cluster|Excessive Warehouse Dwell|Below straight Peers",stolenH:6.93,stolenD:159.34,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Anthony Bennett",truck:"5293",clockIn:"15:42",clockOut:"20:21",engineH:1.6,miles:22,mph:4.7,stops:9,score:175,risk:"critical",flags:"Clock/Engine Time Gap|Low Route Velocity|Stopped Before Clock-Out|Stop â 31min|Stop â 27min|Micro-Stop Cluster|Below straight Peers",stolenH:2.44,stolenD:56.05,source:"Motive GPS+NuVizz"},
+  {driver:"Victor Fernandez",truck:"1502",clockIn:"06:09",clockOut:"18:27",engineH:7.02,miles:250,mph:20.3,stops:15,score:160,risk:"critical",flags:"B600âGPS Clock-In Gap|GPSâB600 Clock-Out Gap|Clock/Engine Time Gap|Stopped Before Clock-Out|Stop â 61min|Micro-Stop Cluster",stolenH:4.08,stolenD:93.76,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Trevor Syers",truck:"0608",clockIn:"06:31",clockOut:"16:01",engineH:5.55,miles:195,mph:20.5,stops:6,score:155,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop â 37min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:3.95,stolenD:90.87,source:"Motive GPS+B600"},
+  {driver:"Scott Hart",truck:"2987",clockIn:"05:16",clockOut:"16:04",engineH:6.37,miles:247,mph:22.9,stops:20,score:155,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop â 26min|Stop â 39min|Micro-Stop Cluster",stolenH:3.5,stolenD:80.46,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Terrence Taylor",truck:"7569",clockIn:"05:41",clockOut:"15:15",engineH:4.84,miles:176,mph:18.4,stops:15,score:155,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop â 36min|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:5.94,stolenD:136.61,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Garry Pitts",truck:"7608",clockIn:"05:42",clockOut:"13:45",engineH:4.69,miles:133,mph:14.4,stops:14,score:130,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Stop â 61min|Micro-Stop Cluster",stolenH:2.35,stolenD:54.05,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Darvin Cepeda",truck:"2617",clockIn:"05:36",clockOut:"11:54",engineH:4.56,miles:162,mph:20.9,stops:9,score:130,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:0.53,stolenD:12.27,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Leroy Smith",truck:"1972",clockIn:"08:06",clockOut:"15:37",engineH:3.69,miles:138,mph:18.3,stops:13,score:130,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Late First Movement|Micro-Stop Cluster|Excessive Warehouse Dwell",stolenH:4.68,stolenD:107.56,source:"Motive GPS+B600+NuVizz"},
   {driver:"Allen Council",truck:"0424",clockIn:"15:43",clockOut:"20:00",engineH:3.54,miles:97,mph:22.6,stops:4,score:90,risk:"critical",flags:"Late First Movement|VEHICLE MOVED AFTER CLOCK-OUT|Excessive Warehouse Dwell",stolenH:8.37,stolenD:192.43,source:"Motive GPS+NuVizz"},
-  {driver:"Rasko Suljic",truck:"1606",clockIn:"04:50",clockOut:"15:00",engineH:7.05,miles:224,mph:19.4,stops:19,score:85,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Micro-Stop Cluster",stolenH:1.13,stolenD:25.96,source:"Motive GPS+B600+NuVizz"},
-  {driver:"Che Roberts",truck:"0920",clockIn:"06:15",clockOut:"16:29",engineH:5.11,miles:149,mph:14.6,stops:17,score:85,risk:"critical",flags:"B600→GPS Clock-In Gap|Clock/Engine Time Gap|Micro-Stop Cluster",stolenH:2.53,stolenD:58.3,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Rasko Suljic",truck:"1606",clockIn:"04:50",clockOut:"15:00",engineH:7.05,miles:224,mph:19.4,stops:19,score:85,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Micro-Stop Cluster",stolenH:1.13,stolenD:25.96,source:"Motive GPS+B600+NuVizz"},
+  {driver:"Che Roberts",truck:"0920",clockIn:"06:15",clockOut:"16:29",engineH:5.11,miles:149,mph:14.6,stops:17,score:85,risk:"critical",flags:"B600âGPS Clock-In Gap|Clock/Engine Time Gap|Micro-Stop Cluster",stolenH:2.53,stolenD:58.3,source:"Motive GPS+B600+NuVizz"},
   {driver:"Jonathan Sailors",truck:"0423",clockIn:"15:23",clockOut:"20:02",engineH:0.33,miles:2,mph:0.4,stops:1,score:80,risk:"critical",flags:"Clock/Engine Time Gap|Stopped Before Clock-Out|Below shuttle Peers",stolenH:3.89,stolenD:89.41,source:"Motive GPS"},
-  {driver:"Ken Watkins",truck:"3299",clockIn:"15:15",clockOut:"16:15",engineH:1.04,miles:36,mph:23.9,stops:1,score:25,risk:"medium",flags:"Stop — 28min",stolenH:0.47,stolenD:10.73,source:"Motive GPS+NuVizz"},
+  {driver:"Ken Watkins",truck:"3299",clockIn:"15:15",clockOut:"16:15",engineH:1.04,miles:36,mph:23.9,stops:1,score:25,risk:"medium",flags:"Stop â 28min",stolenH:0.47,stolenD:10.73,source:"Motive GPS+NuVizz"},
   {driver:"Rasheed Davis",truck:"5075",clockIn:"15:17",clockOut:"17:39",engineH:2.09,miles:69,mph:24,stops:5,score:20,risk:"low",flags:"Micro-Stop Cluster",stolenH:0,stolenD:0,source:"Motive GPS+NuVizz"},
   {driver:"James Davis",truck:"2618T",clockIn:"18:00",clockOut:"20:32",engineH:1.01,miles:20,mph:8,stops:0,score:0,risk:"low",flags:"",stolenH:0,stolenD:0,source:"Motive GPS+NuVizz"},
   {driver:"Jew Williams",truck:"3889",clockIn:"18:33",clockOut:"20:35",engineH:1.64,miles:48,mph:23.7,stops:0,score:0,risk:"low",flags:"",stolenH:0,stolenD:0,source:"Motive GPS"},
@@ -59,7 +59,7 @@ const BENCH = {totalStops:704,gap:{mean:22.9,median:17,p25:12,p75:26,p90:40,outl
 // Utils
 function t24(t){const p=t.split(":").map(Number);return p[0]*60+p[1]}
 function t12(t){const x=t.match(/(\d+):(\d+)\s*(AM|PM)/i);if(!x)return 0;let h=+x[1];if(x[3].toUpperCase()==="PM"&&h!==12)h+=12;if(x[3].toUpperCase()==="AM"&&h===12)h=0;return h*60+(+x[2])}
-function mhm(m){if(!m)return "—";const h=Math.floor(m/60),mm=Math.round(m%60);return h>0?h+"h "+mm+"m":mm+"m"}
+function mhm(m){if(!m)return "â";const h=Math.floor(m/60),mm=Math.round(m%60);return h>0?h+"h "+mm+"m":mm+"m"}
 
 // Enrich data
 const DATA = SENTINEL_DATA.map(function(d){
@@ -86,7 +86,7 @@ var T = {
 function rc(r){return{critical:T.crit,high:T.high,medium:T.med,low:T.low}[r]||T.muted}
 function rbg(r){return{critical:T.critBg,high:T.highBg,medium:T.medBg,low:T.lowBg}[r]||"rgba(255,255,255,.05)"}
 function rbd(r){return{critical:T.critB,high:T.highB,medium:"rgba(255,214,0,.25)",low:T.lowB}[r]||"transparent"}
-function ft(f){return f.includes("AFTER CLOCK")||f.includes("Clock-In Gap")?"severe":f.includes("Stop —")||f.includes("Late")||f.includes("Velocity")?"warning":"info"}
+function ft(f){return f.includes("AFTER CLOCK")||f.includes("Clock-In Gap")?"severe":f.includes("Stop â")||f.includes("Late")||f.includes("Velocity")?"warning":"info"}
 
 var orb = "'Orbitron',sans-serif";
 var mono = "'JetBrains Mono',monospace";
@@ -121,8 +121,8 @@ function GapMeter(props){
     e("div",{style:{width:70,height:5,background:"rgba(255,255,255,.08)",borderRadius:3,overflow:"hidden"}},
       e("div",{style:{height:"100%",width:pct+"%",background:col,borderRadius:3,boxShadow:"0 0 8px "+col+"60"}})
     ),
-    e("span",{style:{fontFamily:mono,fontSize:11,fontWeight:600,color:col,minWidth:40}},g?mhm(g):"—"),
-    g>=180&&e("span",{style:{color:T.crit,fontSize:12,filter:"drop-shadow(0 0 4px rgba(255,23,68,.6))"}},"⚠")
+    e("span",{style:{fontFamily:mono,fontSize:11,fontWeight:600,color:col,minWidth:40}},g?mhm(g):"â"),
+    g>=180&&e("span",{style:{color:T.crit,fontSize:12,filter:"drop-shadow(0 0 4px rgba(255,23,68,.6))"}},"â ")
   );
 }
 
@@ -168,7 +168,7 @@ function DetailPanel(props){
   var d=props.d;if(!d)return null;
   return e("div",{onClick:function(ev){if(ev.target===ev.currentTarget)props.onClose()},style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:200,display:"flex",justifyContent:"flex-end",backdropFilter:"blur(4px)"}},
     e("div",{style:{width:520,maxWidth:"92vw",background:T.bgP,height:"100%",overflowY:"auto",boxShadow:"-4px 0 30px rgba(0,0,0,.5)",padding:28,borderLeft:"2px solid "+T.blue}},
-      e("button",{onClick:props.onClose,style:{float:"right",border:"none",background:"none",fontSize:22,cursor:"pointer",color:T.sub,padding:4,fontFamily:orb}},"✕"),
+      e("button",{onClick:props.onClose,style:{float:"right",border:"none",background:"none",fontSize:22,cursor:"pointer",color:T.sub,padding:4,fontFamily:orb}},"â"),
       e("h2",{style:{marginBottom:4,fontSize:20,fontFamily:orb,color:T.bright}},d.driver),
       e("div",{style:{display:"flex",gap:10,alignItems:"center",marginBottom:20,flexWrap:"wrap"}},
         e("span",{style:{fontFamily:mono,fontSize:13,color:T.silver,background:"rgba(176,190,197,.1)",padding:"2px 8px",borderRadius:3}},"TRK-"+d.truck),
@@ -176,13 +176,13 @@ function DetailPanel(props){
         e("span",{style:{fontFamily:orb,fontWeight:700,fontSize:16,marginLeft:"auto",color:d.score>=150?T.crit:T.high,textShadow:"0 0 12px "+(d.score>=150?T.crit:T.high)+"40"}},d.score+" PTS")
       ),
       d.gapMin>=BENCH.clockGap.acceptable&&e("div",{style:{background:d.gapMin>=240?T.critBg:T.highBg,border:"1px solid "+(d.gapMin>=240?T.critB:T.highB),borderRadius:4,padding:14,marginBottom:20}},
-        e("div",{style:{fontWeight:700,color:d.gapMin>=240?T.crit:T.high,fontSize:13,fontFamily:orb}},"⚠ CLOCK→DELIVERY: "+mhm(d.gapMin)),
-        e("div",{style:{fontSize:11,color:T.sub,marginTop:6,fontFamily:mono}},"Clocked in "+d.clockIn+" · First delivery "+(d.firstDel||"—")),
-        e("div",{style:{fontSize:11,color:T.sub,marginTop:2,fontFamily:mono}},"Benchmark median "+mhm(BENCH.clockGap.median)+" · acceptable <"+mhm(BENCH.clockGap.acceptable))
+        e("div",{style:{fontWeight:700,color:d.gapMin>=240?T.crit:T.high,fontSize:13,fontFamily:orb}},"â  CLOCKâDELIVERY: "+mhm(d.gapMin)),
+        e("div",{style:{fontSize:11,color:T.sub,marginTop:6,fontFamily:mono}},"Clocked in "+d.clockIn+" Â· First delivery "+(d.firstDel||"â")),
+        e("div",{style:{fontSize:11,color:T.sub,marginTop:2,fontFamily:mono}},"Benchmark median "+mhm(BENCH.clockGap.median)+" Â· acceptable <"+mhm(BENCH.clockGap.acceptable))
       ),
-      e(Section,{title:"Shift Intel"},e(Stat,{k:"Clock In / Out",v:d.clockIn+" — "+d.clockOut}),e(Stat,{k:"Engine Hours",v:d.engineH+"h"}),e(Stat,{k:"Miles",v:d.miles+" mi"}),e(Stat,{k:"Avg Speed",v:d.mph+" mph"}),e(Stat,{k:"Stops",v:d.stops}),e(Stat,{k:"First Delivery",v:d.firstDel||"—"}),e(Stat,{k:"Data Sources",v:d.source,small:true})),
+      e(Section,{title:"Shift Intel"},e(Stat,{k:"Clock In / Out",v:d.clockIn+" â "+d.clockOut}),e(Stat,{k:"Engine Hours",v:d.engineH+"h"}),e(Stat,{k:"Miles",v:d.miles+" mi"}),e(Stat,{k:"Avg Speed",v:d.mph+" mph"}),e(Stat,{k:"Stops",v:d.stops}),e(Stat,{k:"First Delivery",v:d.firstDel||"â"}),e(Stat,{k:"Data Sources",v:d.source,small:true})),
       e(Section,{title:"Time Theft Estimate"},e(Stat,{k:"Stolen Hours",v:d.stolenH.toFixed(2)+"h",vc:T.crit}),e(Stat,{k:"Est. Cost",v:"$"+d.stolenD.toFixed(2),vc:T.crit})),
-      e(Section,{title:"vs Fleet Benchmarks"},e(Stat,{k:"Stops vs Median",v:d.stops+" / "+BENCH.stops.median}),e(Stat,{k:"Clock→1st Del",v:mhm(d.gapMin)+" / "+mhm(BENCH.clockGap.median)+" median",vc:d.gapMin>BENCH.clockGap.median?T.crit:T.low})),
+      e(Section,{title:"vs Fleet Benchmarks"},e(Stat,{k:"Stops vs Median",v:d.stops+" / "+BENCH.stops.median}),e(Stat,{k:"Clockâ1st Del",v:mhm(d.gapMin)+" / "+mhm(BENCH.clockGap.median)+" median",vc:d.gapMin>BENCH.clockGap.median?T.crit:T.low})),
       e(Section,{title:"All Flags ("+d.flagList.length+")"},
         e("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},d.flagList.map(function(f,i){return e(FlagChip,{key:i,text:f,type:ft(f)})}))
       )
@@ -267,7 +267,7 @@ function App(){
   }
 
   // Build columns config
-  var cols=[["driver","Driver"],["","Truck"],["gap","Clock→1st"],["score","Score"],["risk","Risk"],["stops","Stops"],["miles","Miles"],["stolen","Stolen(h)"],["","Flags"]];
+  var cols=[["driver","Driver"],["","Truck"],["gap","Clockâ1st"],["score","Score"],["risk","Risk"],["stops","Stops"],["miles","Miles"],["stolen","Stolen(h)"],["","Flags"]];
 
   return e("div",{style:{background:T.bg,color:T.text,minHeight:"100vh",fontFamily:"'DM Sans',sans-serif"}},
 
@@ -277,7 +277,7 @@ function App(){
         e("div",{style:{width:42,height:42,borderRadius:4,background:"linear-gradient(135deg,"+T.blue+","+T.red+")",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 20px "+T.blue+"50"}},e("span",{style:{fontWeight:900,fontSize:20,color:"#fff",fontFamily:orb}},"S")),
         e("div",null,
           e("div",{style:{fontWeight:800,fontSize:20,letterSpacing:4,background:"linear-gradient(90deg,"+T.cyan+","+T.silver+")",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",fontFamily:orb}},"SENTINEL"),
-          e("div",{style:{fontSize:9,color:T.sub,fontWeight:600,letterSpacing:1.5,fontFamily:orb}},"DAVIS DELIVERY • TIME THEFT AUDIT SYSTEM")
+          e("div",{style:{fontSize:9,color:T.sub,fontWeight:600,letterSpacing:1.5,fontFamily:orb}},"DAVIS DELIVERY â¢ TIME THEFT AUDIT SYSTEM")
         )
       ),
       e("div",{style:{background:"rgba(0,212,255,.1)",color:T.cyan,padding:"6px 16px",borderRadius:3,fontWeight:700,fontSize:11,border:"1px solid rgba(0,212,255,.2)",letterSpacing:1,fontFamily:orb}},"APR 7, 2026")
@@ -294,23 +294,23 @@ function App(){
       // === AUDIT TAB ===
       tab==="audit"&&e("div",null,
         e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:20}},
-          e(SummaryCard,{icon:"⚠",label:"Critical Drivers",value:critCount,sub:"of "+filtered.length+" total",variant:"critical"}),
-          e(SummaryCard,{icon:"⏱",label:"Est. Stolen Hours",value:totalStolenH.toFixed(1)+"h",sub:"$"+totalStolenD.toFixed(2)+" est. cost",variant:"warn"}),
-          e(SummaryCard,{icon:"🔴",label:"Clock→Del Alerts",value:gapAlerts,sub:"3+ hrs before first stop",variant:"critical"}),
-          e(SummaryCard,{icon:"📊",label:"Avg Del. Gap",value:BENCH.gap.median+"m",sub:"median between stops",variant:"info"})
+          e(SummaryCard,{icon:"â ",label:"Critical Drivers",value:critCount,sub:"of "+filtered.length+" total",variant:"critical"}),
+          e(SummaryCard,{icon:"â±",label:"Est. Stolen Hours",value:totalStolenH.toFixed(1)+"h",sub:"$"+totalStolenD.toFixed(2)+" est. cost",variant:"warn"}),
+          e(SummaryCard,{icon:"ð´",label:"ClockâDel Alerts",value:gapAlerts,sub:"3+ hrs before first stop",variant:"critical"}),
+          e(SummaryCard,{icon:"ð",label:"Avg Del. Gap",value:BENCH.gap.median+"m",sub:"median between stops",variant:"info"})
         ),
         e("div",{style:{background:T.card,border:"1px solid "+T.brd,borderRadius:6,overflow:"hidden",marginBottom:20}},
           e("div",{style:{padding:"16px 20px",borderBottom:"1px solid "+T.brd,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}},
             e("h2",{style:{fontSize:13,fontWeight:700,color:T.bright,letterSpacing:1,fontFamily:orb}},"DRIVER AUDIT"),
             e("div",{style:{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}},
-              e("input",{placeholder:"Search…",value:search,onChange:function(ev){setSearch(ev.target.value)},style:{padding:"6px 12px",border:"1px solid "+T.brd,borderRadius:3,fontSize:12,width:150,background:T.bgP,color:T.text,outline:"none",fontFamily:mono}}),
+              e("input",{placeholder:"Searchâ¦",value:search,onChange:function(ev){setSearch(ev.target.value)},style:{padding:"6px 12px",border:"1px solid "+T.brd,borderRadius:3,fontSize:12,width:150,background:T.bgP,color:T.text,outline:"none",fontFamily:mono}}),
               ["all","critical","medium","low"].map(function(r){return e("button",{key:r,onClick:function(){setRiskFilter(r)},style:{padding:"4px 12px",borderRadius:3,border:"1px solid "+(riskFilter===r?T.cyan:T.brd),background:riskFilter===r?"rgba(0,212,255,.1)":"transparent",color:riskFilter===r?T.cyan:T.sub,cursor:"pointer",fontSize:9,fontWeight:700,letterSpacing:1,textTransform:"uppercase",fontFamily:orb}},r==="all"?"All":r)})
             )
           ),
           e("div",{style:{overflowX:"auto"}},
             e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
               e("thead",null,e("tr",null,
-                cols.map(function(c){var col=c[0],label=c[1];return e("th",{key:label,style:thS(col),onClick:col?function(){toggleSort(col)}:undefined},label," ",col&&sortCol===col?(sortDir==="asc"?"▲":"▼"):col?"↕":"")})
+                cols.map(function(c){var col=c[0],label=c[1];return e("th",{key:label,style:thS(col),onClick:col?function(){toggleSort(col)}:undefined},label," ",col&&sortCol===col?(sortDir==="asc"?"â²":"â¼"):col?"â":"")})
               )),
               e("tbody",null,filtered.map(function(d,idx){
                 var isGB=d.gapSev==="critical"||d.gapSev==="high";
@@ -324,7 +324,7 @@ function App(){
                   e("td",{style:tdS},d.miles),
                   e("td",{style:Object.assign({},tdS,{fontFamily:mono,fontWeight:600,color:d.stolenH>2?T.crit:d.stolenH>0?T.high:T.muted})},d.stolenH.toFixed(1)),
                   e("td",{style:tdS},e("div",{style:{display:"flex",flexWrap:"wrap",gap:3,maxWidth:320}},
-                    isGB&&e(FlagChip,{text:"⏱ CLK→DEL "+mhm(d.gapMin),type:"gap"}),
+                    isGB&&e(FlagChip,{text:"â± CLKâDEL "+mhm(d.gapMin),type:"gap"}),
                     d.flagList.slice(0,3).map(function(f,i){return e(FlagChip,{key:i,text:f,type:ft(f)})}),
                     d.flagList.length>3&&e(FlagChip,{text:"+"+(d.flagList.length-3),type:"info"})
                   ))
@@ -338,7 +338,7 @@ function App(){
       // === CLOCK GAP TAB ===
       tab==="clockgap"&&e("div",null,
         e("div",{style:{marginBottom:16}},
-          e("h2",{style:{fontSize:14,fontWeight:700,color:T.bright,letterSpacing:1,fontFamily:orb}},"CLOCK-IN → FIRST DELIVERY"),
+          e("h2",{style:{fontSize:14,fontWeight:700,color:T.bright,letterSpacing:1,fontFamily:orb}},"CLOCK-IN â FIRST DELIVERY"),
           e("p",{style:{color:T.sub,fontSize:12,marginTop:4}},"Sorted by gap. Red = 4+ hrs, orange = 3+ hrs, yellow = 2+ hrs.")
         ),
         e("div",{style:{background:T.card,border:"1px solid "+T.brd,borderRadius:6,overflow:"hidden",marginBottom:20}},
@@ -350,7 +350,7 @@ function App(){
                 return e("tr",{key:d.driver,onClick:function(){setDetail(d)},style:{cursor:"pointer",background:idx%2===0?"transparent":"rgba(255,255,255,.015)",borderBottom:"1px solid "+T.brd}},
                   e("td",{style:tdS},e("span",{style:{fontWeight:600,color:T.bright}},d.driver)),
                   e("td",{style:Object.assign({},tdS,{fontFamily:mono,color:T.silver})},d.clockIn),
-                  e("td",{style:Object.assign({},tdS,{fontFamily:mono,color:T.silver})},d.firstDel||"—"),
+                  e("td",{style:Object.assign({},tdS,{fontFamily:mono,color:T.silver})},d.firstDel||"â"),
                   e("td",{style:tdS},e("span",{style:{fontFamily:orb,fontWeight:700,color:col,fontSize:14,textShadow:"0 0 10px "+col+"40"}},mhm(d.gapMin))),
                   e("td",{style:tdS},e(RiskBadge,{risk:sev})),
                   e("td",{style:Object.assign({},tdS,{minWidth:180})},
@@ -358,7 +358,7 @@ function App(){
                       e("div",{style:{position:"absolute",left:accPct+"%",top:0,height:"100%",width:1,background:T.muted,zIndex:1}}),
                       e("div",{style:{height:"100%",width:barPct+"%",background:"linear-gradient(90deg,"+col+"80,"+col+")",borderRadius:3,boxShadow:"0 0 8px "+col+"30"}})
                     ),
-                    e("div",{style:{fontSize:8,color:T.muted,marginTop:2,fontFamily:mono}},"|— 2hr acceptable —|")
+                    e("div",{style:{fontSize:8,color:T.muted,marginTop:2,fontFamily:mono}},"|â 2hr acceptable â|")
                   ),
                   e("td",{style:Object.assign({},tdS,{textAlign:"center",fontWeight:600})},d.stops),
                   e("td",{style:tdS},e("span",{style:{fontFamily:orb,fontWeight:700,color:d.score>=150?T.crit:T.sub,fontSize:12}},d.score))
@@ -373,7 +373,7 @@ function App(){
           return e("div",{style:{background:T.card,border:"1px solid "+T.brd,borderRadius:6,padding:20,maxWidth:600}},
             e("h3",{style:{fontSize:11,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"DISTRIBUTION SUMMARY"),
             e(Stat,{k:"Drivers with data",v:gd.length}),e(Stat,{k:"Avg gap",v:mhm(avg)}),
-            e(Stat,{k:"Worst",v:gd[0].driver+" — "+mhm(gd[0].gapMin),vc:T.crit}),
+            e(Stat,{k:"Worst",v:gd[0].driver+" â "+mhm(gd[0].gapMin),vc:T.crit}),
             e(Stat,{k:"> 3 hrs",v:gd.filter(function(d){return d.gapMin>=180}).length,vc:T.crit}),
             e(Stat,{k:"> 4 hrs",v:gd.filter(function(d){return d.gapMin>=240}).length,vc:T.crit})
           );
@@ -388,7 +388,7 @@ function App(){
         ),
         e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:20}},
           e("div",{style:{background:T.card,border:"1px solid "+T.brd,borderRadius:6,padding:20}},
-            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"⏱ INTER-DELIVERY TIME"),
+            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"â± INTER-DELIVERY TIME"),
             e("p",{style:{fontSize:11,color:T.sub,marginBottom:14}},"Time between completing consecutive stops."),
             e(BenchBar,{label:"P25 (Fast)",value:BENCH.gap.p25,max:120,color:T.low}),
             e(BenchBar,{label:"Median",value:BENCH.gap.median,max:120,color:T.cyan}),
@@ -398,7 +398,7 @@ function App(){
             e("div",{style:{marginTop:10,padding:10,background:"rgba(0,212,255,.05)",borderRadius:4,fontSize:11,color:T.cyan,border:"1px solid rgba(0,212,255,.15)"}},"Outlier: >"+BENCH.gap.outlier+" min flagged (P90)")
           ),
           e("div",{style:{background:T.card,border:"1px solid "+T.brd,borderRadius:6,padding:20}},
-            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"🕐 CLOCK-IN → FIRST DEL"),
+            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"ð CLOCK-IN â FIRST DEL"),
             e("p",{style:{fontSize:11,color:T.sub,marginBottom:14}},"Time from punch-in to first completed delivery."),
             e(BenchBar,{label:"Acceptable",value:BENCH.clockGap.acceptable,max:300,color:T.low}),
             e(BenchBar,{label:"Median",value:BENCH.clockGap.median,max:300,color:T.cyan}),
@@ -407,11 +407,11 @@ function App(){
             e("div",{style:{marginTop:10,padding:10,background:T.critBg,borderRadius:4,fontSize:11,color:T.crit,border:"1px solid "+T.critB}},"Multiple drivers exceed 3+ hrs before first delivery.")
           ),
           e("div",{style:{background:T.card,border:"1px solid "+T.brd,borderRadius:6,padding:20}},
-            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"📊 STOPS PER DRIVER"),
+            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"ð STOPS PER DRIVER"),
             e(Stat,{k:"Minimum",v:BENCH.stops.min}),e(Stat,{k:"Median",v:BENCH.stops.median}),e(Stat,{k:"Mean",v:BENCH.stops.mean}),e(Stat,{k:"P75",v:BENCH.stops.p75}),e(Stat,{k:"Maximum",v:BENCH.stops.max})
           ),
           e("div",{style:{background:T.card,border:"1px solid "+T.brd,borderRadius:6,padding:20}},
-            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"🔧 ALGORITHM"),
+            e("h3",{style:{fontSize:12,fontWeight:700,color:T.cyan,letterSpacing:1,marginBottom:14,fontFamily:orb}},"ð§ ALGORITHM"),
             e("p",{style:{fontSize:12,color:T.sub,lineHeight:1.7}},"Percentile-based thresholds (P75/P90) adapt to your fleet. More data = smarter outlier detection."),
             e("br"),
             e("p",{style:{fontSize:12,color:T.silver}},"Current: "+BENCH.totalStops+" stops (1 day)"),
@@ -427,7 +427,7 @@ function App(){
           e("p",{style:{color:T.sub,fontSize:12,marginTop:4}},"Feed NuVizz stop data to build better benchmarks.")
         ),
         e("div",{onClick:function(){document.getElementById("fileInput").click()},style:{border:"2px dashed "+T.brd,borderRadius:6,padding:40,textAlign:"center",background:T.card,marginBottom:20,cursor:"pointer",transition:".2s"}},
-          e("div",{style:{fontSize:36}},"📂"),
+          e("div",{style:{fontSize:36}},"ð"),
           e("p",{style:{color:T.silver,marginTop:8,fontWeight:600}},"Click to upload NuVizz CSVs, Icon exports, or Sentinel files"),
           e("p",{style:{fontSize:10,color:T.muted,marginTop:4,fontFamily:mono}},".csv files accepted"),
           e("input",{type:"file",id:"fileInput",accept:".csv",multiple:true,hidden:true,onChange:handleFileUpload})
@@ -456,5 +456,7 @@ function App(){
 
 ReactDOM.render(e(App), document.getElementById("root"));
 </script>
+
+<script src="/sentinel-nuvizz-patch.js"></script>
 </body>
 </html>
