@@ -584,7 +584,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.7.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2070,6 +2070,136 @@ async function fetchNuVizzAPI(dates){
 }
 
 // ═══════════════════════════════════════════
+// SENTINEL AI + DASHCAM
+// ═══════════════════════════════════════════
+async function runSentinelAI(driverName, driverType, driverCo){
+  const out=document.getElementById('diAiOutput');
+  const txt=document.getElementById('diAiText');
+  const status=document.getElementById('diAiStatus');
+  if(!out||!txt) return;
+  out.style.display='block';
+  txt.textContent='';
+  status.textContent='Analyzing...';
+  status.style.color='#c084fc';
+
+  // Gather all the data we already computed in renderDriverIntel
+  const pick=document.getElementById('diDriverPick');
+  const FB=FLEET_BENCH;
+  const TB=TYPE_BENCH[driverType]||TYPE_BENCH.straight;
+
+  // Re-gather data for API call
+  const cutoff=diDateRange();
+  const b600=[],stops=[];
+  if(window._b600History) window._b600History.forEach(r=>{
+    if(diMatchDriver(r.name,driverName) && new Date(r.date)>=cutoff) b600.push(r);
+  });
+  if(window._nuvizzHistory) window._nuvizzHistory.forEach(r=>{
+    if(diMatchDriver(r[2],driverName) && new Date(r[0])>=cutoff) stops.push({date:r[0],time:r[1],customer:r[3],city:r[4]});
+  });
+
+  function parseClk(t){if(!t)return null;t=t.trim().toLowerCase();const m=t.match(/(\d+):(\d+)\s*(a|p)/);if(!m)return null;let h=parseInt(m[1]),mn=parseInt(m[2]);if(m[3]==='p'&&h!==12)h+=12;if(m[3]==='a'&&h===12)h=0;return h+mn/60;}
+
+  const byDate={};
+  stops.forEach(s=>{if(!byDate[s.date])byDate[s.date]=[];byDate[s.date].push(s);});
+
+  const dailyRows=[], clockToFirst=[], allGaps=[];
+  Object.keys(byDate).sort().forEach(date=>{
+    const ds=byDate[date].sort((a,b)=>a.time.localeCompare(b.time));
+    const fh=parseInt(ds[0].time.split(':')[0])+parseInt(ds[0].time.split(':')[1])/60;
+    const lh=parseInt(ds[ds.length-1].time.split(':')[0])+parseInt(ds[ds.length-1].time.split(':')[1])/60;
+    const dayGaps=[];
+    for(let i=1;i<ds.length;i++){const t1=ds[i-1].time.split(':').map(Number),t2=ds[i].time.split(':').map(Number);const g=(t2[0]*60+t2[1])-(t1[0]*60+t1[1]);if(g>0&&g<480){dayGaps.push(g);allGaps.push(g);}}
+    const b6=b600.find(r=>r.date===date);
+    const row={date,stops:ds.length,first:ds[0].time,last:ds[ds.length-1].time,avgGap:dayGaps.length?dayGaps.reduce((a,v)=>a+v,0)/dayGaps.length:0,maxGap:dayGaps.length?Math.max(...dayGaps):0,clockIn:b6?.clockIn||'—',clockOut:b6?.clockOut||'—',totalHrs:b6?.totalHrs||0,cities:[...new Set(ds.map(s=>s.city))]};
+    dailyRows.push(row);
+    if(b6?.clockIn){const ci=parseClk(b6.clockIn);if(ci!==null){const gapMin=Math.round((fh-ci)*60);if(gapMin>=0&&gapMin<600)clockToFirst.push({date,clockIn:b6.clockIn,firstDel:ds[0].time,gapMin,stops:ds.length});}}
+  });
+  clockToFirst.sort((a,b)=>b.gapMin-a.gapMin);
+
+  const avgGap=allGaps.length?allGaps.reduce((a,v)=>a+v,0)/allGaps.length:0;
+  const medGap=allGaps.length?allGaps.sort((a,b)=>a-b)[Math.floor(allGaps.length/2)]:0;
+  const p90Gap=allGaps.length?allGaps[Math.floor(allGaps.length*0.9)]:0;
+  const custCount={},cityCount={};
+  stops.forEach(s=>{custCount[s.customer]=(custCount[s.customer]||0)+1;if(s.city)cityCount[s.city]=(cityCount[s.city]||0)+1;});
+
+  const clockIns=b600.map(r=>parseClk(r.clockIn)).filter(v=>v!==null);
+  function fmt(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return `${hh}:${String(mm).padStart(2,'0')}`;}
+
+  try{
+    const res=await fetch('/api/sentinel-ai',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        driverName, driverType, driverCo,
+        kpis:{
+          avgStopsDay: dailyRows.length? (stops.length/dailyRows.length).toFixed(1) : '?',
+          avgShift: b600.length? (b600.reduce((a,r)=>a+(r.totalHrs||0),0)/b600.length).toFixed(1) : '?',
+          avgFirstDel: clockToFirst.length? fmt(clockToFirst.reduce((a,r)=>a+parseInt(r.firstDel.split(':')[0])+parseInt(r.firstDel.split(':')[1])/60,0)/clockToFirst.length) : '?',
+          avgGap: avgGap.toFixed(0), medGap: medGap.toFixed(0), p90Gap: p90Gap.toFixed(0),
+          avgClockIn: clockIns.length? fmt(clockIns.reduce((a,v)=>a+v,0)/clockIns.length) : '?',
+          totalStops: stops.length
+        },
+        clockToFirst: clockToFirst.slice(0,30),
+        dailyRows: dailyRows.slice(0,30),
+        topCustomers: Object.entries(custCount).sort((a,b)=>b[1]-a[1]).slice(0,8),
+        topCities: Object.entries(cityCount).sort((a,b)=>b[1]-a[1]).slice(0,6),
+        fleetBench: FB,
+        typeBench: TB
+      })
+    });
+    const data=await res.json();
+    if(data.success){
+      txt.textContent=data.analysis;
+      status.textContent=`Analysis complete · ${data.usage?.input_tokens||0}+${data.usage?.output_tokens||0} tokens`;
+      status.style.color='var(--green)';
+    } else {
+      txt.textContent='Error: '+(data.error||'Unknown error')+'\n'+(data.detail||'');
+      status.textContent='Failed';
+      status.style.color='var(--red2)';
+    }
+  }catch(e){
+    txt.textContent='Error: '+e.message;
+    status.textContent='Failed';
+    status.style.color='var(--red2)';
+  }
+}
+
+async function requestDashcam(driverName, date, time, vehicleId){
+  const ts=`${date}T${time}:00`;
+  log(`📹 Requesting dashcam for ${driverName} at ${ts} (vehicle ${vehicleId||'unknown'})...`,'hi');
+
+  // Find vehicle ID from cache if not provided
+  let vid=vehicleId;
+  if(!vid){
+    // Try to find from roster/cache
+    const profile=getDriverProfile(driverName);
+    for(const [num,v] of Object.entries(vehicleCache)){
+      if(v.currentDriver&&diMatchDriver(v.currentDriver,driverName)){vid=v.id;break;}
+    }
+  }
+
+  if(!vid){
+    alert(`Cannot request dashcam: no vehicle ID found for ${driverName}. Run an ENGAGE scan for this date first to populate vehicle data.`);
+    return;
+  }
+
+  try{
+    const res=await fetch(`/api/motive-dashcam?action=video_request&vehicle_id=${vid}&start_time=${encodeURIComponent(ts)}`);
+    const data=await res.json();
+    if(res.ok){
+      alert(`✅ Dashcam footage requested for ${driverName} at ${time} on ${date}.\n\nRequest ID: ${data.request_id||'pending'}\nFootage will be sent to your Motive email within ~5 minutes.`);
+      log(`✅ Dashcam request submitted: ${driverName} at ${ts}`,'ok');
+    } else {
+      alert(`Dashcam request failed: ${data.error||JSON.stringify(data)}`);
+      log(`⚠️ Dashcam request failed: ${data.error||'unknown'}`,'warn');
+    }
+  }catch(e){
+    alert(`Dashcam request error: ${e.message}`);
+    log(`⚠️ Dashcam error: ${e.message}`,'err');
+  }
+}
+
+// ═══════════════════════════════════════════
 // DRIVER INTEL
 // ═══════════════════════════════════════════
 let diRange = 'month'; // week, month, quarter, all
@@ -2297,6 +2427,14 @@ function renderDriverIntel(driverName){
       <div style="font-family:var(--head);font-size:16px;color:var(--text);letter-spacing:1px;">${driverName}</div>
       <span style="background:${profile.type==='tractor'?'rgba(0,102,255,.15)':'rgba(0,230,118,.12)'};color:${profile.type==='tractor'?'var(--blue3)':'var(--green)'};border:1px solid ${profile.type==='tractor'?'rgba(0,102,255,.3)':'rgba(0,230,118,.25)'};padding:3px 10px;border-radius:3px;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">${profile.type==='tractor'?'🚛':'🚚'} ${typeLabel.toUpperCase()}</span>
       <span style="background:rgba(255,255,255,.04);color:var(--text2);border:1px solid var(--b1);padding:3px 10px;border-radius:3px;font-family:var(--mono);font-size:9px;">${coLabel} · ${profile.role}</span>
+      <button onclick="runSentinelAI('${driverName.replace(/'/g,"\\'")}','${profile.type}','${profile.co}')" style="margin-left:auto;background:linear-gradient(135deg,rgba(138,43,226,.2),rgba(0,212,255,.15));border:1px solid rgba(138,43,226,.4);border-radius:var(--radius);color:#c084fc;padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🤖 AI ANALYSIS</button>
+    </div>
+    <div id="diAiOutput" style="display:none;background:linear-gradient(135deg,rgba(138,43,226,.06),rgba(0,212,255,.04));border:1px solid rgba(138,43,226,.25);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-family:var(--head);font-size:10px;color:#c084fc;letter-spacing:1px;">🤖 SENTINEL AI</span>
+        <span id="diAiStatus" style="font-family:var(--mono);font-size:9px;color:var(--text3);"></span>
+      </div>
+      <div id="diAiText" style="font-family:var(--ui);font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;"></div>
     </div>
 
     <!-- KPI CARDS -->
@@ -2383,6 +2521,7 @@ function renderDriverIntel(driverName){
               <th style="padding:5px 8px;">GAP</th>
               <th style="padding:5px 8px;">VISUAL</th>
               <th style="padding:5px 8px;">STOPS</th>
+              <th style="padding:5px 8px;">📹</th>
             </tr>
           </thead>
           <tbody>
@@ -2391,6 +2530,7 @@ function renderDriverIntel(driverName){
               const col=sev==='crit'?'var(--red2)':sev==='high'?'var(--amber)':sev==='med'?'var(--amber2)':'var(--green)';
               const barPct=Math.min(100, r.gapMin/360*100);
               const accPct=120/360*100; // 2hr acceptable line
+              const showCam=r.gapMin>=120;
               return `<tr style="border-bottom:1px solid rgba(255,255,255,.04);">
                 <td style="padding:5px 8px;color:var(--text2);">${r.date}</td>
                 <td style="padding:5px 8px;color:var(--text);">${r.clockIn}</td>
@@ -2404,6 +2544,7 @@ function renderDriverIntel(driverName){
                   <div style="font-size:7px;color:var(--text3);margin-top:1px;">|— 2hr —|</div>
                 </td>
                 <td style="padding:5px 8px;color:var(--blue3);">${r.stops}</td>
+                <td style="padding:5px 8px;">${showCam?`<button onclick="requestDashcam('${driverName.replace(/'/g,"\\\\'")}','${r.date}','${r.clockIn.replace(/[ap]$/i,'')}',null)" style="background:rgba(255,26,26,.1);border:1px solid rgba(255,26,26,.3);border-radius:3px;color:var(--red2);padding:2px 6px;cursor:pointer;font-size:9px;font-family:var(--mono);">📹</button>`:''}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -2479,7 +2620,7 @@ function renderDriverIntel(driverName){
               <td style="padding:5px 8px;">${r.spanHrs.toFixed(1)}h</td>
               <td style="padding:5px 8px;color:var(--cyan);">${r.stopsPerHr.toFixed(1)}</td>
               <td style="padding:5px 8px;color:${gapCol};">${r.avgGap.toFixed(0)}m</td>
-              <td style="padding:5px 8px;color:${maxCol};font-weight:${r.maxGap>FB.gapFlag?'700':'400'};">${r.maxGap}m</td>
+              <td style="padding:5px 8px;color:${maxCol};font-weight:${r.maxGap>FB.gapFlag?'700':'400'};">${r.maxGap}m${r.maxGap>=60?` <button onclick="requestDashcam('${driverName.replace(/'/g,"\\\\'")}','${r.date}','${r.first}',null)" style="background:rgba(255,26,26,.1);border:1px solid rgba(255,26,26,.3);border-radius:3px;color:var(--red2);padding:1px 4px;cursor:pointer;font-size:8px;margin-left:3px;">📹</button>`:''}</td>
               <td style="padding:5px 8px;">${r.totalHrs?r.totalHrs.toFixed(1):''}</td>
               <td style="padding:5px 8px;font-size:9px;color:var(--text3);">${r.cities.join(', ')}</td>
             </tr>`;
