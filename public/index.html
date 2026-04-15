@@ -7,17 +7,17 @@
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#05080e; --s1:#0a0f1a; --s2:#0e1524; --s3:#131d30; --s4:#1a2740;
-  --b1:#0f2040; --b2:#153060; --b3:#1a4080;
-  --red:#ff1a1a; --red2:#ff4d4d; --amber:#ffaa00; --amber2:#ffcc33;
-  --green:#00ff88; --green2:#33ffaa; --blue:#0066ff; --blue2:#1a8cff; --blue3:#4da6ff;
-  --cyan:#00d4ff; --cyan2:#33e0ff;
-  --energon:#00d4ff; --spark:#ff6600;
-  --text:#c8daf0; --text2:#6889aa; --text3:#304868;
+  --bg:#f0f2f5; --s1:#e8ecf1; --s2:#ffffff; --s3:#f5f7fa; --s4:#dce3ed;
+  --b1:#c8d3e0; --b2:#a8b8cc; --b3:#8899b3;
+  --red:#cc1111; --red2:#e63333; --amber:#cc8800; --amber2:#e6a020;
+  --green:#00994d; --green2:#00b359; --blue:#0055cc; --blue2:#1a75e6; --blue3:#3388ee;
+  --cyan:#0088aa; --cyan2:#009ec2;
+  --energon:#0077aa; --spark:#cc5500;
+  --text:#1a2233; --text2:#556677; --text3:#8899aa;
   --head:'Orbitron',sans-serif; --ui:'Rajdhani',sans-serif; --mono:'JetBrains Mono',monospace;
   --radius:4px;
-  --glow:0 0 12px rgba(0,212,255,.25);
-  --glow-red:0 0 12px rgba(255,26,26,.3);
+  --glow:0 0 12px rgba(0,119,170,.15);
+  --glow-red:0 0 12px rgba(204,17,17,.2);
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:var(--bg);color:var(--text);font-family:var(--ui);font-weight:500;min-height:100vh;overflow-x:hidden;}
@@ -25,8 +25,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-weight:50
 /* ── METAL TEXTURE ── */
 body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   background:
-    repeating-linear-gradient(90deg,transparent,transparent 2px,rgba(0,212,255,.008) 2px,rgba(0,212,255,.008) 3px),
-    repeating-linear-gradient(0deg,transparent,transparent 60px,rgba(0,212,255,.015) 60px,rgba(0,212,255,.015) 61px);
+    repeating-linear-gradient(90deg,transparent,transparent 2px,rgba(0,85,170,.02) 2px,rgba(0,85,170,.02) 3px),
+    repeating-linear-gradient(0deg,transparent,transparent 60px,rgba(0,85,170,.03) 60px,rgba(0,85,170,.03) 61px);
 }
 
 /* ── ANGULAR CLIP PATHS ── */
@@ -2235,30 +2235,39 @@ function diSetRange(r){
   if(pick.value) renderDriverIntel(pick.value);
 }
 
+// Canonical name map — every alias resolves to one display name (GLOBAL)
+const CANONICAL_NAME = {
+  'james':'James Davis','james davis':'James Davis',
+  'leslie':'Leslie Thomas','leslie thomas':'Leslie Thomas',
+  'brent bryd':'Brent Byrd','brenton byrd':'Brent Byrd','brent boyd':'Brent Byrd',
+  'chris head':'Chris Head','c head':'Chris Head',
+  'denis salkic':'Denis Salkic','denis salikic':'Denis Salkic',
+  'junior thomas':'Junior Thomas','junior thoamas':'Junior Thomas',
+  'mandi malbrough':'Mandi Malbrough','mandi malborough':'Mandi Malbrough','mandi marlboroug':'Mandi Malbrough',
+  'terrence taylor':'Terrence Taylor','terrance taylor':'Terrence Taylor',
+  'terry gambrell':'Terry Gambrell','t gambrell':'Terry Gambrell',
+  'william tillery':'William Tillery','bill tillery':'William Tillery',
+  'jonathan sailors':'Jonathan Sailors','johnathan sailers':'Jonathan Sailors',
+  'alfred andi':'Alfred Andi','fred andi':'Alfred Andi',
+  'jean delsoin':'Jean Delsoin','jean delsion':'Jean Delsoin',
+  'kobe boakye':'Kobe Boakye','kobe kawakabe':'Kobe Boakye',
+  'jovenski gibbs':'Jovenski Gibbs','joe gibbs':'Jovenski Gibbs',
+};
+function toCanonical(name){
+  if(!name) return '';
+  const k=name.toLowerCase().trim();
+  return CANONICAL_NAME[k] || name.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+}
+
 function populateDriverPicker(){
   const pick=document.getElementById('diDriverPick');
   if(!pick) return;
-
-  // Canonical name map — aliases → display name
-  const CANONICAL={
-    'james':'James Davis','brent bryd':'Brent Byrd','brenton byrd':'Brent Byrd','brent boyd':'Brent Byrd',
-    'c head':'Chris Head','denis salikic':'Denis Salkic','junior thoamas':'Junior Thomas',
-    'leslie':'Leslie Thomas','mandi malborough':'Mandi Malbrough','mandi marlboroug':'Mandi Malbrough',
-    'terrance taylor':'Terrence Taylor','t gambrell':'Terry Gambrell','bill tillery':'William Tillery',
-    'johnathan sailers':'Jonathan Sailors','fred andi':'Alfred Andi','jean delsion':'Jean Delsoin',
-    'kobe kawakabe':'Kobe Boakye','joe gibbs':'Jovenski Gibbs'
-  };
-
-  // Build unique driver list from DRIVER_ROSTER
   const seen=new Set();
   const byGroup={shuttle:[],loadshift:[],tractor:[],straight:[],owner_tractor:[],owner_straight:[]};
   for(const [key,info] of Object.entries(DRIVER_ROSTER)){
-    // Get canonical display name
-    let name=CANONICAL[key];
-    if(!name) name=key.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+    const name=toCanonical(key);
     if(seen.has(name)) continue;
     seen.add(name);
-
     const group = info.co==='owner'
       ? (info.type==='tractor'?'owner_tractor':'owner_straight')
       : info.role==='shuttle'?'shuttle'
@@ -2266,21 +2275,18 @@ function populateDriverPicker(){
       : info.type==='tractor'?'tractor':'straight';
     byGroup[group].push({name,type:info.type,role:info.role,co:info.co});
   }
-
   pick.innerHTML='<option value="">— Select Driver —</option>';
   const labels={tractor:'TRACTOR DRIVERS (Davis)',straight:'BOX/STRAIGHT DRIVERS (Davis)',
     shuttle:'SHUTTLE DRIVERS',loadshift:'LOAD/SHIFT',
     owner_tractor:'CONTRACTORS — TRACTOR',owner_straight:'CONTRACTORS — BOX/STRAIGHT'};
-  const order=['tractor','straight','shuttle','loadshift','owner_tractor','owner_straight'];
-
-  order.forEach(g=>{
+  ['tractor','straight','shuttle','loadshift','owner_tractor','owner_straight'].forEach(g=>{
     const list=byGroup[g];
     if(!list.length) return;
     list.sort((a,b)=>a.name.localeCompare(b.name));
     pick.innerHTML+=`<optgroup label="${labels[g]}">`;
     list.forEach(d=>{
       const tag=d.type==='tractor'?'🚛':'🚚';
-      pick.innerHTML+=`<option value="${d.name.replace(/"/g,'&quot;')}" data-type="${d.type}" data-role="${d.role}" data-co="${d.co}">${tag} ${d.name}</option>`;
+      pick.innerHTML+=`<option value="${d.name.replace(/"/g,'&quot;')}">${tag} ${d.name}</option>`;
     });
     pick.innerHTML+=`</optgroup>`;
   });
@@ -2309,51 +2315,9 @@ function diDateRangeEnd(){
 }
 
 // Canonical name groups — all names that refer to the same person
-const NAME_GROUPS=[
-  ['james davis','james'],
-  ['brent byrd','brent bryd','brenton byrd','brent boyd'],
-  ['chris head','c head'],
-  ['denis salkic','denis salikic'],
-  ['junior thomas','junior thoamas'],
-  ['leslie thomas','leslie'],
-  ['mandi malbrough','mandi malborough','mandi marlboroug'],
-  ['terrence taylor','terrance taylor'],
-  ['terry gambrell','t gambrell'],
-  ['william tillery','bill tillery'],
-  ['jonathan sailors','johnathan sailers'],
-  ['alfred andi','fred andi'],
-  ['jean delsoin','jean delsion'],
-  ['kobe boakye','kobe kawakabe'],
-  ['jovenski gibbs','joe gibbs'],
-];
-
-function _getNameGroup(name){
-  const n=name.toLowerCase().trim();
-  for(const g of NAME_GROUPS){
-    if(g.includes(n)) return g;
-    // Partial: check if any group member shares last name
-    const nLast=n.split(/\s+/).pop();
-    for(const m of g){
-      const mLast=m.split(/\s+/).pop();
-      if(nLast.length>2 && nLast===mLast) return g;
-    }
-  }
-  return [n];
-}
-
 function diMatchDriver(a, b){
   if(!a||!b) return false;
-  const al=a.toLowerCase().trim(), bl=b.toLowerCase().trim();
-  if(al===bl) return true;
-  // Check if both names are in the same canonical group
-  const ga=_getNameGroup(al), gb=_getNameGroup(bl);
-  if(ga===gb) return true;
-  // Cross-check: is either name in the other's group?
-  if(ga.includes(bl) || gb.includes(al)) return true;
-  // Fallback: last name match
-  const aLast=al.split(/\s+/).pop(), bLast=bl.split(/\s+/).pop();
-  if(aLast.length>2 && bLast.length>2 && aLast===bLast) return true;
-  return false;
+  return toCanonical(a)===toCanonical(b);
 }
 
 function renderDriverIntel(driverName){
