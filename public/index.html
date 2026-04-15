@@ -454,11 +454,15 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <select id="diDriverPick" onchange="renderDriverIntel(this.value)" style="flex:1;min-width:200px;background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:8px 12px;font-family:var(--mono);font-size:12px;outline:none;">
         <option value="">— Select Driver —</option>
       </select>
-      <div style="display:flex;gap:6px;">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
         <button onclick="diSetRange('week')" class="fb-btn" id="diWeek">7d</button>
         <button onclick="diSetRange('month')" class="fb-btn active" id="diMonth">30d</button>
-        <button onclick="diSetRange('quarter')" class="fb-btn" id="diQtr">Q1</button>
+        <button onclick="diSetRange('90d')" class="fb-btn" id="di90d">90d</button>
+        <button onclick="diSetRange('6mo')" class="fb-btn" id="di6mo">6mo</button>
+        <button onclick="diSetRange('1yr')" class="fb-btn" id="di1yr">1yr</button>
         <button onclick="diSetRange('all')" class="fb-btn" id="diAll">All</button>
+        <input type="date" id="diCustomStart" style="background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:4px 6px;font-family:var(--mono);font-size:10px;width:110px;" onchange="diSetRange('custom')">
+        <input type="date" id="diCustomEnd" style="background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:4px 6px;font-family:var(--mono);font-size:10px;width:110px;" onchange="diSetRange('custom')">
       </div>
     </div>
     <div id="diEmpty" style="text-align:center;padding:40px 0;color:var(--text2);">
@@ -584,7 +588,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.8.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -660,25 +664,32 @@ const SHIFT_BUFFER_AFTER = 90;   // minutes after clock-out (preserves GPS-after
 const DRIVER_ROSTER = {
   // Uline Shuttle — stops at Warehouse+Uline are their JOB. Almost never flag.
   'james davis':{role:'shuttle',type:'tractor',co:'davis'},
+  'james':{role:'shuttle',type:'tractor',co:'davis'}, // B600 first-name only
   'jew williams':{role:'shuttle',type:'tractor',co:'davis'},
   'jonathan sailors':{role:'shuttle',type:'tractor',co:'davis'},
   'johnathan sailers':{role:'shuttle',type:'tractor',co:'davis'},
   'leslie thomas':{role:'shuttle',type:'tractor',co:'davis'},
+  'leslie':{role:'shuttle',type:'tractor',co:'davis'}, // B600 first-name only
   // Load/Shift — yard work, not route drivers
   'brad goodroe':{role:'loadshift',type:'tractor',co:'davis'},
-  // Davis Tractor Drivers — longer routes, fewer stops, more highway
+  // Davis Tractor Drivers
   'allen council':{role:'tractor',type:'tractor',co:'davis'},
   'anthony kostner':{role:'tractor',type:'tractor',co:'davis'},
   'brent bryd':{role:'tractor',type:'tractor',co:'davis'},
+  'brenton byrd':{role:'tractor',type:'tractor',co:'davis'}, // B600 name
+  'brent boyd':{role:'tractor',type:'tractor',co:'davis'}, // NuVizz name
   'brett spradley':{role:'tractor',type:'tractor',co:'davis'},
   'brian worley':{role:'tractor',type:'tractor',co:'davis'},
   'che roberts':{role:'tractor',type:'tractor',co:'davis'},
   'chris head':{role:'tractor',type:'tractor',co:'davis'},
+  'c head':{role:'tractor',type:'tractor',co:'davis'}, // B600 initial
   'darvin cepeda':{role:'tractor',type:'tractor',co:'davis'},
   'denis salkic':{role:'tractor',type:'tractor',co:'davis'},
+  'denis salikic':{role:'tractor',type:'tractor',co:'davis'}, // B600 typo
   'garry pitts':{role:'tractor',type:'tractor',co:'davis'},
   'jim pallette':{role:'tractor',type:'tractor',co:'davis'},
   'junior thomas':{role:'tractor',type:'tractor',co:'davis'},
+  'junior thoamas':{role:'tractor',type:'tractor',co:'davis'}, // B600 typo
   'marcus young':{role:'tractor',type:'tractor',co:'davis'},
   'mareese johnson':{role:'tractor',type:'tractor',co:'davis'},
   'montel bishop':{role:'tractor',type:'tractor',co:'davis'},
@@ -688,7 +699,9 @@ const DRIVER_ROSTER = {
   'victor fernandez':{role:'tractor',type:'tractor',co:'davis'},
   'william goodwin':{role:'tractor',type:'tractor',co:'davis'},
   'andre murphy':{role:'tractor',type:'tractor',co:'davis'},
-  // Davis Straight/Box Drivers — local routes, more stops
+  'william tillery':{role:'tractor',type:'tractor',co:'davis'},
+  'bill tillery':{role:'tractor',type:'tractor',co:'davis'}, // NuVizz alias
+  // Davis Straight/Box Drivers
   'aaron mitchell':{role:'straight',type:'straight',co:'davis'},
   'brent dixon':{role:'straight',type:'straight',co:'davis'},
   'enock akyea':{role:'straight',type:'straight',co:'davis'},
@@ -696,6 +709,7 @@ const DRIVER_ROSTER = {
   'leroy smith':{role:'straight',type:'straight',co:'davis'},
   'mandi malbrough':{role:'straight',type:'straight',co:'davis'},
   'mandi malborough':{role:'straight',type:'straight',co:'davis'},
+  'mandi marlboroug':{role:'straight',type:'straight',co:'davis'}, // B600 truncated
   'marcus crumpton':{role:'straight',type:'straight',co:'davis'},
   'michael frye':{role:'straight',type:'straight',co:'davis'},
   'michael tharp':{role:'straight',type:'straight',co:'davis'},
@@ -703,23 +717,28 @@ const DRIVER_ROSTER = {
   'scott hart':{role:'straight',type:'straight',co:'davis'},
   'tariq hammou':{role:'straight',type:'straight',co:'davis'},
   'terrence taylor':{role:'straight',type:'straight',co:'davis'},
+  'terrance taylor':{role:'straight',type:'straight',co:'davis'}, // B600 spelling
   'terry gambrell':{role:'straight',type:'straight',co:'davis'},
+  't gambrell':{role:'straight',type:'straight',co:'davis'}, // B600 initial
   'tobias johnson':{role:'straight',type:'straight',co:'davis'},
   'trevarr howard':{role:'straight',type:'straight',co:'davis'},
   'william kidd':{role:'straight',type:'straight',co:'davis'},
   'trevor syers':{role:'straight',type:'straight',co:'davis'},
-  // Owner Operators
-  'alfred morgan':{role:'straight',type:'straight',co:'owner'},
+  'william hart':{role:'straight',type:'straight',co:'davis'},
+  // Owner Operators / Contractors
   'anthony bennett':{role:'straight',type:'straight',co:'owner'},
   'ben paintsil':{role:'straight',type:'straight',co:'owner'},
   'colin calhoun':{role:'straight',type:'straight',co:'owner'},
   'dj mccrary':{role:'straight',type:'straight',co:'owner'},
   'frank okine':{role:'straight',type:'straight',co:'owner'},
-  'fred andi':{role:'straight',type:'straight',co:'owner'},
+  'alfred andi':{role:'straight',type:'straight',co:'owner'}, // corrected from fred andi
+  'fred andi':{role:'straight',type:'straight',co:'owner'}, // alias
   'george leonard':{role:'tractor',type:'tractor',co:'owner'},
-  'jean delsion':{role:'tractor',type:'tractor',co:'owner'},
+  'jean delsoin':{role:'tractor',type:'tractor',co:'owner'}, // corrected spelling
+  'jean delsion':{role:'tractor',type:'tractor',co:'owner'}, // alias
   'ken watkins':{role:'straight',type:'straight',co:'owner'},
-  'kobe kawakabe':{role:'straight',type:'straight',co:'owner'},
+  'kobe boakye':{role:'straight',type:'straight',co:'owner'}, // corrected from kawakabe
+  'kobe kawakabe':{role:'straight',type:'straight',co:'owner'}, // alias
   'martin wyatt':{role:'straight',type:'straight',co:'owner'},
   'mone watkins':{role:'straight',type:'straight',co:'owner'},
   'nana owusu':{role:'straight',type:'straight',co:'owner'},
@@ -732,6 +751,8 @@ const DRIVER_ROSTER = {
   'vincent bonzo':{role:'straight',type:'straight',co:'owner'},
   'pierre adeaban':{role:'straight',type:'straight',co:'owner'},
   'jovenski gibbs':{role:'straight',type:'straight',co:'owner'},
+  'joe gibbs':{role:'straight',type:'straight',co:'owner'}, // alias
+  'steven adjetey':{role:'straight',type:'straight',co:'owner'}, // NuVizz only
 };
 
 function getDriverProfile(name) {
@@ -2202,12 +2223,13 @@ async function requestDashcam(driverName, date, time, vehicleId){
 // ═══════════════════════════════════════════
 // DRIVER INTEL
 // ═══════════════════════════════════════════
-let diRange = 'month'; // week, month, quarter, all
+let diRange = 'month';
 
 function diSetRange(r){
   diRange=r;
   document.querySelectorAll('#tab-driver .fb-btn').forEach(b=>b.classList.remove('active'));
-  const el=document.getElementById('di'+r.charAt(0).toUpperCase()+r.slice(1));
+  const idMap={week:'diWeek',month:'diMonth','90d':'di90d','6mo':'di6mo','1yr':'di1yr',all:'diAll'};
+  const el=document.getElementById(idMap[r]);
   if(el) el.classList.add('active');
   const pick=document.getElementById('diDriverPick');
   if(pick.value) renderDriverIntel(pick.value);
@@ -2257,19 +2279,41 @@ function diDateRange(){
   const now=new Date();
   if(diRange==='week') return new Date(now-7*864e5);
   if(diRange==='month') return new Date(now-30*864e5);
-  if(diRange==='quarter') return new Date('2026-01-01');
+  if(diRange==='90d') return new Date(now-90*864e5);
+  if(diRange==='6mo') return new Date(now-182*864e5);
+  if(diRange==='1yr') return new Date(now-365*864e5);
+  if(diRange==='custom'){
+    const s=document.getElementById('diCustomStart')?.value;
+    if(s) return new Date(s);
+  }
   return new Date('2020-01-01');
+}
+
+function diDateRangeEnd(){
+  if(diRange==='custom'){
+    const e=document.getElementById('diCustomEnd')?.value;
+    if(e) return new Date(e+'T23:59:59');
+  }
+  return new Date();
 }
 
 function diMatchDriver(a, b){
   if(!a||!b) return false;
   const al=a.toLowerCase().trim(), bl=b.toLowerCase().trim();
   if(al===bl) return true;
-  // Fuzzy: match last name + first initial
+  // Check if both map to the same roster entry
+  const pa=getDriverProfile(a), pb=getDriverProfile(b);
+  if(pa.role!=='unknown' && pb.role!=='unknown'){
+    // Same person if same role+type+co and similar names
+    const aLast=al.split(/\s+/).pop(), bLast=bl.split(/\s+/).pop();
+    const aFirst=al.split(/\s+/)[0], bFirst=bl.split(/\s+/)[0];
+    if(aLast.length>2 && aLast===bLast) return true;
+    if(aFirst.length>2 && aFirst===bFirst && pa.type===pb.type) return true;
+  }
+  // Fuzzy: match last name
   const ap=al.split(/\s+/), bp=bl.split(/\s+/);
   const aLast=ap[ap.length-1], bLast=bp[bp.length-1];
   if(aLast.length>2 && bLast.length>2 && aLast===bLast) return true;
-  // Match first+last regardless of case differences
   if(ap.length>=2 && bp.length>=2 && ap[0]===bp[0] && aLast===bLast) return true;
   return false;
 }
@@ -2280,6 +2324,7 @@ function renderDriverIntel(driverName){
   document.getElementById('diContent').style.display='block';
 
   const cutoff=diDateRange();
+  const cutoffEnd=diDateRangeEnd();
 
   // Gather B600 data for this driver
   const b600=[];
@@ -2287,7 +2332,7 @@ function renderDriverIntel(driverName){
     window._b600History.forEach(r=>{
       if(!diMatchDriver(r.name, driverName)) return;
       const d=new Date(r.date);
-      if(d>=cutoff) b600.push(r);
+      if(d>=cutoff && d<=cutoffEnd) b600.push(r);
     });
   }
 
@@ -2298,7 +2343,7 @@ function renderDriverIntel(driverName){
       // r = [date, time, driver, customer, city, zip, stopNum]
       if(!diMatchDriver(r[2], driverName)) return;
       const d=new Date(r[0]);
-      if(d>=cutoff) stops.push({date:r[0], time:r[1], customer:r[3], city:r[4], zip:r[5], stopNum:r[6]});
+      if(d>=cutoff && d<=cutoffEnd) stops.push({date:r[0], time:r[1], customer:r[3], city:r[4], zip:r[5], stopNum:r[6]});
     });
   }
 
