@@ -418,13 +418,25 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <div id="tab-flags" class="content visible">
 
     <!-- STOP SCAN (always visible) -->
-    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;margin-bottom:14px;">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;white-space:nowrap;">🔍 STOP SCAN</span>
-        <input id="stopScanInput" placeholder="PRO / Stop #" style="flex:1;min-width:140px;background:var(--s1);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:6px 10px;font-family:var(--mono);font-size:11px;outline:none;" onkeydown="if(event.key==='Enter')scanStop()">
-        <button onclick="scanStop()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">SCAN</button>
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:250px;background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.08);">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;white-space:nowrap;">🔍 STOP SCAN</span>
+          <input id="stopScanInput" placeholder="PRO / Stop #" style="flex:1;min-width:120px;background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;outline:none;" onkeydown="if(event.key==='Enter')scanStop()">
+          <button onclick="scanStop()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:8px 16px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">SCAN</button>
+        </div>
+        <div id="stopScanResult" style="display:none;margin-top:10px;"></div>
       </div>
-      <div id="stopScanResult" style="display:none;margin-top:10px;"></div>
+      <button onclick="runFleetAI()" style="background:linear-gradient(135deg,#7c3aed,#0077aa);color:#fff;border:none;border-radius:var(--radius);padding:12px 20px;cursor:pointer;font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:1px;white-space:nowrap;box-shadow:0 2px 8px rgba(124,58,237,.25);">🤖 AI FLEET<br>ANALYSIS</button>
+    </div>
+
+    <!-- AI Fleet Output (always available) -->
+    <div id="fleetAiOutput" style="display:none;background:linear-gradient(135deg,rgba(124,58,237,.08),rgba(0,119,170,.05));border:2px solid rgba(124,58,237,.25);border-radius:var(--radius);padding:16px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-family:var(--head);font-size:11px;color:#7c3aed;letter-spacing:1px;">🤖 SENTINEL AI — FLEET ANALYSIS</span>
+        <span id="fleetAiStatus" style="font-family:var(--mono);font-size:9px;color:var(--text3);"></span>
+      </div>
+      <div id="fleetAiText" style="font-family:var(--ui);font-size:13px;color:var(--text);line-height:1.7;white-space:pre-wrap;"></div>
     </div>
 
     <div class="empty" id="emptyState">
@@ -439,19 +451,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         <div style="font-family:var(--ui);font-size:16px;font-weight:700;">
           Threat Board <span id="flagBadge" style="background:var(--red);color:#fff;padding:2px 10px;border-radius:4px;font-size:11px;font-family:var(--mono);margin-left:6px;">0</span>
         </div>
-        <div style="display:flex;gap:6px;">
-          <button onclick="runFleetAI()" style="background:linear-gradient(135deg,rgba(138,43,226,.15),rgba(0,136,170,.1));border:1px solid rgba(138,43,226,.3);border-radius:var(--radius);color:#9333ea;padding:5px 12px;cursor:pointer;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">🤖 AI FLEET ANALYSIS</button>
-          <button class="src-btn" onclick="exportCSV()" style="font-size:10px;">📥 Export</button>
-        </div>
-      </div>
-
-      <!-- AI Fleet Output -->
-      <div id="fleetAiOutput" style="display:none;background:linear-gradient(135deg,rgba(138,43,226,.06),rgba(0,136,170,.04));border:1px solid rgba(138,43,226,.2);border-radius:var(--radius);padding:16px;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-          <span style="font-family:var(--head);font-size:10px;color:#9333ea;letter-spacing:1px;">🤖 SENTINEL AI — FLEET ANALYSIS</span>
-          <span id="fleetAiStatus" style="font-family:var(--mono);font-size:9px;color:var(--text3);"></span>
-        </div>
-        <div id="fleetAiText" style="font-family:var(--ui);font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;"></div>
+        <button class="src-btn" onclick="exportCSV()" style="font-size:10px;">📥 Export</button>
       </div>
       <div class="filter-bar">
         <button class="fb-btn active" onclick="setFilter('all',this)">All</button>
