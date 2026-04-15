@@ -423,11 +423,34 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     </div>
     <div id="flagsContent" style="display:none;">
       <div id="multiDaySummary" style="display:none;background:linear-gradient(135deg,var(--s2),var(--s1));border:1px solid var(--energon);border-radius:var(--radius);padding:14px;margin-bottom:14px;box-shadow:0 0 12px rgba(0,212,255,.08);"></div>
+
+      <!-- STOP SCAN -->
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;white-space:nowrap;">🔍 STOP SCAN</span>
+          <input id="stopScanInput" placeholder="PRO / Stop #" style="flex:1;min-width:140px;background:var(--s1);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:6px 10px;font-family:var(--mono);font-size:11px;outline:none;" onkeydown="if(event.key==='Enter')scanStop()">
+          <button onclick="scanStop()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">SCAN</button>
+        </div>
+        <div id="stopScanResult" style="display:none;margin-top:10px;"></div>
+      </div>
+
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <div style="font-family:var(--ui);font-size:16px;font-weight:700;">
           Threat Board <span id="flagBadge" style="background:var(--red);color:#fff;padding:2px 10px;border-radius:4px;font-size:11px;font-family:var(--mono);margin-left:6px;">0</span>
         </div>
-        <button class="src-btn" onclick="exportCSV()" style="font-size:10px;">📥 Export</button>
+        <div style="display:flex;gap:6px;">
+          <button onclick="runFleetAI()" style="background:linear-gradient(135deg,rgba(138,43,226,.15),rgba(0,136,170,.1));border:1px solid rgba(138,43,226,.3);border-radius:var(--radius);color:#9333ea;padding:5px 12px;cursor:pointer;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">🤖 AI FLEET ANALYSIS</button>
+          <button class="src-btn" onclick="exportCSV()" style="font-size:10px;">📥 Export</button>
+        </div>
+      </div>
+
+      <!-- AI Fleet Output -->
+      <div id="fleetAiOutput" style="display:none;background:linear-gradient(135deg,rgba(138,43,226,.06),rgba(0,136,170,.04));border:1px solid rgba(138,43,226,.2);border-radius:var(--radius);padding:16px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-family:var(--head);font-size:10px;color:#9333ea;letter-spacing:1px;">🤖 SENTINEL AI — FLEET ANALYSIS</span>
+          <span id="fleetAiStatus" style="font-family:var(--mono);font-size:9px;color:var(--text3);"></span>
+        </div>
+        <div id="fleetAiText" style="font-family:var(--ui);font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;"></div>
       </div>
       <div class="filter-bar">
         <button class="fb-btn active" onclick="setFilter('all',this)">All</button>
@@ -588,7 +611,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.9.0';
+const APP_VERSION = '3.0.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2087,6 +2110,147 @@ async function fetchNuVizzAPI(dates){
     }
   }catch(e){
     log(`NuVizz API error: ${e.message}`,'warn');
+  }
+}
+
+// ═══════════════════════════════════════════
+// STOP SCAN + FLEET AI
+// ═══════════════════════════════════════════
+async function scanStop(){
+  const input=document.getElementById('stopScanInput');
+  const out=document.getElementById('stopScanResult');
+  const stopNbr=input.value.trim();
+  if(!stopNbr){ out.style.display='none'; return; }
+  out.style.display='block';
+  out.innerHTML=`<div style="font-family:var(--mono);font-size:11px;color:var(--text2);">Scanning ${stopNbr}...</div>`;
+
+  try{
+    const res=await fetch(`/api/nuvizz-stops?stopNbr=${encodeURIComponent(stopNbr)}`);
+    const data=await res.json();
+    if(!res.ok||data.error){
+      out.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">${data.error||'Stop not found'}</div>`;
+      return;
+    }
+
+    const s=data.stop||data.Stop?.stop||data;
+    const load=data.Stop?.load||data.load||{};
+    const exec=data.Stop?.stopExecutionInfo||data.stopExecutionInfo||{};
+    const addr=(s.to||{}).address||s.address||{};
+    const sched=(s.to||{}).schedule||{};
+    const arrival=exec.to?.actualArrival||exec.actualArrival||'—';
+    const departure=exec.to?.actualDeparture||exec.actualDeparture||'—';
+
+    out.innerHTML=`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:var(--mono);font-size:10px;">
+        <div><span style="color:var(--text3);">STOP#</span> <span style="color:var(--text);font-weight:700;">${s.stopNbr||stopNbr}</span></div>
+        <div><span style="color:var(--text3);">PRO</span> <span style="color:var(--text);">${s.proNumber||'—'}</span></div>
+        <div><span style="color:var(--text3);">STATUS</span> <span style="color:${exec.stopStatus>=90?'var(--green)':'var(--amber)'};">${exec.stopStatus||'?'}</span></div>
+        <div><span style="color:var(--text3);">TYPE</span> <span style="color:var(--text);">${s.stopType==='DO'?'Delivery':'Pickup'}</span></div>
+        <div style="grid-column:1/-1;border-top:1px solid var(--b1);padding-top:6px;">
+          <span style="color:var(--text3);">CUSTOMER</span>
+          <div style="color:var(--text);font-weight:700;">${addr.name||'—'}</div>
+          <div style="color:var(--text2);">${addr.addr1||''} ${addr.city||''}, ${addr.state||''} ${addr.zip||''}</div>
+        </div>
+        <div><span style="color:var(--text3);">DRIVER</span> <span style="color:var(--energon);font-weight:700;">${load.driverName||'—'}</span></div>
+        <div><span style="color:var(--text3);">ROUTE</span> <span style="color:var(--text);">${load.routeName||load.loadNbr||'—'}</span></div>
+        <div><span style="color:var(--text3);">TRUCK</span> <span style="color:var(--text);">${load.vehicleNbr||'—'}</span></div>
+        <div><span style="color:var(--text3);">WEIGHT</span> <span style="color:var(--text);">${s.weight||'—'} ${s.weightUOM||'lbs'}</span></div>
+        <div><span style="color:var(--text3);">PALLETS</span> <span style="color:var(--text);">${s.totalPallets||'—'}</span></div>
+        <div><span style="color:var(--text3);">CARTONS</span> <span style="color:var(--text);">${s.totalCartons||'—'}</span></div>
+        <div style="grid-column:1/-1;border-top:1px solid var(--b1);padding-top:6px;">
+          <span style="color:var(--text3);">WINDOW</span> <span style="color:var(--text);">${sched.timeFrom||'—'} → ${sched.timeTo||'—'}</span>
+        </div>
+        <div><span style="color:var(--text3);">ARRIVED</span> <span style="color:var(--green);">${arrival}</span></div>
+        <div><span style="color:var(--text3);">DEPARTED</span> <span style="color:var(--text);">${departure}</span></div>
+        ${s.sealNbr?`<div><span style="color:var(--text3);">SEAL#</span> <span style="color:var(--text);">${s.sealNbr}</span></div>`:''}
+      </div>
+    `;
+  }catch(e){
+    out.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">Error: ${e.message}</div>`;
+  }
+}
+
+async function runFleetAI(){
+  if(!results.length){ alert('Run an ENGAGE scan first to generate data for AI analysis.'); return; }
+  const out=document.getElementById('fleetAiOutput');
+  const txt=document.getElementById('fleetAiText');
+  const status=document.getElementById('fleetAiStatus');
+  out.style.display='block';
+  txt.textContent='';
+  status.textContent='Analyzing fleet...';
+  status.style.color='#9333ea';
+
+  const flagged=results.filter(r=>r.risk!=='low'&&r.risk!=='nodata');
+  const withData=results.filter(r=>r.hasData);
+  const totalStolen=withData.reduce((a,r)=>a+r.stolenHrs,0);
+  const totalCost=withData.reduce((a,r)=>a+r.stolenDollars,0);
+
+  const driverSummaries=flagged.slice(0,20).map(r=>{
+    const flags=r.flags?r.flags.map(f=>f.title||f).join(', '):'none';
+    return `${r.name} (${r.driverRole||'?'} ${r.driverType||'?'}, score:${r.score}, risk:${r.risk}, stolen:${r.stolenHrs.toFixed(1)}h/$${r.stolenDollars.toFixed(0)}, truck:${r.truck||'?'}, clock:${r.clockIn}-${r.clockOut}, stops:${r.gps?.deliveryStops||0}, miles:${r.gps?.actualMiles?.toFixed(0)||'?'}, mph:${r.gps?.effectiveMph?.toFixed(1)||'?'}, engineH:${r.gps?.engineOnMin?((r.gps.engineOnMin)/60).toFixed(1):'?'}, b600:${r.b600Matched?'yes':'no'}, flags:[${flags}])`;
+  }).join('\n');
+
+  const cleanCount=results.filter(r=>r.risk==='low'&&r.hasData).length;
+
+  const prompt=`SENTINEL FLEET SCAN RESULTS — analyze for time theft patterns across the entire fleet.
+
+SCAN PERIOD: ${auditStartDate} → ${auditEndDate}
+TOTAL DRIVERS SCANNED: ${results.length}
+WITH GPS DATA: ${withData.length}
+FLAGGED: ${flagged.length} (${results.filter(r=>r.risk==='critical').length} critical, ${results.filter(r=>r.risk==='high').length} high, ${results.filter(r=>r.risk==='medium').length} medium)
+CLEAN: ${cleanCount}
+TOTAL EST STOLEN HOURS: ${totalStolen.toFixed(1)}h
+TOTAL EST COST: $${totalCost.toFixed(0)}
+
+FLEET BENCHMARKS:
+- Inter-delivery gap: median ${FLEET_BENCH.gap.median}m, P90 ${FLEET_BENCH.gap.p90}m
+- First delivery: median ${FLEET_BENCH.firstDel.median}h
+- Stops/day: median ${FLEET_BENCH.stopsDay.median}
+
+TOP ${Math.min(flagged.length,20)} FLAGGED DRIVERS (sorted by score):
+${driverSummaries}
+
+Analyze this fleet scan. Identify:
+1. PATTERNS — are multiple drivers doing the same suspicious thing? Same time of day? Same behavior?
+2. WORST OFFENDERS — who needs immediate attention and why?
+3. COST IMPACT — where is the most money being lost?
+4. RECOMMENDATIONS — specific actions to take (confrontations, route changes, policy changes)
+5. COMPARISON — how does this day/period compare to fleet benchmarks?
+
+Be specific with names, numbers, and actionable recommendations.`;
+
+  try{
+    const res=await fetch('/api/sentinel-ai',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        driverName:'FLEET SCAN',
+        driverType:'fleet',
+        driverCo:'davis',
+        kpis:{totalDrivers:results.length,flagged:flagged.length,totalStolen:totalStolen.toFixed(1),totalCost:totalCost.toFixed(0)},
+        clockToFirst:[],
+        dailyRows:[],
+        topCustomers:[],
+        topCities:[],
+        fleetBench:FLEET_BENCH,
+        typeBench:TYPE_BENCH.straight,
+        _rawPrompt:prompt
+      })
+    });
+    const data=await res.json();
+    if(data.success){
+      txt.textContent=data.analysis;
+      status.textContent=`Complete · ${data.usage?.input_tokens||0}+${data.usage?.output_tokens||0} tokens`;
+      status.style.color='var(--green)';
+    } else {
+      txt.textContent='Error: '+(data.error||'Unknown')+'\n'+(data.detail||'');
+      status.textContent='Failed';
+      status.style.color='var(--red)';
+    }
+  }catch(e){
+    txt.textContent='Error: '+e.message;
+    status.textContent='Failed';
+    status.style.color='var(--red)';
   }
 }
 
