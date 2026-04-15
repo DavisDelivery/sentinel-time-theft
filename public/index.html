@@ -416,6 +416,17 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 <div class="content-area">
   <!-- FLAGS -->
   <div id="tab-flags" class="content visible">
+
+    <!-- STOP SCAN (always visible) -->
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;white-space:nowrap;">🔍 STOP SCAN</span>
+        <input id="stopScanInput" placeholder="PRO / Stop #" style="flex:1;min-width:140px;background:var(--s1);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:6px 10px;font-family:var(--mono);font-size:11px;outline:none;" onkeydown="if(event.key==='Enter')scanStop()">
+        <button onclick="scanStop()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">SCAN</button>
+      </div>
+      <div id="stopScanResult" style="display:none;margin-top:10px;"></div>
+    </div>
+
     <div class="empty" id="emptyState">
       <div class="empty-icon">⬡</div>
       <h2>SENTINEL ONLINE</h2>
@@ -423,16 +434,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     </div>
     <div id="flagsContent" style="display:none;">
       <div id="multiDaySummary" style="display:none;background:linear-gradient(135deg,var(--s2),var(--s1));border:1px solid var(--energon);border-radius:var(--radius);padding:14px;margin-bottom:14px;box-shadow:0 0 12px rgba(0,212,255,.08);"></div>
-
-      <!-- STOP SCAN -->
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;white-space:nowrap;">🔍 STOP SCAN</span>
-          <input id="stopScanInput" placeholder="PRO / Stop #" style="flex:1;min-width:140px;background:var(--s1);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:6px 10px;font-family:var(--mono);font-size:11px;outline:none;" onkeydown="if(event.key==='Enter')scanStop()">
-          <button onclick="scanStop()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">SCAN</button>
-        </div>
-        <div id="stopScanResult" style="display:none;margin-top:10px;"></div>
-      </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <div style="font-family:var(--ui);font-size:16px;font-weight:700;">
@@ -611,7 +612,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.0.1';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
