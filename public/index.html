@@ -588,7 +588,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '2.8.0';
+const APP_VERSION = '2.9.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2239,21 +2239,32 @@ function populateDriverPicker(){
   const pick=document.getElementById('diDriverPick');
   if(!pick) return;
 
-  // Build canonical list from DRIVER_ROSTER only
+  // Canonical name map — aliases → display name
+  const CANONICAL={
+    'james':'James Davis','brent bryd':'Brent Byrd','brenton byrd':'Brent Byrd','brent boyd':'Brent Byrd',
+    'c head':'Chris Head','denis salikic':'Denis Salkic','junior thoamas':'Junior Thomas',
+    'leslie':'Leslie Thomas','mandi malborough':'Mandi Malbrough','mandi marlboroug':'Mandi Malbrough',
+    'terrance taylor':'Terrence Taylor','t gambrell':'Terry Gambrell','bill tillery':'William Tillery',
+    'johnathan sailers':'Jonathan Sailors','fred andi':'Alfred Andi','jean delsion':'Jean Delsoin',
+    'kobe kawakabe':'Kobe Boakye','joe gibbs':'Jovenski Gibbs'
+  };
+
+  // Build unique driver list from DRIVER_ROSTER
+  const seen=new Set();
   const byGroup={shuttle:[],loadshift:[],tractor:[],straight:[],owner_tractor:[],owner_straight:[]};
   for(const [key,info] of Object.entries(DRIVER_ROSTER)){
-    // Deduplicate aliases (skip if same last name already added)
-    const name=key.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+    // Get canonical display name
+    let name=CANONICAL[key];
+    if(!name) name=key.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+    if(seen.has(name)) continue;
+    seen.add(name);
+
     const group = info.co==='owner'
       ? (info.type==='tractor'?'owner_tractor':'owner_straight')
       : info.role==='shuttle'?'shuttle'
       : info.role==='loadshift'?'loadshift'
       : info.type==='tractor'?'tractor':'straight';
-    // Skip duplicates (same last name in same group)
-    const last=name.split(' ').pop().toLowerCase();
-    if(!byGroup[group].find(d=>d.name.split(' ').pop().toLowerCase()===last)){
-      byGroup[group].push({name,type:info.type,role:info.role,co:info.co});
-    }
+    byGroup[group].push({name,type:info.type,role:info.role,co:info.co});
   }
 
   pick.innerHTML='<option value="">— Select Driver —</option>';
@@ -2297,24 +2308,51 @@ function diDateRangeEnd(){
   return new Date();
 }
 
+// Canonical name groups — all names that refer to the same person
+const NAME_GROUPS=[
+  ['james davis','james'],
+  ['brent byrd','brent bryd','brenton byrd','brent boyd'],
+  ['chris head','c head'],
+  ['denis salkic','denis salikic'],
+  ['junior thomas','junior thoamas'],
+  ['leslie thomas','leslie'],
+  ['mandi malbrough','mandi malborough','mandi marlboroug'],
+  ['terrence taylor','terrance taylor'],
+  ['terry gambrell','t gambrell'],
+  ['william tillery','bill tillery'],
+  ['jonathan sailors','johnathan sailers'],
+  ['alfred andi','fred andi'],
+  ['jean delsoin','jean delsion'],
+  ['kobe boakye','kobe kawakabe'],
+  ['jovenski gibbs','joe gibbs'],
+];
+
+function _getNameGroup(name){
+  const n=name.toLowerCase().trim();
+  for(const g of NAME_GROUPS){
+    if(g.includes(n)) return g;
+    // Partial: check if any group member shares last name
+    const nLast=n.split(/\s+/).pop();
+    for(const m of g){
+      const mLast=m.split(/\s+/).pop();
+      if(nLast.length>2 && nLast===mLast) return g;
+    }
+  }
+  return [n];
+}
+
 function diMatchDriver(a, b){
   if(!a||!b) return false;
   const al=a.toLowerCase().trim(), bl=b.toLowerCase().trim();
   if(al===bl) return true;
-  // Check if both map to the same roster entry
-  const pa=getDriverProfile(a), pb=getDriverProfile(b);
-  if(pa.role!=='unknown' && pb.role!=='unknown'){
-    // Same person if same role+type+co and similar names
-    const aLast=al.split(/\s+/).pop(), bLast=bl.split(/\s+/).pop();
-    const aFirst=al.split(/\s+/)[0], bFirst=bl.split(/\s+/)[0];
-    if(aLast.length>2 && aLast===bLast) return true;
-    if(aFirst.length>2 && aFirst===bFirst && pa.type===pb.type) return true;
-  }
-  // Fuzzy: match last name
-  const ap=al.split(/\s+/), bp=bl.split(/\s+/);
-  const aLast=ap[ap.length-1], bLast=bp[bp.length-1];
+  // Check if both names are in the same canonical group
+  const ga=_getNameGroup(al), gb=_getNameGroup(bl);
+  if(ga===gb) return true;
+  // Cross-check: is either name in the other's group?
+  if(ga.includes(bl) || gb.includes(al)) return true;
+  // Fallback: last name match
+  const aLast=al.split(/\s+/).pop(), bLast=bl.split(/\s+/).pop();
   if(aLast.length>2 && bLast.length>2 && aLast===bLast) return true;
-  if(ap.length>=2 && bp.length>=2 && ap[0]===bp[0] && aLast===bLast) return true;
   return false;
 }
 
