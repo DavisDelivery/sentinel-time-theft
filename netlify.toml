@@ -44,6 +44,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/sync-b600-weekly"
+  to = "/.netlify/functions/sync-b600-weekly"
+  status = 200
+
+[[redirects]]
   from = "/api/sentinel-ai"
   to = "/.netlify/functions/sentinel-ai"
   status = 200
