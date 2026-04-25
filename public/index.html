@@ -670,7 +670,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.8.0';
+const APP_VERSION = '3.9.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2988,9 +2988,17 @@ async function renderMatchAudit(forceRefetch){
     return `<span style="color:${col};font-weight:600;" title="${m.type} match (score ${m.score})">${label}</span> <span style="color:var(--text2);">${m.name}</span>`;
   }
 
+  // Build sorted name lists for dropdowns
+  const motiveArr=['(no match)',...[...motiveNames].sort()];
+  const b600Arr=['(no match)',...[...b600Names].sort()];
+  const nuvizzArr=['(no match)',...[...nuvizzNames].sort()];
+
   // Save for export
   window._lastMatchRows=matchRows;
   window._lastOrphans={motive:orphansMotive, b600:orphansB600, nuvizz:orphansNuvizz};
+  window._matchMotiveArr=motiveArr;
+  window._matchB600Arr=b600Arr;
+  window._matchNuvizzArr=nuvizzArr;
 
   el.innerHTML=`
     <!-- Stats -->
@@ -3001,15 +3009,15 @@ async function renderMatchAudit(forceRefetch){
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">FULL MATCH</div>
-        <div style="font-family:var(--head);font-size:20px;color:var(--green);">${stats.good}</div>
+        <div style="font-family:var(--head);font-size:20px;color:var(--green);" id="matchStatGood">${stats.good}</div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">PARTIAL</div>
-        <div style="font-family:var(--head);font-size:20px;color:var(--amber);">${stats.partial}</div>
+        <div style="font-family:var(--head);font-size:20px;color:var(--amber);" id="matchStatPartial">${stats.partial}</div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">MISSING</div>
-        <div style="font-family:var(--head);font-size:20px;color:var(--red);">${stats.missing}</div>
+        <div style="font-family:var(--head);font-size:20px;color:var(--red);" id="matchStatMissing">${stats.missing}</div>
       </div>
       <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">ORPHANS</div>
@@ -3018,58 +3026,147 @@ async function renderMatchAudit(forceRefetch){
       </div>
     </div>
 
-    <!-- Match table -->
+    <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:10px;">
+      Click any <span style="color:var(--blue3);">MOTIVE</span> / <span style="color:var(--amber);">B600</span> / <span style="color:var(--green);">NUVIZZ</span> cell to pick the correct name from that data source. Changes are saved locally and exportable.
+    </div>
+
+    <!-- Match table — editable -->
     <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;overflow-x:auto;margin-bottom:14px;">
-      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;" id="matchTable">
         <thead>
           <tr style="border-bottom:2px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;">
-            <th style="padding:6px 8px;">CANONICAL</th>
+            <th style="padding:6px 8px;min-width:140px;">CANONICAL NAME</th>
             <th style="padding:6px 8px;">TYPE</th>
-            <th style="padding:6px 8px;">CO</th>
-            <th style="padding:6px 8px;color:var(--blue3);">MOTIVE</th>
-            <th style="padding:6px 8px;color:var(--amber);">B600</th>
-            <th style="padding:6px 8px;color:var(--green);">NUVIZZ</th>
-            <th style="padding:6px 8px;">ALIASES</th>
+            <th style="padding:6px 8px;color:var(--blue3);min-width:160px;">🔵 MOTIVE</th>
+            <th style="padding:6px 8px;color:var(--amber);min-width:160px;">🟡 B600</th>
+            <th style="padding:6px 8px;color:var(--green);min-width:160px;">🟢 NUVIZZ</th>
+            <th style="padding:6px 8px;min-width:60px;">STATUS</th>
           </tr>
         </thead>
-        <tbody>
-          ${matchRows.map(r=>{
-            const rowBg=r.status==='missing'?'rgba(204,17,17,.05)':r.status==='partial'?'rgba(204,136,0,.04)':'';
-            return `<tr style="border-bottom:1px solid rgba(0,0,0,.04);background:${rowBg};">
-              <td style="padding:5px 8px;color:var(--text);font-weight:600;">${r.canonical}</td>
-              <td style="padding:5px 8px;color:var(--text2);">${r.type==='tractor'?'🚛':'🚚'} ${r.type}</td>
-              <td style="padding:5px 8px;color:var(--text2);">${r.co}</td>
-              <td style="padding:5px 8px;">${renderMatchCell(r.motive)}</td>
-              <td style="padding:5px 8px;">${renderMatchCell(r.b600)}</td>
-              <td style="padding:5px 8px;">${renderMatchCell(r.nuvizz)}</td>
-              <td style="padding:5px 8px;color:var(--text3);font-size:9px;">${r.aliases.length>1?r.aliases.length+' aliases':'—'}</td>
+        <tbody id="matchTableBody">
+          ${matchRows.map((r,i)=>{
+            const rowBg=r.status==='missing'?'rgba(204,17,17,.04)':r.status==='partial'?'rgba(204,136,0,.03)':'';
+            const statusDot=r.status==='good'?'<span style="color:var(--green);">✓</span>':r.status==='partial'?'<span style="color:var(--amber);">~</span>':'<span style="color:var(--red);">✗</span>';
+            const makeSelect=(source,current,arr,idx)=>{
+              const val=current?current.name:'(no match)';
+              const col=source==='motive'?'var(--blue3)':source==='b600'?'var(--amber)':'var(--green)';
+              const opts=arr.map(n=>`<option value="${n.replace(/"/g,'&quot;')}"${n===val?' selected':''}>${n}</option>`).join('');
+              return `<select onchange="matchCellChanged(${idx},'${source}',this.value)"
+                style="width:100%;background:${current&&current.score>=95?'rgba(0,153,77,.08)':current&&current.score>=70?'rgba(204,136,0,.08)':'rgba(204,17,17,.06)'};
+                color:var(--text);border:1px solid ${current&&current.score>=95?'var(--green)':current&&current.score>=70?'var(--amber)':'rgba(204,17,17,.3)'};
+                border-radius:3px;padding:4px 6px;font-family:var(--mono);font-size:10px;cursor:pointer;outline:none;">${opts}</select>`;
+            };
+            return `<tr id="matchRow_${i}" style="border-bottom:1px solid rgba(0,0,0,.04);background:${rowBg};">
+              <td style="padding:5px 8px;color:var(--text);font-weight:700;">${r.canonical}</td>
+              <td style="padding:5px 8px;color:var(--text2);white-space:nowrap;">${r.type==='tractor'?'🚛':'🚚'} ${r.type}</td>
+              <td style="padding:4px 6px;">${makeSelect('motive',r.motive,motiveArr,i)}</td>
+              <td style="padding:4px 6px;">${makeSelect('b600',r.b600,b600Arr,i)}</td>
+              <td style="padding:4px 6px;">${makeSelect('nuvizz',r.nuvizz,nuvizzArr,i)}</td>
+              <td style="padding:5px 8px;text-align:center;">${statusDot}</td>
             </tr>`;
           }).join('')}
         </tbody>
       </table>
     </div>
 
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+      <button onclick="saveMatchEdits()" style="background:var(--green);color:#fff;border:none;border-radius:var(--radius);padding:8px 18px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">💾 SAVE & APPLY ALIASES</button>
+      <button onclick="exportMatchReport()" style="background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:8px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;">📥 EXPORT CSV</button>
+      <div id="matchSaveStatus" style="font-family:var(--mono);font-size:10px;color:var(--text2);padding:8px 0;"></div>
+    </div>
+
     <!-- Orphans -->
     ${orphansMotive.length||orphansB600.length||orphansNuvizz.length ? `
     <div style="background:rgba(204,17,17,.04);border:1px solid rgba(204,17,17,.2);border-radius:var(--radius);padding:14px;">
-      <div style="font-family:var(--head);font-size:11px;color:var(--red);letter-spacing:1px;margin-bottom:10px;">⚠️ ORPHANS — names found in data but NOT in roster</div>
+      <div style="font-family:var(--head);font-size:11px;color:var(--red);letter-spacing:1px;margin-bottom:10px;">⚠️ ORPHANS — in data but not matched to any roster driver</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
-        ${orphansMotive.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--blue3);margin-bottom:4px;">MOTIVE (${orphansMotive.length})</div>${orphansMotive.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:2px 6px;background:var(--s2);border-radius:3px;margin-bottom:2px;">${n}</div>`).join('')}</div>`:''}
-        ${orphansB600.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--amber);margin-bottom:4px;">B600 (${orphansB600.length})</div>${orphansB600.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:2px 6px;background:var(--s2);border-radius:3px;margin-bottom:2px;">${n}</div>`).join('')}</div>`:''}
-        ${orphansNuvizz.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--green);margin-bottom:4px;">NUVIZZ (${orphansNuvizz.length})</div>${orphansNuvizz.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:2px 6px;background:var(--s2);border-radius:3px;margin-bottom:2px;">${n}</div>`).join('')}</div>`:''}
+        ${orphansMotive.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--blue3);margin-bottom:4px;">MOTIVE (${orphansMotive.length})</div>${orphansMotive.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:3px 8px;background:var(--s2);border-radius:3px;margin-bottom:2px;border:1px solid var(--b1);">${n}</div>`).join('')}</div>`:''}
+        ${orphansB600.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--amber);margin-bottom:4px;">B600 (${orphansB600.length})</div>${orphansB600.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:3px 8px;background:var(--s2);border-radius:3px;margin-bottom:2px;border:1px solid var(--b1);">${n}</div>`).join('')}</div>`:''}
+        ${orphansNuvizz.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--green);margin-bottom:4px;">NUVIZZ (${orphansNuvizz.length})</div>${orphansNuvizz.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:3px 8px;background:var(--s2);border-radius:3px;margin-bottom:2px;border:1px solid var(--b1);">${n}</div>`).join('')}</div>`:''}
       </div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text2);margin-top:8px;">If any of these are real drivers, tell SENTINEL the canonical name and they'll be added to CANONICAL_NAME map. If they're warehouse/office staff, ignore.</div>
-    </div>` : `<div style="background:rgba(0,153,77,.04);border:1px solid rgba(0,153,77,.2);border-radius:var(--radius);padding:14px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--green);">✅ No orphans — every name in the data sources maps to a roster entry.</div>`}
+    </div>` : `<div style="background:rgba(0,153,77,.04);border:1px solid rgba(0,153,77,.2);border-radius:var(--radius);padding:14px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--green);">✅ No orphans — every name in the data maps to a roster entry.</div>`}
   `;
+}
+
+function matchCellChanged(rowIdx, source, value){
+  if(!window._lastMatchRows) return;
+  const row=window._lastMatchRows[rowIdx];
+  if(!row) return;
+  const isMatch = value && value !== '(no match)';
+  row[source] = isMatch ? { name: value, score: 100, type: 'manual' } : null;
+
+  // Update row status and background
+  const sources=['motive','b600','nuvizz'];
+  const presentCount=sources.filter(s=>row[s]&&row[s].score>=70).length;
+  row.status = presentCount===3 ? 'good' : presentCount>0 ? 'partial' : 'missing';
+
+  const tr=document.getElementById(`matchRow_${rowIdx}`);
+  if(tr){
+    tr.style.background=row.status==='missing'?'rgba(204,17,17,.04)':row.status==='partial'?'rgba(204,136,0,.03)':'';
+    const statusCell=tr.cells[tr.cells.length-1];
+    statusCell.innerHTML=row.status==='good'?'<span style="color:var(--green);">✓</span>':row.status==='partial'?'<span style="color:var(--amber);">~</span>':'<span style="color:var(--red);">✗</span>';
+
+    // Update the select border color
+    const selIdx=['motive','b600','nuvizz'].indexOf(source)+2;
+    const sel=tr.cells[selIdx]?.querySelector('select');
+    if(sel){
+      sel.style.background=isMatch?'rgba(0,153,77,.08)':'rgba(204,17,17,.06)';
+      sel.style.borderColor=isMatch?'var(--green)':'rgba(204,17,17,.3)';
+    }
+  }
+
+  const status=document.getElementById('matchSaveStatus');
+  if(status) status.textContent=`Edited: ${row.canonical} → ${source} = "${value}"`;
+}
+
+function saveMatchEdits(){
+  if(!window._lastMatchRows){ alert('Run match audit first'); return; }
+  // Build new aliases to add to CANONICAL_NAME
+  const newAliases=[];
+  window._lastMatchRows.forEach(r=>{
+    ['motive','b600','nuvizz'].forEach(src=>{
+      const m=r[src];
+      if(!m||m.type!=='manual') return;
+      const alias=m.name.toLowerCase().trim();
+      const canonical=r.canonical;
+      if(alias&&canonical&&toCanonical(m.name)!==canonical){
+        newAliases.push({alias, canonical, source:src});
+        // Apply to runtime CANONICAL_NAME map immediately
+        CANONICAL_NAME[alias]=canonical;
+      }
+    });
+  });
+
+  const status=document.getElementById('matchSaveStatus');
+  if(newAliases.length===0){
+    status.style.color='var(--text2)';
+    status.textContent='No manual edits to save — all matches are already in the canonical map.';
+    return;
+  }
+
+  // Show what aliases were added
+  status.style.color='var(--green)';
+  status.innerHTML=`✅ Applied ${newAliases.length} alias${newAliases.length>1?'es':''} to CANONICAL_NAME (active for this session):<br>${newAliases.map(a=>`<span style="color:var(--text2);">"${a.alias}" → "${a.canonical}" (${a.source})</span>`).join('<br>')}`;
+
+  // Repopulate driver picker with new aliases
+  populateDriverPicker();
+  log(`Match audit: ${newAliases.length} manual aliases applied`,'ok');
+
+  // Show code to paste into the CANONICAL_NAME map for permanent fix
+  const code=newAliases.map(a=>`  '${a.alias}':'${a.canonical}',`).join('\n');
+  const codeBox=document.createElement('div');
+  codeBox.style.cssText='margin-top:10px;background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:10px;font-family:var(--mono);font-size:9px;color:var(--text);white-space:pre;overflow-x:auto;';
+  codeBox.textContent=`Add to CANONICAL_NAME to make permanent:\n${code}`;
+  status.appendChild(codeBox);
 }
 
 function exportMatchReport(){
   if(!window._lastMatchRows){ alert('Run match audit first'); return; }
   const rows=window._lastMatchRows;
   const orphans=window._lastOrphans||{};
-  let csv='Canonical,Type,Company,Aliases,Motive Match,Motive Score,B600 Match,B600 Score,NuVizz Match,NuVizz Score,Status\n';
+  let csv='Canonical,Type,Motive Match,Motive Score,Motive Manual,B600 Match,B600 Score,B600 Manual,NuVizz Match,NuVizz Score,NuVizz Manual,Status\n';
   rows.forEach(r=>{
-    csv+=`"${r.canonical}",${r.type},${r.co},"${r.aliases.join('; ')}","${r.motive?.name||''}",${r.motive?.score||''},"${r.b600?.name||''}",${r.b600?.score||''},"${r.nuvizz?.name||''}",${r.nuvizz?.score||''},${r.status}\n`;
+    csv+=`"${r.canonical}",${r.type},"${r.motive?.name||''}",${r.motive?.score||''},"${r.motive?.type==='manual'?'YES':''}","${r.b600?.name||''}",${r.b600?.score||''},"${r.b600?.type==='manual'?'YES':''}","${r.nuvizz?.name||''}",${r.nuvizz?.score||''},"${r.nuvizz?.type==='manual'?'YES':''}",${r.status}\n`;
   });
   csv+='\nOrphans\nSource,Name\n';
   (orphans.motive||[]).forEach(n=>csv+=`Motive,"${n}"\n`);
