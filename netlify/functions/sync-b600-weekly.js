@@ -161,6 +161,6 @@ export default async (req) => {
 
 // Netlify Scheduled Function config — runs every Monday at 6 AM ET (11:00 UTC)
 export const config = {
-  path: '/api/sync-b600-weekly',
-  schedule: '0 11 * * 1' // cron: minute hour day month dayOfWeek (1 = Monday)
+  path: '/api/sync-b600-weekly'
+  // schedule: '0 11 * * 1' — disabled until build stabilizes
 };
