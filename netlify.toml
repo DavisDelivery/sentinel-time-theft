@@ -2,6 +2,9 @@
   publish = "public"
   functions = "netlify/functions"
 
+[functions]
+  node_bundler = "esbuild"
+
 # API redirects — patch scripts call /api/*, Netlify serves at /.netlify/functions/*
 [[redirects]]
   from = "/api/nuvizz-loads-by-date"
