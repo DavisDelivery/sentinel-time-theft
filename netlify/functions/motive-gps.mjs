@@ -41,6 +41,12 @@ export default async (req, context) => {
         ep = "driving_periods";
         break;
 
+      case "users":
+      case "drivers":
+        // /v1/users — list all users/drivers in org
+        ep = "users";
+        break;
+
       case "hos":
       case "hours_of_service":
         ep = "hours_of_service";

@@ -632,7 +632,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.4.0';
+const APP_VERSION = '3.5.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1190,6 +1190,39 @@ async function fetchAllVehicles(){
   return all;
 }
 
+// Fetch all drivers from Motive's users endpoint
+async function fetchAllMotiveDrivers(){
+  let all=[], page=1, hasMore=true;
+  while(hasMore && page<=10){
+    const resp=await fetch(`/.netlify/functions/motive-gps?action=users&page_no=${page}&per_page=100`);
+    if(!resp.ok){log(`Motive users API ${resp.status}`,'warn');break;}
+    const data=await resp.json();
+    const users=data.users||data.data||[];
+    if(users.length===0){hasMore=false;break;}
+    all=all.concat(users);
+    if(!data.pagination?.next||users.length<100)hasMore=false;
+    page++;
+  }
+  // Filter to drivers only (role: driver, fleet_admin etc may not be drivers)
+  const drivers=all.filter(u=>{
+    const usr=u.user||u;
+    const role=(usr.role||'').toLowerCase();
+    return role==='driver' || role==='' || (usr.driver_company_id && !role.includes('admin'));
+  }).map(u=>{
+    const usr=u.user||u;
+    return {
+      id: usr.id,
+      name: ((usr.first_name||'')+' '+(usr.last_name||'')).trim(),
+      first_name: usr.first_name||'',
+      last_name: usr.last_name||'',
+      email: usr.email||'',
+      role: usr.role||''
+    };
+  }).filter(d=>d.name.length>1);
+  log(`Motive drivers: ${drivers.length} active in org (${all.length} total users)`,'info');
+  return drivers;
+}
+
 // ═══════════════════════════════════════════
 // MOTIVE API: Fetch driving_periods
 // This is the SOURCE OF TRUTH for who drove which truck and when
@@ -1241,12 +1274,18 @@ async function fetchVehicleLocations(vehicleId, startDate, endDate){
 // ═══════════════════════════════════════════
 function buildDriverData(periods){
   const driverMap={};
+  let droppedNoName=0;
   periods.forEach(p=>{
     const dp=p.driving_period||p;
     const driver=dp.driver||{};
     const vehicle=dp.vehicle||{};
-    const name=((driver.first_name||'')+ ' '+(driver.last_name||'')).trim();
-    if(!name||name.length<2)return;
+    let name=((driver.first_name||'')+ ' '+(driver.last_name||'')).trim();
+    // Fallback: use first_name only, or last_name only, or driver.username, or vehicle-based ID
+    if(!name||name.length<2){
+      name=driver.first_name||driver.last_name||driver.username||driver.email||'';
+      if(!name && vehicle.number) name=`(no driver) ${vehicle.number}`;
+    }
+    if(!name||name.length<2){droppedNoName++;return;}
     const key=name.toLowerCase();
     if(!driverMap[key])driverMap[key]={name,driverId:driver.id,vehicles:{},periods:[],departures:[],arrivals:[]};
 
@@ -1652,16 +1691,42 @@ async function runAudit(){
     // Step 1: Fetch all vehicles (builds cache for ID lookups)
     await fetchAllVehicles();
 
-    // Step 2: Fetch driving_periods — THE source of truth
+    // Step 1b: Fetch full Motive driver roster (so we don't miss anyone)
+    const motiveDrivers=await fetchAllMotiveDrivers();
+
+    // Step 2: Fetch driving_periods — primary source of GPS data
     const periods=await fetchDrivingPeriods(startDate, endDate);
     if(periods.length===0){
-      log('⚠️ No driving_periods returned for this date range. No drivers were active.','warn');
-      btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('ready');return;
+      log('⚠️ No driving_periods returned — checking full driver roster anyway','warn');
     }
 
     // Step 3: Build driver data from periods
     const drivers=buildDriverData(periods);
     log(`Built ${drivers.length} driver profiles from driving_periods`,'ok');
+
+    // Step 3b: Merge in any Motive drivers that didn't show in driving_periods
+    // (i.e. didn't drive that day, or yard-only, or co-driver setup)
+    const driversInPeriods=new Set(drivers.map(d=>d.name.toLowerCase()));
+    let added=0;
+    motiveDrivers.forEach(md=>{
+      if(!md.name||driversInPeriods.has(md.name.toLowerCase()))return;
+      drivers.push({
+        name: md.name,
+        driverId: md.id,
+        vehicles:{},
+        periods:[],
+        departures:[],
+        arrivals:[],
+        clockIn:null,
+        clockOut:null,
+        truck:'',
+        // Mark as no-GPS so scoring engine knows
+        _noMotiveActivity: true
+      });
+      added++;
+    });
+    if(added>0) log(`Added ${added} drivers from Motive roster (no driving_periods that date)`,'info');
+    log(`Total drivers to audit: ${drivers.length}`,'ok');
 
     if(drivers.length===0){
       log('No driver data to analyze','warn');
