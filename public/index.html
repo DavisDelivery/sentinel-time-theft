@@ -507,6 +507,28 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">💾 SCAN HISTORY</div>
       <button onclick="loadScanHistory()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🔄 REFRESH</button>
     </div>
+
+    <!-- SERVER SCAN TRIGGER -->
+    <div style="background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:14px;margin-bottom:16px;">
+      <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">⚡ RUN SERVER SCAN</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:10px;">Runs the full audit server-side. No browser needed — close the app and check back. Results save automatically to Scan History.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">START DATE</div>
+          <input type="date" id="serverScanStart" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;">
+        </div>
+        <div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">END DATE</div>
+          <input type="date" id="serverScanEnd" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;">
+        </div>
+        <div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">SECRET</div>
+          <input type="password" id="serverScanSecret" placeholder="scan secret" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;width:130px;">
+        </div>
+        <button onclick="runServerScan()" style="background:linear-gradient(135deg,var(--energon),#005580);color:#fff;border:none;border-radius:var(--radius);padding:8px 20px;cursor:pointer;font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:1px;margin-top:12px;">⚡ SCAN</button>
+      </div>
+      <div id="serverScanStatus" style="display:none;margin-top:10px;font-family:var(--mono);font-size:11px;line-height:1.7;"></div>
+    </div>
     <div style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
       Every ENGAGE scan is auto-saved to Firestore. Click any row to reload its Threat Board without re-running the scan. Data never changes once captured.
     </div>
@@ -648,7 +670,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.6.5';
+const APP_VERSION = '3.8.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2268,6 +2290,40 @@ async function runWeeklySync(){
   }catch(e){
     el.style.color='var(--red)';
     el.textContent='❌ Error: '+e.message;
+  }
+}
+
+async function runServerScan(){
+  const start=document.getElementById('serverScanStart').value;
+  const end=document.getElementById('serverScanEnd').value;
+  const secret=document.getElementById('serverScanSecret').value;
+  const status=document.getElementById('serverScanStatus');
+  if(!start||!end){ alert('Select start and end dates'); return; }
+  if(!secret){ alert('Enter the scan secret'); return; }
+  status.style.display='block';
+  status.style.color='var(--energon)';
+  status.innerHTML='⚡ Scan running server-side... this may take 30-120 seconds depending on date range.<br><span style="color:var(--text3);">You can close this tab — results will be in Scan History when done.</span>';
+  try{
+    const res=await fetch('/api/sentinel-scan-run',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({startDate:start,endDate:end,secret})
+    });
+    const data=await res.json();
+    if(data.success){
+      status.style.color='var(--green)';
+      status.innerHTML=`✅ Scan complete!<br>
+        <span style="color:var(--text2);">${data.driverCount} drivers · ${data.flaggedCount} flagged · ${data.critical} critical · ${data.high} high</span><br>
+        <span style="color:var(--red2);">Est stolen: ${(data.totalStolenHrs||0).toFixed(1)}h / $${(data.totalCost||0).toFixed(0)}</span><br>
+        <span style="color:var(--text3);font-size:9px;">Scan ID: ${data.scanId}</span>`;
+      setTimeout(()=>loadScanHistory(),1500);
+    } else {
+      status.style.color='var(--red)';
+      status.innerHTML=`❌ Error: ${data.error||'unknown'}<br><span style="color:var(--text3);font-size:9px;">${(data.logs||[]).slice(-3).join('<br>')}</span>`;
+    }
+  }catch(e){
+    status.style.color='var(--red)';
+    status.innerHTML=`❌ ${e.message}`;
   }
 }
 

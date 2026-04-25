@@ -47,6 +47,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/sentinel-scan-run"
+  to = "/.netlify/functions/sentinel-scan-run"
+  status = 200
+
+[[redirects]]
   from = "/api/sentinel-scan-save"
   to = "/.netlify/functions/sentinel-scan-save"
   status = 200
