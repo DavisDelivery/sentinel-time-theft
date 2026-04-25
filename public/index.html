@@ -408,6 +408,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
   <button class="tab" onclick="showTab('driver',this)">👤 Driver Intel</button>
   <button class="tab" onclick="showTab('scans',this)">💾 Scan History</button>
+  <button class="tab" onclick="showTab('match',this);renderMatchAudit()">🔗 Name Match</button>
   <button class="tab" onclick="showTab('report',this)">📊 Report</button>
   <button class="tab" onclick="showTab('history',this)">📈 History</button>
   <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
@@ -515,6 +516,21 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <p style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;">Run ENGAGE on the Threat Board — results will persist here automatically.</p>
     </div>
     <div id="scanHistoryList" style="display:none;"></div>
+  </div>
+
+  <!-- NAME MATCH AUDIT -->
+  <div id="tab-match" class="content">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+      <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">🔗 NAME MATCHING AUDIT</div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="renderMatchAudit(true)" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🔄 RE-MATCH</button>
+        <button onclick="exportMatchReport()" style="background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">📥 EXPORT</button>
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+      Reconciles every name across <span style="color:var(--energon);">DRIVER ROSTER</span>, <span style="color:var(--blue3);">MOTIVE</span> (live), <span style="color:var(--amber);">B600</span>, and <span style="color:var(--green);">NUVIZZ</span>. Flags mismatches and orphans so you can verify the data merging correctly. Click suspicious rows to manually link names.
+    </div>
+    <div id="matchAuditContent" style="text-align:center;padding:30px;color:var(--text2);font-family:var(--mono);font-size:11px;">Click 🔄 RE-MATCH to run the audit</div>
   </div>
 
   <!-- REPORT -->
@@ -632,7 +648,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.5.0';
+const APP_VERSION = '3.6.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2721,6 +2737,264 @@ function toCanonical(name){
   const k=name.toLowerCase().trim();
   return CANONICAL_NAME[k] || name.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
 }
+
+// ═══════════════════════════════════════════
+// NAME MATCHING AUDIT
+// Cross-references: DRIVER_ROSTER ↔ Motive ↔ B600 ↔ NuVizz
+// ═══════════════════════════════════════════
+function fuzzyMatch(name, candidates){
+  if(!name) return [];
+  const n=name.toLowerCase().trim();
+  const np=n.split(/\s+/);
+  const nFirst=np[0]||'', nLast=np[np.length-1]||'';
+  const matches=[];
+  for(const c of candidates){
+    const cl=c.toLowerCase().trim();
+    if(cl===n) { matches.push({name:c, type:'exact', score:100}); continue; }
+    const cp=cl.split(/\s+/);
+    const cFirst=cp[0]||'', cLast=cp[cp.length-1]||'';
+    // First+last match
+    if(np.length>=2 && cp.length>=2 && nFirst===cFirst && nLast===cLast){
+      matches.push({name:c, type:'first+last', score:95}); continue;
+    }
+    // Last name + first initial
+    if(nLast.length>2 && cLast.length>2 && nLast===cLast && nFirst[0]===cFirst[0]){
+      matches.push({name:c, type:'last+initial', score:85}); continue;
+    }
+    // Last name only (longer = more specific)
+    if(nLast.length>3 && cLast.length>3 && nLast===cLast){
+      matches.push({name:c, type:'last', score:70}); continue;
+    }
+    // First name only with same type? Lower score
+    if(nFirst.length>3 && cFirst.length>3 && nFirst===cFirst){
+      matches.push({name:c, type:'first', score:50}); continue;
+    }
+    // Substring (catches typos like "Mandi Marlboroug")
+    if(nLast.length>4 && cLast.length>4){
+      const minLen=Math.min(nLast.length,cLast.length);
+      let common=0;
+      for(let i=0;i<minLen;i++) if(nLast[i]===cLast[i]) common++; else break;
+      if(common>=4) {
+        matches.push({name:c, type:'partial-last', score:40+common}); continue;
+      }
+    }
+  }
+  return matches.sort((a,b)=>b.score-a.score);
+}
+
+let _lastMotiveDrivers=[]; // cached from last audit run
+
+async function renderMatchAudit(forceRefetch){
+  const el=document.getElementById('matchAuditContent');
+  if(!el) return;
+  el.innerHTML=`<div style="text-align:center;padding:30px;color:var(--text2);font-family:var(--mono);font-size:11px;">Running match audit...</div>`;
+
+  // Fetch Motive drivers if needed
+  let motiveDrivers=_lastMotiveDrivers;
+  if(forceRefetch || !motiveDrivers.length){
+    try{
+      el.innerHTML=`<div style="text-align:center;padding:30px;color:var(--text2);font-family:var(--mono);font-size:11px;">Fetching Motive driver roster...</div>`;
+      motiveDrivers=await fetchAllMotiveDrivers();
+      _lastMotiveDrivers=motiveDrivers;
+    }catch(e){
+      log(`Match audit: Motive fetch failed - ${e.message}`,'warn');
+      motiveDrivers=[];
+    }
+  }
+
+  // Build canonical sets
+  const rosterCanonicals=new Set();
+  for(const k of Object.keys(DRIVER_ROSTER)) rosterCanonicals.add(toCanonical(k));
+  const rosterArr=[...rosterCanonicals];
+
+  // B600: unique driver names
+  const b600Names=new Set();
+  if(window._b600History) window._b600History.forEach(r=>b600Names.add(r.name));
+
+  // NuVizz: unique driver names
+  const nuvizzNames=new Set();
+  if(window._nuvizzHistory) window._nuvizzHistory.forEach(r=>nuvizzNames.add(r[2]));
+
+  // Motive: unique names
+  const motiveNames=new Set(motiveDrivers.map(d=>d.name));
+
+  // For each canonical roster name, find best match in each source
+  const matchRows=[];
+  for(const canon of rosterArr){
+    const profile=getDriverProfile(canon);
+    // Get all aliases for this canonical name
+    const aliases=Object.keys(DRIVER_ROSTER).filter(k=>toCanonical(k)===canon);
+
+    // Try matching with each alias, take best match per source
+    function bestMatch(targetSet){
+      const targetArr=[...targetSet];
+      let best=null;
+      for(const a of aliases){
+        const matches=fuzzyMatch(a, targetArr);
+        if(matches.length && (!best || matches[0].score>best.score)){
+          best=matches[0];
+        }
+      }
+      return best;
+    }
+
+    const motiveMatch=bestMatch(motiveNames);
+    const b600Match=bestMatch(b600Names);
+    const nuvizzMatch=bestMatch(nuvizzNames);
+
+    // Status: full match, partial, missing
+    const sources=[motiveMatch, b600Match, nuvizzMatch];
+    const presentCount=sources.filter(m=>m && m.score>=70).length;
+    const lowConfCount=sources.filter(m=>m && m.score>=40 && m.score<70).length;
+    let status='good';
+    if(presentCount===0) status='missing';
+    else if(presentCount<3 || lowConfCount>0) status='partial';
+
+    matchRows.push({
+      canonical: canon,
+      type: profile.type||'?',
+      role: profile.role||'?',
+      co: profile.co||'?',
+      aliases,
+      motive: motiveMatch,
+      b600: b600Match,
+      nuvizz: nuvizzMatch,
+      status
+    });
+  }
+
+  // Find ORPHANS — names in data but not in any roster alias
+  const allCanonicals=new Set(rosterArr.map(n=>n.toLowerCase()));
+  const allAliases=new Set(Object.keys(DRIVER_ROSTER));
+  function isOrphan(name){
+    if(!name) return false;
+    const lower=name.toLowerCase().trim();
+    if(allAliases.has(lower)) return false;
+    // Check if it fuzzy-matches a roster name
+    const matches=fuzzyMatch(name, rosterArr);
+    return !(matches.length && matches[0].score>=70);
+  }
+  const orphansMotive=[...motiveNames].filter(n=>isOrphan(n));
+  const orphansB600=[...b600Names].filter(n=>isOrphan(n));
+  const orphansNuvizz=[...nuvizzNames].filter(n=>isOrphan(n));
+
+  // Sort: missing first, then partial, then good
+  matchRows.sort((a,b)=>{
+    const order={missing:0,partial:1,good:2};
+    if(order[a.status]!==order[b.status]) return order[a.status]-order[b.status];
+    return a.canonical.localeCompare(b.canonical);
+  });
+
+  const stats={
+    total: matchRows.length,
+    good: matchRows.filter(r=>r.status==='good').length,
+    partial: matchRows.filter(r=>r.status==='partial').length,
+    missing: matchRows.filter(r=>r.status==='missing').length
+  };
+
+  function renderMatchCell(m){
+    if(!m) return '<span style="color:var(--text3);">—</span>';
+    const col = m.score>=95?'var(--green)' : m.score>=70?'var(--amber)' : 'var(--red)';
+    const label = m.score>=95?'✓' : m.score>=70?'~' : '?';
+    return `<span style="color:${col};font-weight:600;" title="${m.type} match (score ${m.score})">${label}</span> <span style="color:var(--text2);">${m.name}</span>`;
+  }
+
+  // Save for export
+  window._lastMatchRows=matchRows;
+  window._lastOrphans={motive:orphansMotive, b600:orphansB600, nuvizz:orphansNuvizz};
+
+  el.innerHTML=`
+    <!-- Stats -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:14px;">
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">ROSTER</div>
+        <div style="font-family:var(--head);font-size:20px;color:var(--blue3);">${stats.total}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">FULL MATCH</div>
+        <div style="font-family:var(--head);font-size:20px;color:var(--green);">${stats.good}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">PARTIAL</div>
+        <div style="font-family:var(--head);font-size:20px;color:var(--amber);">${stats.partial}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">MISSING</div>
+        <div style="font-family:var(--head);font-size:20px;color:var(--red);">${stats.missing}</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">ORPHANS</div>
+        <div style="font-family:var(--head);font-size:20px;color:${(orphansMotive.length+orphansB600.length+orphansNuvizz.length)>0?'var(--red)':'var(--green)'};">${orphansMotive.length+orphansB600.length+orphansNuvizz.length}</div>
+        <div style="font-family:var(--mono);font-size:8px;color:var(--text3);">M:${orphansMotive.length} B:${orphansB600.length} N:${orphansNuvizz.length}</div>
+      </div>
+    </div>
+
+    <!-- Match table -->
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;overflow-x:auto;margin-bottom:14px;">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;">
+            <th style="padding:6px 8px;">CANONICAL</th>
+            <th style="padding:6px 8px;">TYPE</th>
+            <th style="padding:6px 8px;">CO</th>
+            <th style="padding:6px 8px;color:var(--blue3);">MOTIVE</th>
+            <th style="padding:6px 8px;color:var(--amber);">B600</th>
+            <th style="padding:6px 8px;color:var(--green);">NUVIZZ</th>
+            <th style="padding:6px 8px;">ALIASES</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${matchRows.map(r=>{
+            const rowBg=r.status==='missing'?'rgba(204,17,17,.05)':r.status==='partial'?'rgba(204,136,0,.04)':'';
+            return `<tr style="border-bottom:1px solid rgba(0,0,0,.04);background:${rowBg};">
+              <td style="padding:5px 8px;color:var(--text);font-weight:600;">${r.canonical}</td>
+              <td style="padding:5px 8px;color:var(--text2);">${r.type==='tractor'?'🚛':'🚚'} ${r.type}</td>
+              <td style="padding:5px 8px;color:var(--text2);">${r.co}</td>
+              <td style="padding:5px 8px;">${renderMatchCell(r.motive)}</td>
+              <td style="padding:5px 8px;">${renderMatchCell(r.b600)}</td>
+              <td style="padding:5px 8px;">${renderMatchCell(r.nuvizz)}</td>
+              <td style="padding:5px 8px;color:var(--text3);font-size:9px;">${r.aliases.length>1?r.aliases.length+' aliases':'—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Orphans -->
+    ${orphansMotive.length||orphansB600.length||orphansNuvizz.length ? `
+    <div style="background:rgba(204,17,17,.04);border:1px solid rgba(204,17,17,.2);border-radius:var(--radius);padding:14px;">
+      <div style="font-family:var(--head);font-size:11px;color:var(--red);letter-spacing:1px;margin-bottom:10px;">⚠️ ORPHANS — names found in data but NOT in roster</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+        ${orphansMotive.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--blue3);margin-bottom:4px;">MOTIVE (${orphansMotive.length})</div>${orphansMotive.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:2px 6px;background:var(--s2);border-radius:3px;margin-bottom:2px;">${n}</div>`).join('')}</div>`:''}
+        ${orphansB600.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--amber);margin-bottom:4px;">B600 (${orphansB600.length})</div>${orphansB600.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:2px 6px;background:var(--s2);border-radius:3px;margin-bottom:2px;">${n}</div>`).join('')}</div>`:''}
+        ${orphansNuvizz.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--green);margin-bottom:4px;">NUVIZZ (${orphansNuvizz.length})</div>${orphansNuvizz.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:2px 6px;background:var(--s2);border-radius:3px;margin-bottom:2px;">${n}</div>`).join('')}</div>`:''}
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text2);margin-top:8px;">If any of these are real drivers, tell SENTINEL the canonical name and they'll be added to CANONICAL_NAME map. If they're warehouse/office staff, ignore.</div>
+    </div>` : `<div style="background:rgba(0,153,77,.04);border:1px solid rgba(0,153,77,.2);border-radius:var(--radius);padding:14px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--green);">✅ No orphans — every name in the data sources maps to a roster entry.</div>`}
+  `;
+}
+
+function exportMatchReport(){
+  if(!window._lastMatchRows){ alert('Run match audit first'); return; }
+  const rows=window._lastMatchRows;
+  const orphans=window._lastOrphans||{};
+  let csv='Canonical,Type,Company,Aliases,Motive Match,Motive Score,B600 Match,B600 Score,NuVizz Match,NuVizz Score,Status\n';
+  rows.forEach(r=>{
+    csv+=`"${r.canonical}",${r.type},${r.co},"${r.aliases.join('; ')}","${r.motive?.name||''}",${r.motive?.score||''},"${r.b600?.name||''}",${r.b600?.score||''},"${r.nuvizz?.name||''}",${r.nuvizz?.score||''},${r.status}\n`;
+  });
+  csv+='\nOrphans\nSource,Name\n';
+  (orphans.motive||[]).forEach(n=>csv+=`Motive,"${n}"\n`);
+  (orphans.b600||[]).forEach(n=>csv+=`B600,"${n}"\n`);
+  (orphans.nuvizz||[]).forEach(n=>csv+=`NuVizz,"${n}"\n`);
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`sentinel-match-audit-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ═══════════════════════════════════════════
+// NAME MATCHING (legacy diMatchDriver)
 
 function populateDriverPicker(){
   const pick=document.getElementById('diDriverPick');
