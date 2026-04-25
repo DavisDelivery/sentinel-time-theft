@@ -2,7 +2,7 @@
 // Lightweight Firestore REST API client — no firebase-admin package needed
 // Uses native fetch + node:crypto for JWT signing
 
-import crypto from 'node:crypto';
+import crypto from 'crypto';
 
 let _accessToken = null;
 let _tokenExpiry = 0;

@@ -1,9 +1,11 @@
 [build]
   publish = "public"
   functions = "netlify/functions"
+  command = ""
 
 [functions]
   node_bundler = "esbuild"
+  external_node_modules = ["node:crypto"]
 
 # API redirects — patch scripts call /api/*, Netlify serves at /.netlify/functions/*
 [[redirects]]
