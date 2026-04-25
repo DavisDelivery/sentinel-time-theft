@@ -542,15 +542,25 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 
   <!-- NAME MATCH AUDIT -->
   <div id="tab-match" class="content">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
       <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">🔗 NAME MATCHING AUDIT</div>
       <div style="display:flex;gap:6px;">
         <button onclick="renderMatchAudit(true)" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🔄 RE-MATCH</button>
-        <button onclick="exportMatchReport()" style="background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">📥 EXPORT</button>
+        <button onclick="exportMatchReport()" style="background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:6px 12px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;">📥 CSV</button>
       </div>
     </div>
-    <div style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
-      Reconciles every name across <span style="color:var(--energon);">DRIVER ROSTER</span>, <span style="color:var(--blue3);">MOTIVE</span> (live), <span style="color:var(--amber);">B600</span>, and <span style="color:var(--green);">NUVIZZ</span>. Flags mismatches and orphans so you can verify the data merging correctly. Click suspicious rows to manually link names.
+    <!-- Filter bar -->
+    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+      <button onclick="setMatchFilter('all')" class="fb-btn active" id="mf-all">All</button>
+      <button onclick="setMatchFilter('davis')" class="fb-btn" id="mf-davis">🏢 Davis</button>
+      <button onclick="setMatchFilter('owner')" class="fb-btn" id="mf-owner">📋 Owner-Op</button>
+      <button onclick="setMatchFilter('tractor')" class="fb-btn" id="mf-tractor">🚛 Tractor</button>
+      <button onclick="setMatchFilter('straight')" class="fb-btn" id="mf-straight">🚚 Box/Straight</button>
+      <button onclick="setMatchFilter('partial')" class="fb-btn" id="mf-partial">~ Partial</button>
+      <button onclick="setMatchFilter('missing')" class="fb-btn" id="mf-missing">✗ Missing</button>
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:10px;">
+      Click any <span style="color:var(--blue3);">MOTIVE</span> / <span style="color:var(--amber);">B600</span> / <span style="color:var(--green);">NUVIZZ</span> dropdown to pick the correct name from that data source.
     </div>
     <div id="matchAuditContent" style="text-align:center;padding:30px;color:var(--text2);font-family:var(--mono);font-size:11px;">Click 🔄 RE-MATCH to run the audit</div>
   </div>
@@ -670,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '3.9.1';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -3086,6 +3096,33 @@ async function renderMatchAudit(forceRefetch){
       </div>
     </div>` : `<div style="background:rgba(0,153,77,.04);border:1px solid rgba(0,153,77,.2);border-radius:var(--radius);padding:14px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--green);">✅ No orphans — every name in the data maps to a roster entry.</div>`}
   `;
+  // Apply current filter after render
+  applyMatchFilter();
+}
+
+let _matchFilter='all';
+function setMatchFilter(f){
+  _matchFilter=f;
+  document.querySelectorAll('[id^="mf-"]').forEach(b=>b.classList.remove('active'));
+  const el=document.getElementById('mf-'+f);
+  if(el) el.classList.add('active');
+  applyMatchFilter();
+}
+
+function applyMatchFilter(){
+  if(!window._lastMatchRows) return;
+  document.querySelectorAll('#matchTableBody tr').forEach((tr,i)=>{
+    const r=window._lastMatchRows[i];
+    if(!r){ tr.style.display=''; return; }
+    let show=true;
+    if(_matchFilter==='davis') show=r.co==='davis';
+    else if(_matchFilter==='owner') show=r.co==='owner';
+    else if(_matchFilter==='tractor') show=r.type==='tractor';
+    else if(_matchFilter==='straight') show=r.type==='straight'||r.type==='box';
+    else if(_matchFilter==='partial') show=r.status==='partial';
+    else if(_matchFilter==='missing') show=r.status==='missing';
+    tr.style.display=show?'':'none';
+  });
 }
 
 function matchCellChanged(rowIdx, source, value){
