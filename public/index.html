@@ -407,6 +407,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 <div class="tab-bar">
   <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
   <button class="tab" onclick="showTab('driver',this)">👤 Driver Intel</button>
+  <button class="tab" onclick="showTab('scans',this)">💾 Scan History</button>
   <button class="tab" onclick="showTab('report',this)">📊 Report</button>
   <button class="tab" onclick="showTab('history',this)">📈 History</button>
   <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
@@ -497,6 +498,23 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <p style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;">Data from B600 timeclock + NuVizz stops (Jan–Apr 2026)</p>
     </div>
     <div id="diContent" style="display:none;"></div>
+  </div>
+
+  <!-- SCAN HISTORY -->
+  <div id="tab-scans" class="content">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+      <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">💾 SCAN HISTORY</div>
+      <button onclick="loadScanHistory()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🔄 REFRESH</button>
+    </div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+      Every ENGAGE scan is auto-saved to Firestore. Click any row to reload its Threat Board without re-running the scan. Data never changes once captured.
+    </div>
+    <div id="scanHistoryEmpty" style="text-align:center;padding:40px 0;color:var(--text2);">
+      <div style="font-size:32px;margin-bottom:10px;">💾</div>
+      <p style="font-family:var(--ui);font-size:14px;">No saved scans yet.</p>
+      <p style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;">Run ENGAGE on the Threat Board — results will persist here automatically.</p>
+    </div>
+    <div id="scanHistoryList" style="display:none;"></div>
   </div>
 
   <!-- REPORT -->
@@ -614,7 +632,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.3.0';
+const APP_VERSION = '3.4.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1727,6 +1745,7 @@ async function runAudit(){
     results.sort((a,b)=>b.score-a.score);
     updateHeader();updateStats();renderFlags();renderReport();
     saveAuditRun();
+    saveScanToFirestore();
     btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('done');
     log(`✅ Audit complete — ${results.filter(r=>r.risk!=='low'&&r.risk!=='nodata').length} drivers flagged, ${results.filter(r=>r.risk==='nodata').length} no data`,'ok');
 
@@ -2139,6 +2158,196 @@ async function runWeeklySync(){
 }
 
 // ═══════════════════════════════════════════
+// SCAN PERSISTENCE (Firestore)
+// ═══════════════════════════════════════════
+function genScanId(){
+  const d=new Date();
+  return `scan_${d.toISOString().replace(/[^0-9]/g,'').slice(0,14)}_${Math.random().toString(36).slice(2,7)}`;
+}
+
+async function saveScanToFirestore(){
+  if(!results.length){ return; }
+  // Attach canonical name so aggregates merge correctly
+  const enriched=results.map(r=>({...r, canonicalName: toCanonical(r.name)}));
+  const scanId=genScanId();
+  try{
+    const res=await fetch('/api/sentinel-scan-save',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        scanId,
+        startDate: auditStartDate,
+        endDate: auditEndDate,
+        meta:{ source: navigator.userAgent.includes('Mobile')?'mobile':'desktop' },
+        results: enriched
+      })
+    });
+    const data=await res.json();
+    if(data.success){
+      log(`💾 Scan saved to Firestore: ${scanId} (${data.driverCount} drivers, ${data.flaggedCount} flagged)`,'ok');
+    } else {
+      log(`⚠️ Scan save failed: ${data.error||'unknown'}`,'warn');
+    }
+  }catch(e){
+    log(`⚠️ Firestore save error: ${e.message}`,'warn');
+  }
+}
+
+async function loadScanHistory(){
+  const listEl=document.getElementById('scanHistoryList');
+  const emptyEl=document.getElementById('scanHistoryEmpty');
+  listEl.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-family:var(--mono);font-size:11px;">Loading...</div>';
+  listEl.style.display='block';
+  emptyEl.style.display='none';
+
+  try{
+    const res=await fetch('/api/sentinel-scan-list?limit=50');
+    const data=await res.json();
+    if(!data.success||!data.scans||data.scans.length===0){
+      listEl.style.display='none';
+      emptyEl.style.display='block';
+      return;
+    }
+
+    listEl.innerHTML=`
+      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;">
+              <th style="padding:6px 8px;">DATE RANGE</th>
+              <th style="padding:6px 8px;">SAVED</th>
+              <th style="padding:6px 8px;">DRIVERS</th>
+              <th style="padding:6px 8px;">FLAGGED</th>
+              <th style="padding:6px 8px;">CRIT</th>
+              <th style="padding:6px 8px;">HIGH</th>
+              <th style="padding:6px 8px;">STOLEN</th>
+              <th style="padding:6px 8px;">$ LOST</th>
+              <th style="padding:6px 8px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.scans.map(s=>{
+              const savedDate=s.createdAt?new Date(s.createdAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'—';
+              const dateRange=s.startDate===s.endDate?s.startDate:`${s.startDate} → ${s.endDate}`;
+              return `<tr style="border-bottom:1px solid rgba(0,0,0,.04);cursor:pointer;" onclick="loadSavedScan('${s.scanId}')" onmouseover="this.style.background='var(--s1)'" onmouseout="this.style.background=''">
+                <td style="padding:6px 8px;color:var(--text);font-weight:600;">${dateRange}</td>
+                <td style="padding:6px 8px;color:var(--text2);">${savedDate}</td>
+                <td style="padding:6px 8px;color:var(--blue3);">${s.driverCount||0}</td>
+                <td style="padding:6px 8px;color:${s.flaggedCount>0?'var(--red)':'var(--text2)'};font-weight:${s.flaggedCount>0?'700':'400'};">${s.flaggedCount||0}</td>
+                <td style="padding:6px 8px;color:${s.critical>0?'var(--red)':'var(--text3)'};">${s.critical||0}</td>
+                <td style="padding:6px 8px;color:${s.high>0?'var(--amber)':'var(--text3)'};">${s.high||0}</td>
+                <td style="padding:6px 8px;color:var(--text);">${(s.totalStolenHrs||0).toFixed(1)}h</td>
+                <td style="padding:6px 8px;color:var(--text);">$${(s.totalCost||0).toFixed(0)}</td>
+                <td style="padding:6px 8px;color:var(--energon);font-size:9px;">→ LOAD</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:8px;text-align:center;">Showing ${data.scans.length} most recent scans</div>
+    `;
+  }catch(e){
+    listEl.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;padding:20px;">Error loading scans: ${e.message}</div>`;
+  }
+}
+
+async function loadSavedScan(scanId){
+  log(`📂 Loading saved scan ${scanId}...`,'info');
+  try{
+    const res=await fetch(`/api/sentinel-scan-list?scanId=${scanId}`);
+    const data=await res.json();
+    if(!data.success||!data.scan){
+      alert('Failed to load scan: '+(data.error||'not found'));
+      return;
+    }
+
+    // Reconstruct results array from saved drivers
+    results=data.scan.drivers.map(d=>({
+      ...d,
+      flags: d.flags||[],
+      gps: d.gps||{deliveryStops:0,actualMiles:0,engineOnMin:0,effectiveMph:0},
+      timeline:[],
+      manifestStops:[],
+      layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0}
+    }));
+    auditStartDate=data.scan.startDate;
+    auditEndDate=data.scan.endDate;
+
+    // Switch to Threat Board and render
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelector('.tab[onclick*="flags"]').classList.add('active');
+    document.querySelectorAll('.content').forEach(c=>c.classList.remove('visible'));
+    document.getElementById('tab-flags').classList.add('visible');
+
+    updateHeader();updateStats();renderFlags();renderReport();
+    log(`✅ Loaded scan ${scanId}: ${results.length} drivers, ${results.filter(r=>r.risk!=='low'&&r.risk!=='nodata').length} flagged`,'ok');
+  }catch(e){
+    alert('Error: '+e.message);
+  }
+}
+
+async function loadDriverHistory(driverName){
+  try{
+    const canonical=toCanonical(driverName);
+    const res=await fetch(`/api/sentinel-scan-list?driver=${encodeURIComponent(canonical)}`);
+    const data=await res.json();
+    if(!data.success||!data.history) return null;
+    return data.history;
+  }catch(e){ return null; }
+}
+
+function renderDiHistoryPanel(driverName, history){
+  const el=document.getElementById('diHistory');
+  if(!el) return;
+  if(!history || !history.totalScans){
+    el.style.display='none';
+    return;
+  }
+  el.style.display='block';
+
+  const rc=history.riskCounts||{};
+  const flagFreq=history.flagFrequency||{};
+  const topFlags=Object.entries(flagFreq).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  el.innerHTML=`
+    <div style="background:linear-gradient(135deg,rgba(0,119,170,.06),rgba(124,58,237,.04));border:1px solid rgba(0,119,170,.25);border-radius:var(--radius);padding:14px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+        <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;">📊 SENTINEL HISTORY — across all saved scans</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">${history.totalScans} scan${history.totalScans>1?'s':''} · first seen ${history.firstSeen?.split('T')[0]||'—'}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:10px;">
+        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">SCANS</div>
+          <div style="font-family:var(--head);font-size:18px;color:var(--blue3);">${history.totalScans||0}</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">CRITICAL</div>
+          <div style="font-family:var(--head);font-size:18px;color:${rc.critical>0?'var(--red)':'var(--text3)'};">${rc.critical||0}</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">HIGH</div>
+          <div style="font-family:var(--head);font-size:18px;color:${rc.high>0?'var(--amber)':'var(--text3)'};">${rc.high||0}</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">MEDIUM</div>
+          <div style="font-family:var(--head);font-size:18px;color:${rc.medium>0?'var(--amber2)':'var(--text3)'};">${rc.medium||0}</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">CLEAN</div>
+          <div style="font-family:var(--head);font-size:18px;color:var(--green);">${rc.low||0}</div>
+        </div>
+        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">TOT STOLEN</div>
+          <div style="font-family:var(--head);font-size:16px;color:var(--red2);">${(history.totalStolenHrs||0).toFixed(1)}h</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">$${(history.totalCost||0).toFixed(0)}</div>
+        </div>
+      </div>
+      ${topFlags.length?`<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:4px;">TOP RECURRING FLAGS:</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${topFlags.map(([f,n])=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:3px 8px;font-family:var(--mono);font-size:10px;"><span style="color:var(--text2);">${f}</span> <span style="color:var(--red);font-weight:700;">×${n}</span></span>`).join('')}</div>`:''}
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════
 // STOP SCAN + FLEET AI
 // ═══════════════════════════════════════════
 async function scanStop(){
@@ -2514,6 +2723,9 @@ function renderDriverIntel(driverName){
   document.getElementById('diEmpty').style.display='none';
   document.getElementById('diContent').style.display='block';
 
+  // Async-load flag history from Firestore (non-blocking)
+  loadDriverHistory(driverName).then(history=>renderDiHistoryPanel(driverName, history));
+
   const cutoff=diDateRange();
   const cutoffEnd=diDateRangeEnd();
 
@@ -2672,6 +2884,9 @@ function renderDriverIntel(driverName){
       </div>
       <div id="diAiText" style="font-family:var(--ui);font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;"></div>
     </div>
+
+    <!-- DRIVER FLAG HISTORY (from Firestore) -->
+    <div id="diHistory" style="display:none;"></div>
 
     <!-- KPI CARDS -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;">
