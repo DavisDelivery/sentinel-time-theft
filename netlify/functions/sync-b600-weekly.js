@@ -101,12 +101,9 @@ export default async (req) => {
     const endDate = lastSunday.toISOString().split('T')[0];
     log(`Pulling B600 data for ${startDate} → ${endDate}`);
 
-    // Step 2: Scrape B600 — reuse totalpass-scraper logic
-    const { default: scraper } = await import('./totalpass-scraper.js');
-    const scrapeReq = new Request(`https://sentinel.local/api/totalpass-scraper?startDate=${startDate}&endDate=${endDate}`, {
-      method: 'GET'
-    });
-    const scrapeRes = await scraper(scrapeReq);
+    // Step 2: Scrape B600 — call our own deployed function via HTTP
+    const siteUrl = Netlify.env.get('URL') || 'https://sentinel-time-theft.netlify.app';
+    const scrapeRes = await fetch(`${siteUrl}/api/totalpass-scraper?startDate=${startDate}&endDate=${endDate}`);
     const scrapeData = await scrapeRes.json();
 
     if (!scrapeData.success || !scrapeData.csv) {
