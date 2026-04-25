@@ -2136,18 +2136,51 @@ async function loadB600History(){
 
 async function loadNuVizzHistory(){
   try{
-    const res=await fetch('/nuvizz-history.json');
-    if(!res.ok) return;
-    const records=await res.json();
-    if(records.length){
-      // records are arrays: [date, time, driver, customer, city, zip, stopNum]
-      window._nuvizzHistory=records;
-      const dates=new Set(records.map(r=>r[0]));
-      const drivers=new Set(records.map(r=>r[2]));
-      log(`📂 NuVizz history loaded: ${records.length} stops (auto)`, 'ok');
-      log(`   ${drivers.size} drivers, ${dates.size} days (${[...dates].sort()[0]} → ${[...dates].sort().pop()})`, 'info');
+    // Load manifest to know which years are available
+    const mres=await fetch('/nuvizz-manifest.json');
+    if(!mres.ok){
+      // Fallback: try old single file
+      const res=await fetch('/nuvizz-history.json');
+      if(!res.ok) return;
+      window._nuvizzHistory=await res.json();
+      log(`📂 NuVizz history loaded: ${window._nuvizzHistory.length} stops`,'ok');
+      return;
     }
-  }catch(e){ /* silent */ }
+    const manifest=await mres.json();
+    const years=Object.keys(manifest).sort();
+    log(`📂 NuVizz: ${years.length} years available (${years.join(', ')}) — loading recent first`,'info');
+
+    // Load most recent year first (2026), then older years in background
+    window._nuvizzHistory=[];
+    const loadYear=async(year)=>{
+      try{
+        const res=await fetch(`/nuvizz-${year}.json`);
+        if(!res.ok) return;
+        const records=await res.json();
+        // Format: [date, time, driver, city, stopNum] (5 fields, slimmed)
+        // Remap to expected 7-field format: [date, time, driver, customer, city, zip, stopNum]
+        const remapped=records.map(r=>r.length===5
+          ? [r[0], r[1], r[2], '', r[3], '', r[4]]  // slimmed format
+          : r);  // full format (legacy)
+        window._nuvizzHistory=window._nuvizzHistory.concat(remapped);
+        const drivers=new Set(records.map(r=>r[2]));
+        const dates=records.map(r=>r[0]).sort();
+        log(`✅ NuVizz ${year}: ${records.length} stops, ${drivers.size} drivers (${dates[0]}→${dates[dates.length-1]})`,'ok');
+        populateDriverPicker();
+      }catch(e){ log(`⚠️ NuVizz ${year} load failed: ${e.message}`,'warn'); }
+    };
+
+    // Load current year first, then backfill
+    const currentYear=new String(new Date().getFullYear());
+    const recentYears=years.filter(y=>y>=String(new Date().getFullYear()-1)).sort().reverse();
+    const olderYears=years.filter(y=>!recentYears.includes(y)).sort().reverse();
+
+    // Load recent years synchronously so Driver Intel has data fast
+    for(const y of recentYears) await loadYear(y);
+    // Load older years in background
+    for(const y of olderYears) loadYear(y);
+
+  }catch(e){ log(`⚠️ NuVizz history load error: ${e.message}`,'warn'); }
 }
 
 function loadB600ForDates(dates){
