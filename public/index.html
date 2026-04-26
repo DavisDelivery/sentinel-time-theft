@@ -680,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.9.1';
+const APP_VERSION = '3.9.2';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2432,38 +2432,146 @@ async function loadScanHistory(){
 }
 
 async function loadSavedScan(scanId){
-  log(`📂 Loading saved scan ${scanId}...`,'info');
+  const listEl=document.getElementById('scanHistoryList');
+  // Remove any existing detail panel
+  const existing=document.getElementById('scanDetailPanel');
+  if(existing) existing.remove();
+
+  // Insert loading panel
+  const panel=document.createElement('div');
+  panel.id='scanDetailPanel';
+  panel.style.cssText='background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:16px;margin-bottom:14px;';
+  panel.innerHTML=`<div style="font-family:var(--mono);font-size:11px;color:var(--energon);">Loading scan ${scanId}...</div>`;
+  listEl.parentNode.insertBefore(panel, listEl);
+
   try{
     const res=await fetch(`/api/sentinel-scan-list?scanId=${scanId}`);
     const data=await res.json();
-    if(!data.success||!data.scan){
-      alert('Failed to load scan: '+(data.error||'not found'));
-      return;
-    }
+    if(!data.success||!data.scan){ panel.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">Error: ${data.error||'not found'}</div>`; return; }
 
-    // Reconstruct results array from saved drivers
-    results=data.scan.drivers.map(d=>({
-      ...d,
-      flags: d.flags||[],
-      gps: d.gps||{deliveryStops:0,actualMiles:0,engineOnMin:0,effectiveMph:0},
-      timeline:[],
-      manifestStops:[],
+    const scan=data.scan;
+    const drivers=scan.drivers||[];
+    const flagged=drivers.filter(d=>d.risk!=='low'&&d.risk!=='nodata').sort((a,b)=>b.score-a.score);
+    const clean=drivers.filter(d=>d.risk==='low');
+    const nodata=drivers.filter(d=>d.risk==='nodata');
+
+    const riskCol=r=>r==='critical'?'var(--red2)':r==='high'?'var(--amber)':r==='medium'?'var(--amber2)':'var(--green)';
+    const riskBg=r=>r==='critical'?'rgba(204,17,17,.06)':r==='high'?'rgba(204,136,0,.05)':r==='medium'?'rgba(204,136,0,.03)':'';
+
+    panel.innerHTML=`
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div style="font-family:var(--head);font-size:13px;color:var(--text);font-weight:700;">${scan.startDate===scan.endDate?scan.startDate:`${scan.startDate} → ${scan.endDate}`}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Saved ${new Date(scan.createdAt).toLocaleString()} · ${scan.source==='server'?'Server scan':'Browser scan'} · ID: ${scanId}</div>
+        </div>
+        <button onclick="document.getElementById('scanDetailPanel').remove()" style="background:var(--s1);color:var(--text2);border:1px solid var(--b1);border-radius:var(--radius);padding:4px 12px;cursor:pointer;font-family:var(--mono);font-size:10px;">✕ Close</button>
+      </div>
+
+      <!-- Summary KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:14px;">
+        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">DRIVERS</div>
+          <div style="font-family:var(--head);font-size:18px;color:var(--blue3);">${drivers.length}</div>
+        </div>
+        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">FLAGGED</div>
+          <div style="font-family:var(--head);font-size:18px;color:var(--red);">${scan.flaggedCount||flagged.length}</div>
+        </div>
+        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">CRITICAL</div>
+          <div style="font-family:var(--head);font-size:18px;color:var(--red2);">${scan.critical||0}</div>
+        </div>
+        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">HIGH</div>
+          <div style="font-family:var(--head);font-size:18px;color:var(--amber);">${scan.high||0}</div>
+        </div>
+        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">EST STOLEN</div>
+          <div style="font-family:var(--head);font-size:16px;color:var(--red2);">${(scan.totalStolenHrs||0).toFixed(1)}h</div>
+        </div>
+        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">$ LOST</div>
+          <div style="font-family:var(--head);font-size:16px;color:var(--red2);">$${(scan.totalCost||0).toFixed(0)}</div>
+        </div>
+      </div>
+
+      <!-- Flagged drivers -->
+      ${flagged.length?`
+      <div style="font-family:var(--head);font-size:10px;color:var(--red);letter-spacing:1px;margin-bottom:8px;">⚠️ FLAGGED DRIVERS (${flagged.length})</div>
+      <div style="border:1px solid var(--b1);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;">
+        ${flagged.map(d=>`
+          <div style="background:${riskBg(d.risk)};border-bottom:1px solid rgba(0,0,0,.05);padding:10px 12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+              <div>
+                <span style="font-family:var(--head);font-size:12px;color:var(--text);font-weight:700;">${d.name}</span>
+                <span style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-left:8px;">${d.driverType==='tractor'?'🚛':'🚚'} ${d.truck||'—'}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="background:${riskCol(d.risk)};color:#fff;padding:2px 8px;border-radius:3px;font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;">${d.risk}</span>
+                <span style="font-family:var(--mono);font-size:10px;color:var(--text2);">Score: ${d.score}</span>
+                ${d.stolenHrs>0?`<span style="font-family:var(--mono);font-size:10px;color:var(--red2);">${d.stolenHrs.toFixed(1)}h / $${d.stolenDollars.toFixed(0)}</span>`:''}
+              </div>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:4px;font-family:var(--mono);font-size:9px;color:var(--text3);flex-wrap:wrap;">
+              ${d.clockIn?`<span>Clock: ${d.clockIn}–${d.clockOut||'?'}</span>`:''}
+              ${d.gps?.actualMiles?`<span>Miles: ${d.gps.actualMiles}</span>`:''}
+              ${d.gps?.deliveryStops?`<span>Stops: ${d.gps.deliveryStops}</span>`:''}
+              ${d.gps?.engineOnMin?`<span>Engine: ${(d.gps.engineOnMin/60).toFixed(1)}h</span>`:''}
+            </div>
+            ${(d.flags||[]).length?`
+            <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
+              ${d.flags.map(f=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:2px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);">${f.ico||'⚑'} ${f.title||f}</span>`).join('')}
+            </div>`:''}
+          </div>`).join('')}
+      </div>`:''}
+
+      <!-- Clean drivers -->
+      ${clean.length?`
+      <details style="margin-bottom:8px;">
+        <summary style="font-family:var(--head);font-size:10px;color:var(--green);letter-spacing:1px;cursor:pointer;padding:6px 0;">✓ CLEAN DRIVERS (${clean.length})</summary>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;">
+          ${clean.map(d=>`<span style="background:rgba(0,153,77,.06);border:1px solid rgba(0,153,77,.2);border-radius:3px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--green);">${d.name}</span>`).join('')}
+        </div>
+      </details>`:''}
+
+      <!-- No data -->
+      ${nodata.length?`
+      <details>
+        <summary style="font-family:var(--head);font-size:10px;color:var(--text3);letter-spacing:1px;cursor:pointer;padding:6px 0;">— NO DATA (${nodata.length})</summary>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;">
+          ${nodata.map(d=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--text3);">${d.name}</span>`).join('')}
+        </div>
+      </details>`:''}
+
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <button onclick="loadScanToThreatBoard('${scanId}')" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:7px 16px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">→ OPEN IN THREAT BOARD</button>
+      </div>
+    `;
+
+  }catch(e){
+    panel.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">Error: ${e.message}</div>`;
+  }
+}
+
+async function loadScanToThreatBoard(scanId){
+  try{
+    const res=await fetch(`/api/sentinel-scan-list?scanId=${scanId}`);
+    const data=await res.json();
+    if(!data.success||!data.scan) return;
+    const scan=data.scan;
+    results=(scan.drivers||[]).map(d=>({
+      ...d, flags:d.flags||[], gps:d.gps||{}, timeline:[], manifestStops:[],
       layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0}
     }));
-    auditStartDate=data.scan.startDate;
-    auditEndDate=data.scan.endDate;
-
-    // Switch to Threat Board and render
+    auditStartDate=scan.startDate;
+    auditEndDate=scan.endDate;
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     document.querySelector('.tab[onclick*="flags"]').classList.add('active');
     document.querySelectorAll('.content').forEach(c=>c.classList.remove('visible'));
     document.getElementById('tab-flags').classList.add('visible');
-
     updateHeader();updateStats();renderFlags();renderReport();
-    log(`✅ Loaded scan ${scanId}: ${results.length} drivers, ${results.filter(r=>r.risk!=='low'&&r.risk!=='nodata').length} flagged`,'ok');
-  }catch(e){
-    alert('Error: '+e.message);
-  }
+    log(`✅ Loaded scan ${scanId} into Threat Board`,'ok');
+  }catch(e){ alert('Error: '+e.message); }
 }
 
 async function loadDriverHistory(driverName){
