@@ -680,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.2';
+const APP_VERSION = '3.10.3';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -3897,8 +3897,65 @@ function saveAuditRun(){
     if(hist.length>50)hist.length=50; // keep last 50 runs
     localStorage.setItem('sentinel_history',JSON.stringify(hist));
     log('Audit saved to history','ok');
-    renderHistory();
   }catch(e){log('Could not save history: '+e.message,'warn');}
+  // v3.10.3: Per-driver-day snapshots for the History viewer (slim — no GPS arrays).
+  // Stored separately under sentinel_history_v2 so the original summary list stays untouched.
+  try{
+    const snapshot={
+      id:run.id,
+      date:auditStartDate,
+      endDate:auditEndDate,
+      period:auditPeriod,
+      ranAt:run.ranAt,
+      summary:{
+        driverCount:run.driverCount,
+        dataCount:run.dataCount,
+        flaggedCount:run.flaggedCount,
+        criticalCount:run.criticalCount,
+        totalStolenHrs:run.totalStolenHrs,
+        totalStolenDollars:run.totalStolenDollars
+      },
+      drivers:results.map(r=>({
+        name:r.name,
+        truck:r.truck||'',
+        score:r.score||0,
+        risk:r.risk||'nodata',
+        flagCount:(r.flags||[]).length,
+        flagTitles:(r.flags||[]).map(f=>f.title||f.name||'').filter(Boolean),
+        clockIn:r.clockIn||'',
+        clockOut:r.clockOut||'',
+        gpsClockIn:r.gpsClockIn||'',
+        gpsClockOut:r.gpsClockOut||'',
+        drivingMin:r.drivingMin||0,
+        engineGapMin:r.engineGapMin||0,
+        actualMiles:r.gps?.actualMiles||0,
+        effectiveMph:r.gps?.effectiveMph||0,
+        unexplainedStops:(r.gps?.unexplained||[]).length,
+        stolenHrs:r.stolenHrs||0,
+        stolenDollars:r.stolenDollars||0,
+        hasData:!!r.hasData,
+        b600Matched:!!r.b600Matched,
+        driverRole:r.driverRole||'',
+        driverCo:r.driverCo||'',
+        _source:r._source||'',
+        _inHub:r._inHub
+      }))
+    };
+    const v2=JSON.parse(localStorage.getItem('sentinel_history_v2')||'[]');
+    v2.unshift(snapshot);
+    // Cap at 30 runs — full per-driver data is bigger; keeps us under 5MB localStorage cap.
+    if(v2.length>30)v2.length=30;
+    localStorage.setItem('sentinel_history_v2',JSON.stringify(v2));
+  }catch(e){
+    // QuotaExceededError most likely — drop oldest and retry once
+    try{
+      const v2=JSON.parse(localStorage.getItem('sentinel_history_v2')||'[]');
+      while(v2.length>10){v2.pop();}
+      localStorage.setItem('sentinel_history_v2',JSON.stringify(v2));
+      log('History storage trimmed to fit (kept newest 10 runs with details)','warn');
+    }catch(e2){log('History details could not be saved: '+e2.message,'warn');}
+  }
+  renderHistory();
 }
 
 function loadAuditHistory(){
@@ -3909,43 +3966,227 @@ function loadAuditHistory(){
   }catch(e){}
 }
 
+// ═══════════════════════════════════════════
+// v3.10.3: HISTORY VIEWER
+// Side-by-side comparison + drill into per-driver-day detail.
+// State lives in module-scope vars; re-renders read state on each call.
+// ═══════════════════════════════════════════
+let _histSelectedRunIds = []; // up to 3 run IDs for side-by-side
+let _histSort = { col: 'score', dir: 'desc' }; // sort state for the comparison table
+let _histExpanded = null; // {runId, driverName} when a cell is expanded
+
+function _histGetV2(){
+  try{ return JSON.parse(localStorage.getItem('sentinel_history_v2')||'[]'); }catch(e){ return []; }
+}
+function _histGetSummary(){
+  try{ return JSON.parse(localStorage.getItem('sentinel_history')||'[]'); }catch(e){ return []; }
+}
+function _histStorageBytes(){
+  let b=0;
+  try{ b += (localStorage.getItem('sentinel_history')||'').length; }catch(e){}
+  try{ b += (localStorage.getItem('sentinel_history_v2')||'').length; }catch(e){}
+  return b;
+}
+function _histRiskColor(risk){
+  return risk==='critical'?'var(--red2)':risk==='high'?'var(--red)':risk==='medium'?'var(--amber)':risk==='low'?'var(--green)':'var(--text3)';
+}
+function _histDateLabel(h){
+  return (h.period==='day' || !h.endDate || h.date===h.endDate) ? h.date : `${h.date} → ${h.endDate}`;
+}
+
+function histToggleRun(id){
+  const i=_histSelectedRunIds.indexOf(id);
+  if(i>=0) _histSelectedRunIds.splice(i,1);
+  else {
+    if(_histSelectedRunIds.length>=3) _histSelectedRunIds.shift(); // FIFO eviction at cap
+    _histSelectedRunIds.push(id);
+  }
+  _histExpanded=null;
+  renderHistory();
+}
+
+function histSetSort(col){
+  if(_histSort.col===col) _histSort.dir = _histSort.dir==='asc'?'desc':'asc';
+  else { _histSort.col=col; _histSort.dir = (col==='name'||col==='truck')?'asc':'desc'; }
+  renderHistory();
+}
+
+function histToggleExpand(runId, driverName){
+  if(_histExpanded && _histExpanded.runId===runId && _histExpanded.driverName===driverName) _histExpanded=null;
+  else _histExpanded={runId, driverName};
+  renderHistory();
+}
+
+function _histSortDrivers(rows, col, dir){
+  const mul = dir==='asc'?1:-1;
+  return rows.slice().sort((a,b)=>{
+    const av=a[col], bv=b[col];
+    if(typeof av==='number' && typeof bv==='number') return (av-bv)*mul;
+    return String(av||'').localeCompare(String(bv||''))*mul;
+  });
+}
+
+function _histSortHeader(label, col){
+  const isActive = _histSort.col===col;
+  const arrow = isActive ? (_histSort.dir==='asc'?' ▲':' ▼') : '';
+  return `<th onclick="histSetSort('${col}')" style="cursor:pointer;user-select:none;text-align:left;padding:6px 8px;font-family:var(--mono);font-size:9px;color:${isActive?'var(--blue3)':'var(--text2)'};border-bottom:1px solid var(--b1);white-space:nowrap;">${label}${arrow}</th>`;
+}
+
 function renderHistory(){
   const el=document.getElementById('historyContent');
   if(!el)return;
-  try{
-    const hist=JSON.parse(localStorage.getItem('sentinel_history')||'[]');
-    if(!hist.length){el.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--text3);">No audit history yet. Run your first scan.</div>';return;}
-    el.innerHTML=hist.map(h=>{
-      const dateLabel=h.period==='day'?h.date:`${h.date} → ${h.endDate}`;
-      return`<div style="display:flex;align-items:center;gap:12px;padding:8px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);margin-bottom:4px;">
-        <div style="flex:1;">
-          <div style="font-family:var(--ui);font-size:13px;font-weight:600;">${dateLabel}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Ran ${new Date(h.ranAt).toLocaleString()}</div>
-        </div>
-        <div style="text-align:center;padding:0 8px;">
-          <div style="font-family:var(--head);font-size:16px;color:var(--blue3);">${h.dataCount}</div>
-          <div style="font-family:var(--mono);font-size:8px;color:var(--text3);">DRIVERS</div>
-        </div>
-        <div style="text-align:center;padding:0 8px;">
-          <div style="font-family:var(--head);font-size:16px;color:${h.flaggedCount>0?'var(--red)':'var(--green)'};">${h.flaggedCount}</div>
-          <div style="font-family:var(--mono);font-size:8px;color:var(--text3);">FLAGGED</div>
-        </div>
-        <div style="text-align:center;padding:0 8px;">
-          <div style="font-family:var(--head);font-size:16px;color:var(--amber);">${h.totalStolenHrs.toFixed(1)}h</div>
-          <div style="font-family:var(--mono);font-size:8px;color:var(--text3);">STOLEN</div>
-        </div>
-        <div style="text-align:center;padding:0 8px;">
-          <div style="font-family:var(--head);font-size:16px;color:var(--amber2);">$${h.totalStolenDollars.toFixed(0)}</div>
-          <div style="font-family:var(--mono);font-size:8px;color:var(--text3);">LOST</div>
-        </div>
-      </div>`;
-    }).join('');
-  }catch(e){}
+  const summary=_histGetSummary();
+  const v2=_histGetV2();
+  if(!summary.length && !v2.length){
+    el.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--text3);">No audit history yet. Run your first scan.</div>';
+    return;
+  }
+  // Index v2 snapshots by id for fast lookup
+  const v2ById={};
+  v2.forEach(s=>{v2ById[s.id]=s;});
+  // Use v2 list as the authoritative one for selection (it has drill-in data); fall back to summary.
+  const runs = v2.length ? v2 : summary;
+  // Drop selected IDs that no longer exist
+  _histSelectedRunIds = _histSelectedRunIds.filter(id=>v2ById[id]);
+
+  const bytes=_histStorageBytes();
+  const kb=(bytes/1024).toFixed(0);
+
+  let html = `
+    <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:10px;">
+      ${runs.length} runs stored · ${kb} KB · ${_histSelectedRunIds.length}/3 selected for comparison
+      ${v2.length===0?' · <span style="color:var(--amber);">⚠ Pre-v3.10.3 history — drill-in unavailable, re-run to capture details</span>':''}
+    </div>`;
+
+  // ── RUN LIST (clickable, multi-select up to 3) ──
+  html += `<div style="margin-bottom:14px;">`;
+  html += runs.map(h=>{
+    const sel = _histSelectedRunIds.includes(h.id);
+    const dateLabel=_histDateLabel(h);
+    const summary = h.summary || h; // v2 has .summary, legacy has flat fields
+    const dataCount = summary.dataCount ?? h.dataCount ?? 0;
+    const flaggedCount = summary.flaggedCount ?? h.flaggedCount ?? 0;
+    const totalStolenHrs = summary.totalStolenHrs ?? h.totalStolenHrs ?? 0;
+    const totalStolenDollars = summary.totalStolenDollars ?? h.totalStolenDollars ?? 0;
+    const hasV2 = !!v2ById[h.id];
+    return `<div onclick="${hasV2?`histToggleRun(${h.id})`:''}" style="display:flex;align-items:center;gap:12px;padding:8px 10px;background:${sel?'rgba(0,180,255,.08)':'var(--s1)'};border:1px solid ${sel?'var(--blue3)':'var(--b1)'};border-radius:var(--radius);margin-bottom:4px;cursor:${hasV2?'pointer':'default'};opacity:${hasV2?'1':'.6'};">
+      <div style="width:18px;font-size:13px;color:var(--blue3);">${sel?'☑':(hasV2?'☐':'·')}</div>
+      <div style="flex:1;">
+        <div style="font-family:var(--ui);font-size:13px;font-weight:600;">${dateLabel}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Ran ${new Date(h.ranAt).toLocaleString()}</div>
+      </div>
+      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:var(--blue3);">${dataCount}</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">DRIVERS</div></div>
+      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:${flaggedCount>0?'var(--red)':'var(--green)'};">${flaggedCount}</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">FLAGGED</div></div>
+      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:var(--amber);">${totalStolenHrs.toFixed(1)}h</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">STOLEN</div></div>
+      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:var(--amber2);">$${totalStolenDollars.toFixed(0)}</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">LOST</div></div>
+    </div>`;
+  }).join('');
+  html += `</div>`;
+
+  // ── COMPARISON TABLE — only when 1+ runs selected ──
+  if(_histSelectedRunIds.length===0){
+    html += `<div style="font-family:var(--mono);font-size:10px;color:var(--text3);padding:14px;background:var(--s1);border:1px dashed var(--b1);border-radius:var(--radius);text-align:center;">Click up to 3 runs above to compare drivers side-by-side. Click any driver row to drill into that day's detail.</div>`;
+    el.innerHTML=html;
+    return;
+  }
+
+  // Build union of driver names across selected runs
+  const selSnapshots = _histSelectedRunIds.map(id=>v2ById[id]).filter(Boolean);
+  // Order columns by run date (oldest left → newest right) for natural reading
+  selSnapshots.sort((a,b)=>new Date(a.ranAt)-new Date(b.ranAt));
+
+  const driverUnion = {};
+  selSnapshots.forEach(snap=>{
+    snap.drivers.forEach(d=>{
+      if(!driverUnion[d.name]) driverUnion[d.name]={name:d.name,truck:d.truck};
+    });
+  });
+  // Build comparison rows: one per driver, with per-run score/risk + an aggregate for sorting
+  const compRows = Object.values(driverUnion).map(du=>{
+    const perRun = selSnapshots.map(snap=>{
+      const d = snap.drivers.find(x=>x.name===du.name);
+      return d ? {score:d.score, risk:d.risk, hasData:d.hasData, stolenHrs:d.stolenHrs, runId:snap.id, driver:d} : null;
+    });
+    const scores = perRun.filter(p=>p && p.hasData).map(p=>p.score);
+    const maxScore = scores.length ? Math.max(...scores) : 0;
+    const avgScore = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
+    const totalStolen = perRun.filter(p=>p).reduce((a,p)=>a+(p.stolenHrs||0),0);
+    return {name:du.name, truck:du.truck||'', perRun, score:maxScore, avgScore, stolenHrs:totalStolen};
+  });
+  const sorted = _histSortDrivers(compRows, _histSort.col, _histSort.dir);
+
+  html += `<div style="font-family:var(--ui);font-size:13px;font-weight:700;margin-bottom:8px;">Side-by-side: ${selSnapshots.map(s=>_histDateLabel(s)).join(' · ')}</div>`;
+  html += `<div style="overflow-x:auto;background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);"><table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;"><thead><tr>`;
+  html += _histSortHeader('DRIVER','name');
+  html += _histSortHeader('TRUCK','truck');
+  selSnapshots.forEach(snap=>{
+    html += `<th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);white-space:nowrap;">${_histDateLabel(snap)}</th>`;
+  });
+  html += _histSortHeader('MAX','score');
+  html += _histSortHeader('AVG','avgScore');
+  html += _histSortHeader('STOLEN h','stolenHrs');
+  html += `</tr></thead><tbody>`;
+
+  sorted.forEach(row=>{
+    html += `<tr style="border-bottom:1px solid var(--b1);">`;
+    html += `<td style="padding:6px 8px;font-weight:600;color:var(--text);">${row.name}</td>`;
+    html += `<td style="padding:6px 8px;color:var(--text2);">${row.truck||'—'}</td>`;
+    row.perRun.forEach(p=>{
+      if(!p){
+        html += `<td style="padding:6px 8px;text-align:center;color:var(--text3);">—</td>`;
+      } else if(!p.hasData){
+        html += `<td onclick="histToggleExpand(${p.runId},'${row.name.replace(/'/g,"\\'")}')" style="padding:6px 8px;text-align:center;color:var(--text3);cursor:pointer;background:rgba(255,255,255,.02);">no data</td>`;
+      } else {
+        const c=_histRiskColor(p.risk);
+        const isExp = _histExpanded && _histExpanded.runId===p.runId && _histExpanded.driverName===row.name;
+        html += `<td onclick="histToggleExpand(${p.runId},'${row.name.replace(/'/g,"\\'")}')" style="padding:6px 8px;text-align:center;cursor:pointer;background:${isExp?'rgba(0,180,255,.12)':'transparent'};border-left:${isExp?'2px solid var(--blue3)':'none'};border-right:${isExp?'2px solid var(--blue3)':'none'};"><span style="color:${c};font-weight:700;">${p.score}</span><span style="color:var(--text3);font-size:9px;"> ${p.risk}</span></td>`;
+      }
+    });
+    html += `<td style="padding:6px 8px;text-align:center;color:${row.score>=50?'var(--red2)':row.score>=30?'var(--amber)':'var(--text2)'};font-weight:700;">${row.score}</td>`;
+    html += `<td style="padding:6px 8px;text-align:center;color:var(--text2);">${row.avgScore.toFixed(0)}</td>`;
+    html += `<td style="padding:6px 8px;text-align:center;color:${row.stolenHrs>0?'var(--amber)':'var(--text3)'};">${row.stolenHrs.toFixed(1)}</td>`;
+    html += `</tr>`;
+    // Inline expansion row when a cell in this driver is selected
+    if(_histExpanded && _histExpanded.driverName===row.name){
+      const snap = v2ById[_histExpanded.runId];
+      const d = snap && snap.drivers.find(x=>x.name===row.name);
+      if(d){
+        const totalCols = 2 + selSnapshots.length + 3;
+        html += `<tr><td colspan="${totalCols}" style="padding:0;background:rgba(0,180,255,.04);border-top:2px solid var(--blue3);border-bottom:2px solid var(--blue3);">`;
+        html += `<div style="padding:12px 16px;">`;
+        html += `<div style="font-family:var(--ui);font-size:12px;font-weight:700;margin-bottom:8px;">${d.name} — ${_histDateLabel(snap)}${d.driverRole?` <span style="font-size:9px;color:var(--text2);font-weight:400;font-family:var(--mono);">${d.driverRole}${d.driverCo==='owner'?' (OO)':''}</span>`:''}${d.b600Matched?' <span style="color:var(--green);font-size:9px;font-family:var(--mono);">●B600</span>':''}${d._inHub===false?' <span style="font-size:9px;color:var(--amber);font-family:var(--mono);background:rgba(255,170,0,.12);border:1px solid rgba(255,170,0,.35);border-radius:3px;padding:1px 5px;margin-left:4px;">⚠ NOT IN HUB</span>':''}</div>`;
+        html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-family:var(--mono);font-size:10px;">`;
+        const stat=(label,val,color)=>`<div><div style="font-size:8px;color:var(--text3);">${label}</div><div style="font-size:13px;color:${color||'var(--text)'};font-weight:700;">${val}</div></div>`;
+        html += stat('SCORE', `<span style="color:${_histRiskColor(d.risk)};">${d.score} ${d.risk}</span>`);
+        html += stat('TRUCK', `#${d.truck||'—'}`);
+        html += stat('IN', d.gpsClockIn||d.clockIn||'—');
+        html += stat('OUT', d.gpsClockOut||d.clockOut||'—');
+        html += stat('DRIVING', `${(d.drivingMin/60).toFixed(1)}h`);
+        html += stat('ENG GAP', `${d.engineGapMin.toFixed(0)}min`, d.engineGapMin>60?'var(--amber)':'var(--text)');
+        html += stat('MILES', d.actualMiles.toFixed(0));
+        html += stat('MPH', d.effectiveMph.toFixed(1));
+        html += stat('UNEXP STOPS', d.unexplainedStops, d.unexplainedStops>0?'var(--amber)':'var(--text)');
+        html += stat('STOLEN', `${d.stolenHrs.toFixed(1)}h / $${d.stolenDollars.toFixed(0)}`, d.stolenHrs>0?'var(--amber)':'var(--text)');
+        html += `</div>`;
+        if(d.flagTitles && d.flagTitles.length){
+          html += `<div style="margin-top:10px;"><div style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-bottom:4px;">FLAGS (${d.flagTitles.length})</div>`;
+          html += d.flagTitles.map(t=>`<span style="display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 8px;margin:2px;background:rgba(255,170,0,.1);border:1px solid rgba(255,170,0,.25);border-radius:3px;color:var(--amber);">${t}</span>`).join('');
+          html += `</div>`;
+        }
+        html += `</div></td></tr>`;
+      }
+    }
+  });
+  html += `</tbody></table></div>`;
+  el.innerHTML=html;
 }
 
 function clearHistory(){
   if(confirm('Clear all audit history?')){
     localStorage.removeItem('sentinel_history');
+    localStorage.removeItem('sentinel_history_v2'); // v3.10.3
+    _histSelectedRunIds=[];
+    _histExpanded=null;
     renderHistory();
     log('History cleared','ok');
   }
