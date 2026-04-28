@@ -680,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.7';
+const APP_VERSION = '3.10.8';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1814,7 +1814,7 @@ async function runAudit(){
 
     // Step 0b: Auto-load NuVizz stop data — try stored history first, then API
     nuvizzData=[]; // clear previous
-    const hadStoredNuvizz = loadNuVizzForDates(dates);
+    const hadStoredNuvizz = await loadNuVizzForDates(dates);
     if(!hadStoredNuvizz){
       log(`NuVizz: no stored data for selected dates — trying live API...`,'info');
       await fetchNuVizzAPI(dates);
@@ -2261,6 +2261,10 @@ const HUB_FIRESTORE_KEY = 'AIzaSyDyRyjuiP_UD8T_2xmW2xLjvqx9RLCYCmo'; // public w
 // Preload window: enough for Driver Intel + Name Match tabs. Older audits
 // trigger an on-demand lazy fetch via fetchB600FromHubForDates().
 const B600_PRELOAD_DAYS = 120;
+// NuVizz preload — same idea. Stops volume is ~3K/week so 120 days = ~50K
+// stops, well within memory and a single Firestore query (5K limit per
+// page so this needs paging, but loadNuVizzHistory handles that).
+const NUVIZZ_PRELOAD_DAYS = 120;
 
 // Convert a Firestore document fields-map into a flat JS object.
 // Handles stringValue / integerValue / doubleValue / arrayValue / mapValue / nullValue.
@@ -2361,52 +2365,127 @@ async function loadB600History() {
 }
 
 async function loadNuVizzHistory(){
-  try{
-    // Load manifest to know which years are available
-    const mres=await fetch('/nuvizz-manifest.json');
-    if(!mres.ok){
-      // Fallback: try old single file
-      const res=await fetch('/nuvizz-history.json');
-      if(!res.ok) return;
-      window._nuvizzHistory=await res.json();
-      log(`📂 NuVizz history loaded: ${window._nuvizzHistory.length} stops`,'ok');
-      return;
+  // v3.10.8: NuVizz history now sourced from MarginIQ Data Hub
+  // (nuvizz_stops collection in davismarginiq Firestore) instead of static
+  // /nuvizz-{year}.json files. The hub is the single source of truth — kept
+  // current by the Sunday-morning email-ingest path.
+  //
+  // Two-tier strategy mirrors what loadB600History does:
+  //   1. Boot preload — last NUVIZZ_PRELOAD_DAYS into window._nuvizzHistory
+  //      so Driver Intel and Name Match tabs have a fast in-memory dataset.
+  //   2. Audit lazy-load — loadNuVizzForDates() lazy-fetches any audit dates
+  //      outside the cached window before filtering.
+  //
+  // Hub access uses the same public Firestore web key as B600 (security
+  // enforced via firestore.rules). Manual CSV upload path is unchanged
+  // and still works as a fallback for offline use.
+  try {
+    const today = new Date();
+    const earliest = new Date(today);
+    earliest.setDate(today.getDate() - NUVIZZ_PRELOAD_DAYS);
+    const fromIso = earliest.toISOString().slice(0, 10);
+    const toIso = today.toISOString().slice(0, 10);
+
+    log(`📂 Loading NuVizz history from Data Hub (last ${NUVIZZ_PRELOAD_DAYS} days)...`, 'info');
+    const records = await fetchNuVizzFromHub(fromIso, toIso);
+    if (records.length) {
+      window._nuvizzHistory = records;
+      const dates = new Set(records.map(r => r[0]));
+      const drivers = new Set(records.map(r => r[2]));
+      log(`📂 NuVizz history loaded: ${records.length} stops (auto, from hub)`, 'ok');
+      log(`   ${drivers.size} drivers, ${dates.size} days (${[...dates].sort()[0]} → ${[...dates].sort().pop()})`, 'info');
+      populateDriverPicker();
+    } else {
+      log(`📂 NuVizz history: hub returned no records for last ${NUVIZZ_PRELOAD_DAYS} days`, 'warn');
     }
-    const manifest=await mres.json();
-    const years=Object.keys(manifest).sort();
-    log(`📂 NuVizz: ${years.length} years available (${years.join(', ')}) — loading recent first`,'info');
+  } catch (e) {
+    log(`⚠️ NuVizz hub load failed: ${e.message} — manual CSV upload still available`, 'warn');
+  }
+}
 
-    // Load most recent year first (2026), then older years in background
-    window._nuvizzHistory=[];
-    const loadYear=async(year)=>{
-      try{
-        const res=await fetch(`/nuvizz-${year}.json`);
-        if(!res.ok) return;
-        const records=await res.json();
-        // Format: [date, time, driver, city, stopNum] (5 fields, slimmed)
-        // Remap to expected 7-field format: [date, time, driver, customer, city, zip, stopNum]
-        const remapped=records.map(r=>r.length===5
-          ? [r[0], r[1], r[2], '', r[3], '', r[4]]  // slimmed format
-          : r);  // full format (legacy)
-        window._nuvizzHistory=window._nuvizzHistory.concat(remapped);
-        const drivers=new Set(records.map(r=>r[2]));
-        const dates=records.map(r=>r[0]).sort();
-        log(`✅ NuVizz ${year}: ${records.length} stops, ${drivers.size} drivers (${dates[0]}→${dates[dates.length-1]})`,'ok');
-        populateDriverPicker();
-      }catch(e){ log(`⚠️ NuVizz ${year} load failed: ${e.message}`,'warn'); }
+// v3.10.8: Pull nuvizz_stops in a date range from MarginIQ Firestore.
+// Returns records in the legacy 7-field array format that the existing
+// SENTINEL code expects: [date, time, driver, customer, city, zip, stopNum].
+// Note: time portion is "" since Firestore stores date-only delivery_date
+// (the original CSV had time too, but the MarginIQ ingest dropped it). This
+// is fine — SENTINEL only uses the time field for cosmetic display in the
+// manifest stop list, not for any audit-matching logic.
+//
+// Pagination: NuVizz volume can hit ~500 stops/day, so a 120-day preload
+// is ~60K docs — well over Firestore runQuery's 5000-doc limit per call.
+// We page by month (each ~13K stops, still over 5K) — actually, paginate
+// via __name__ cursor with orderBy(delivery_date) so each page picks up
+// where the previous left off.
+async function fetchNuVizzFromHub(fromIso, toIso) {
+  const records = [];
+  // Use one runQuery per month-chunk to stay under the 5000-doc limit and
+  // avoid needing cursor logic (each month is ~13K stops worst case, but
+  // typical NuVizz weeks are ~3K stops so a month is ~13K — too big for
+  // one call). Two-week chunks are safer: ~6K stops max → split if needed.
+  // Simpler: 7-day chunks. 7 days × 500/day = 3500 stops, well under limit.
+  const startDate = new Date(fromIso + 'T00:00:00Z');
+  const endDate = new Date(toIso + 'T00:00:00Z');
+  const chunkDays = 7;
+  let cur = new Date(startDate);
+  while (cur <= endDate) {
+    const chunkEnd = new Date(cur);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + chunkDays - 1);
+    if (chunkEnd > endDate) chunkEnd.setTime(endDate.getTime());
+    const chunkFrom = cur.toISOString().slice(0, 10);
+    const chunkTo = chunkEnd.toISOString().slice(0, 10);
+
+    const query = {
+      structuredQuery: {
+        from: [{ collectionId: 'nuvizz_stops' }],
+        where: {
+          compositeFilter: {
+            op: 'AND',
+            filters: [
+              { fieldFilter: { field: { fieldPath: 'delivery_date' }, op: 'GREATER_THAN_OR_EQUAL', value: { stringValue: chunkFrom } } },
+              { fieldFilter: { field: { fieldPath: 'delivery_date' }, op: 'LESS_THAN_OR_EQUAL', value: { stringValue: chunkTo } } }
+            ]
+          }
+        },
+        limit: 5000
+      }
     };
-
-    // Load current year first, then backfill
-    const currentYear=new String(new Date().getFullYear());
-    const recentYears=years.filter(y=>y>=String(new Date().getFullYear()-1)).sort().reverse();
-    const olderYears=years.filter(y=>!recentYears.includes(y)).sort().reverse();
-
-    // Load recent years synchronously so Driver Intel has data fast
-    for(const y of recentYears) await loadYear(y);
-    // Load older years in background
-    for(const y of olderYears) loadYear(y);
-
-  }catch(e){ log(`⚠️ NuVizz history load error: ${e.message}`,'warn'); }
+    const url = `${HUB_FIRESTORE_BASE}:runQuery?key=${HUB_FIRESTORE_KEY}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query)
+    });
+    if (!resp.ok) {
+      // One bad chunk shouldn't kill the whole load
+      console.warn(`NuVizz hub chunk ${chunkFrom}..${chunkTo}: HTTP ${resp.status}`);
+      cur.setUTCDate(cur.getUTCDate() + chunkDays);
+      continue;
+    }
+    const rows = await resp.json();
+    let chunkCount = 0;
+    for (const row of rows) {
+      if (!row.document) continue;
+      const f = _fsFieldsToObj(row.document.fields);
+      if (!f.delivery_date || !f.driver_name) continue;
+      records.push([
+        f.delivery_date,                       // [0] date YYYY-MM-DD
+        '',                                    // [1] time — not stored in Firestore
+        f.driver_name || '',                   // [2] driver
+        f.ship_to || '',                       // [3] customer
+        f.city || '',                          // [4] city
+        f.zip || '',                           // [5] zip
+        f.stop_number || f.pro || ''           // [6] stop number
+      ]);
+      chunkCount++;
+    }
+    // If we hit the limit, log a warning — would mean a single 7-day chunk
+    // had >5000 stops and we'd be silently truncating
+    if (chunkCount === 5000) {
+      console.warn(`NuVizz hub chunk ${chunkFrom}..${chunkTo} hit 5000-doc cap, may be truncated`);
+    }
+    cur.setUTCDate(cur.getUTCDate() + chunkDays);
+  }
+  return records;
 }
 
 // Filter the cached preload for the audit's date range. If any requested
@@ -2448,8 +2527,29 @@ async function loadB600ForDates(dates){
   }
 }
 
-function loadNuVizzForDates(dates){
-  if(!window._nuvizzHistory) return false;
+async function loadNuVizzForDates(dates){
+  if(!window._nuvizzHistory) window._nuvizzHistory = [];
+  // v3.10.8: lazy-fetch any audit dates outside the cached preload window
+  // before filtering. Same pattern as loadB600ForDates.
+  const cachedDates = new Set(window._nuvizzHistory.map(r => r[0]));
+  const missingDates = dates.filter(d => !cachedDates.has(d));
+  if(missingDates.length){
+    const sorted = [...missingDates].sort();
+    const fromIso = sorted[0];
+    const toIso = sorted[sorted.length - 1];
+    log(`NuVizz: lazy-fetching ${missingDates.length} day(s) from hub (${fromIso} → ${toIso})...`, 'info');
+    try {
+      const fresh = await fetchNuVizzFromHub(fromIso, toIso);
+      // Append, dedup by (stopNum + date) — hub authoritative
+      const key = r => `${r[6]}|${r[0]}`;
+      const freshKeys = new Set(fresh.map(key));
+      window._nuvizzHistory = window._nuvizzHistory.filter(r => !freshKeys.has(key(r))).concat(fresh);
+      log(`NuVizz: lazy-loaded ${fresh.length} record(s) from hub`, 'ok');
+    } catch (e) {
+      log(`⚠️ NuVizz lazy load failed: ${e.message}`, 'warn');
+    }
+  }
+  // Now filter to the audit's exact dates
   const dateSet=new Set(dates);
   // records are arrays: [date, time, driver, customer, city, zip, stopNum]
   const matching=window._nuvizzHistory.filter(r=>dateSet.has(r[0]));
