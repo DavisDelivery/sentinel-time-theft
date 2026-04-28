@@ -680,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.1';
+const APP_VERSION = '3.10.2';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1281,15 +1281,20 @@ async function fetchLiveClockData(){
 // MOTIVE API: Fetch all vehicles (paginated)
 // ═══════════════════════════════════════════
 async function fetchAllVehicles(){
-  let all=[], page=1, hasMore=true;
-  while(hasMore){
+  // v3.10.2: Motive paginates via {per_page, page_no, total} — NOT next_page_url.
+  // Loop while collected < total, with length-safety + page cap as fallbacks.
+  let all=[], page=1, total=null;
+  while(page<=20){
     const resp=await fetch(`/.netlify/functions/motive-gps?action=vehicles&page_no=${page}&per_page=100`);
     if(!resp.ok)break;
     const data=await resp.json();
     const vehicles=data.vehicles||[];
-    if(vehicles.length===0){hasMore=false;break;}
+    if(vehicles.length===0)break;
     all=all.concat(vehicles);
-    if(!data.pagination?.next_page_url||vehicles.length<100)hasMore=false;
+    const pg=data.pagination||{};
+    if(typeof pg.total==='number')total=pg.total;
+    if(total!==null && all.length>=total)break;
+    if(vehicles.length<100)break; // safety net
     page++;
   }
   // Build cache: vehicleNumber -> {id, number, make, model}
@@ -1305,15 +1310,19 @@ async function fetchAllVehicles(){
 
 // Fetch all drivers from Motive's users endpoint
 async function fetchAllMotiveDrivers(){
-  let all=[], page=1, hasMore=true;
-  while(hasMore && page<=10){
+  // v3.10.2: Same pagination fix as fetchAllVehicles.
+  let all=[], page=1, total=null;
+  while(page<=20){
     const resp=await fetch(`/.netlify/functions/motive-gps?action=users&page_no=${page}&per_page=100`);
     if(!resp.ok){log(`Motive users API ${resp.status}`,'warn');break;}
     const data=await resp.json();
     const users=data.users||data.data||[];
-    if(users.length===0){hasMore=false;break;}
+    if(users.length===0)break;
     all=all.concat(users);
-    if(!data.pagination?.next_page_url||users.length<100)hasMore=false;
+    const pg=data.pagination||{};
+    if(typeof pg.total==='number')total=pg.total;
+    if(total!==null && all.length>=total)break;
+    if(users.length<100)break;
     page++;
   }
   // Filter to active drivers only.
@@ -1347,7 +1356,9 @@ async function fetchAllMotiveDrivers(){
 // ═══════════════════════════════════════════
 async function fetchDrivingPeriods(startDate, endDate){
   log(`Fetching driving_periods ${startDate} → ${endDate}...`,'hi');
-  let allPeriods=[], page=1;
+  // v3.10.2: Motive returns ~700 driving_periods/day — was capped at page 1 (100).
+  // Use {per_page, page_no, total} pagination shape with length-safety fallback.
+  let allPeriods=[], page=1, total=null;
   while(page<=20){
     let url=`/.netlify/functions/motive-gps?action=driving_periods&start_date=${startDate}&end_date=${endDate}&per_page=100&page_no=${page}`;
     const resp=await fetch(url);
@@ -1357,10 +1368,12 @@ async function fetchDrivingPeriods(startDate, endDate){
     if(periods.length===0)break;
     allPeriods=allPeriods.concat(periods);
     const pagination=data.pagination||{};
-    if(!pagination.next_page_url||periods.length<100)break;
+    if(typeof pagination.total==='number')total=pagination.total;
+    if(total!==null && allPeriods.length>=total)break;
+    if(periods.length<100)break;
     page++;
   }
-  log(`driving_periods: ${allPeriods.length} total records`,'ok');
+  log(`driving_periods: ${allPeriods.length} total records${total!==null?` (Motive total: ${total})`:''}`,'ok');
   return allPeriods;
 }
 

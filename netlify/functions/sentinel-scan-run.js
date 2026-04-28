@@ -117,7 +117,7 @@ async function motiveGet(path, params = {}) {
 
 async function fetchDrivingPeriods(startDate, endDate) {
   const all = [];
-  let page = 1;
+  let page = 1, total = null;
   while (page <= 20) {
     const data = await motiveGet('driving_periods', {
       start_date: startDate, end_date: endDate,
@@ -126,7 +126,10 @@ async function fetchDrivingPeriods(startDate, endDate) {
     const periods = data.driving_periods || [];
     if (!periods.length) break;
     all.push(...periods);
-    if (!data.pagination?.next_page_url || periods.length < 100) break;
+    const pg = data.pagination || {};
+    if (typeof pg.total === 'number') total = pg.total;
+    if (total !== null && all.length >= total) break;
+    if (periods.length < 100) break;
     page++;
   }
   return all;
@@ -134,13 +137,16 @@ async function fetchDrivingPeriods(startDate, endDate) {
 
 async function fetchMotiveUsers() {
   const all = [];
-  let page = 1;
-  while (page <= 10) {
+  let page = 1, total = null;
+  while (page <= 20) {
     const data = await motiveGet('users', { per_page: 100, page_no: page });
     const users = data.users || [];
     if (!users.length) break;
     all.push(...users);
-    if (!data.pagination?.next_page_url || users.length < 100) break;
+    const pg = data.pagination || {};
+    if (typeof pg.total === 'number') total = pg.total;
+    if (total !== null && all.length >= total) break;
+    if (users.length < 100) break;
     page++;
   }
   return all.map(u => {
