@@ -126,7 +126,7 @@ async function fetchDrivingPeriods(startDate, endDate) {
     const periods = data.driving_periods || [];
     if (!periods.length) break;
     all.push(...periods);
-    if (!data.pagination?.next || periods.length < 100) break;
+    if (!data.pagination?.next_page_url || periods.length < 100) break;
     page++;
   }
   return all;
@@ -140,7 +140,7 @@ async function fetchMotiveUsers() {
     const users = data.users || [];
     if (!users.length) break;
     all.push(...users);
-    if (!data.pagination?.next || users.length < 100) break;
+    if (!data.pagination?.next_page_url || users.length < 100) break;
     page++;
   }
   return all.map(u => {

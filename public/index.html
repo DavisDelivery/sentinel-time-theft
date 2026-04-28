@@ -680,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.9.2';
+const APP_VERSION = '3.10.0';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -753,7 +753,10 @@ const SHIFT_BUFFER_BEFORE = 30;  // minutes before clock-in to include
 const SHIFT_BUFFER_AFTER = 90;   // minutes after clock-out (preserves GPS-after-clockout detection)
 
 // ── DRIVER ROSTER (from Fleet Management) ──
-const DRIVER_ROSTER = {
+// v3.10.0: Hub-loaded at runtime from MarginIQ canonical employees collection.
+// `let` (not `const`) so loadRosterFromHub() can replace the object after init.
+// The literal below is the v3.9.2 hardcoded fallback — kept verbatim for offline/error cases.
+let DRIVER_ROSTER = {
   // Uline Shuttle — stops at Warehouse+Uline are their JOB. Almost never flag.
   'james davis':{role:'shuttle',type:'tractor',co:'davis'},
   'james':{role:'shuttle',type:'tractor',co:'davis'}, // B600 first-name only
@@ -856,6 +859,56 @@ function getDriverProfile(name) {
     if (key.includes(k.split(' ')[0]) && k.includes(key.split(' ').pop())) return v;
   }
   return { role: 'unknown', type: 'unknown', co: 'unknown' };
+}
+
+// ═══════════════════════════════════════════
+// v3.10.0: Roster loaded from Davis Data Hub (MarginIQ canonical employees)
+// Defensive merge — hub wins, hardcoded fallback kept for any drivers hub doesn't have.
+// Threshold: hub must return ≥20 entries or fall back entirely.
+// ═══════════════════════════════════════════
+const ROSTER_HUB_URL = 'https://davis-marginiq.netlify.app/api/driver-roster';
+const ROSTER_HUB_MIN_ENTRIES = 20;
+
+async function loadRosterFromHub() {
+  try {
+    const resp = await fetch(ROSTER_HUB_URL, { cache: 'no-store' });
+    if (!resp.ok) {
+      log(`⚠️ Roster hub returned HTTP ${resp.status} — using hardcoded fallback`, 'warn');
+      return;
+    }
+    const data = await resp.json();
+    if (!data.ok || !data.roster || typeof data.roster !== 'object') {
+      log(`⚠️ Roster hub response malformed — using hardcoded fallback`, 'warn');
+      return;
+    }
+    const hubAliases = Object.keys(data.roster).length;
+    if (hubAliases < ROSTER_HUB_MIN_ENTRIES) {
+      log(`⚠️ Roster hub returned only ${hubAliases} entries (need ≥${ROSTER_HUB_MIN_ENTRIES}) — using hardcoded fallback`, 'warn');
+      return;
+    }
+    // Defensive merge: hub wins, hardcoded fallback fills any gaps.
+    const merged = { ...DRIVER_ROSTER };
+    let added = 0, overridden = 0;
+    for (const [k, v] of Object.entries(data.roster)) {
+      const key = k.toLowerCase().trim();
+      if (!key || !v || typeof v !== 'object') continue;
+      // Coerce to expected shape; tolerate missing fields
+      const entry = {
+        role: v.role || 'unknown',
+        type: v.type || 'unknown',
+        co: v.co || 'unknown'
+      };
+      if (merged[key]) overridden++;
+      else added++;
+      merged[key] = entry;
+    }
+    DRIVER_ROSTER = merged;
+    const driverCount = data.driverCount || '?';
+    const aliasCount = data.aliasCount || hubAliases;
+    log(`✅ Roster: ${driverCount} drivers / ${aliasCount} aliases loaded from hub (+${added} new, ${overridden} overrode fallback)`, 'ok');
+  } catch (err) {
+    log(`⚠️ Roster hub fetch failed (${err.message}) — using hardcoded fallback`, 'warn');
+  }
 }
 
 // Role-based scoring thresholds — shuttle drivers need much more tolerance
@@ -1224,7 +1277,7 @@ async function fetchAllVehicles(){
     const vehicles=data.vehicles||[];
     if(vehicles.length===0){hasMore=false;break;}
     all=all.concat(vehicles);
-    if(!data.pagination?.next||vehicles.length<100)hasMore=false;
+    if(!data.pagination?.next_page_url||vehicles.length<100)hasMore=false;
     page++;
   }
   // Build cache: vehicleNumber -> {id, number, make, model}
@@ -1248,7 +1301,7 @@ async function fetchAllMotiveDrivers(){
     const users=data.users||data.data||[];
     if(users.length===0){hasMore=false;break;}
     all=all.concat(users);
-    if(!data.pagination?.next||users.length<100)hasMore=false;
+    if(!data.pagination?.next_page_url||users.length<100)hasMore=false;
     page++;
   }
   // Filter to drivers only (role: driver, fleet_admin etc may not be drivers)
@@ -1287,7 +1340,7 @@ async function fetchDrivingPeriods(startDate, endDate){
     if(periods.length===0)break;
     allPeriods=allPeriods.concat(periods);
     const pagination=data.pagination||{};
-    if(!pagination.next||periods.length<100)break;
+    if(!pagination.next_page_url||periods.length<100)break;
     page++;
   }
   log(`driving_periods: ${allPeriods.length} total records`,'ok');
@@ -3766,7 +3819,11 @@ document.addEventListener('DOMContentLoaded',()=>{
   const wi=document.getElementById('pickWeekInput');if(wi)wi.addEventListener('input',updateWeekHint);
   log(`SENTINEL v${APP_VERSION} — Real data only | Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng} | Shift filter: -${SHIFT_BUFFER_BEFORE}min/+${SHIFT_BUFFER_AFTER}min | Timezone: Eastern`,'hi');
   document.getElementById('versionBadge').textContent='v'+APP_VERSION;
-  Promise.all([loadB600History(), loadNuVizzHistory()]).then(()=>populateDriverPicker());
+  // v3.10.0: Load canonical roster from Davis Data Hub before history/picker init.
+  // populateDriverPicker() and downstream name-matching depend on DRIVER_ROSTER.
+  loadRosterFromHub().finally(()=>{
+    Promise.all([loadB600History(), loadNuVizzHistory()]).then(()=>populateDriverPicker());
+  });
 });
 
 // ═══════════════════════════════════════════
