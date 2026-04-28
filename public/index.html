@@ -680,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.0';
+const APP_VERSION = '3.10.1';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -859,6 +859,18 @@ function getDriverProfile(name) {
     if (key.includes(k.split(' ')[0]) && k.includes(key.split(' ').pop())) return v;
   }
   return { role: 'unknown', type: 'unknown', co: 'unknown' };
+}
+
+// v3.10.1: Boolean check — is this name in the canonical hub roster (or hardcoded fallback)?
+// Uses same matching logic as getDriverProfile so hub-tagging stays consistent with profile lookup.
+function isInHubRoster(name) {
+  if(!name) return false;
+  const key = name.toLowerCase().trim();
+  if (DRIVER_ROSTER[key]) return true;
+  for (const k of Object.keys(DRIVER_ROSTER)) {
+    if (key.includes(k.split(' ')[0]) && k.includes(key.split(' ').pop())) return true;
+  }
+  return false;
 }
 
 // ═══════════════════════════════════════════
@@ -1304,11 +1316,16 @@ async function fetchAllMotiveDrivers(){
     if(!data.pagination?.next_page_url||users.length<100)hasMore=false;
     page++;
   }
-  // Filter to drivers only (role: driver, fleet_admin etc may not be drivers)
+  // Filter to active drivers only.
+  // v3.10.1: Motive `users` endpoint returns ALL users including deactivated/terminated.
+  // status='active' is the authoritative liveness flag (verified via API: 61 active / 37 deactivated).
+  // Empty role is too permissive — only include role='driver' (admins/fleet_user excluded).
   const drivers=all.filter(u=>{
     const usr=u.user||u;
     const role=(usr.role||'').toLowerCase();
-    return role==='driver' || role==='' || (usr.driver_company_id && !role.includes('admin'));
+    const status=(usr.status||'').toLowerCase();
+    if(status && status!=='active')return false; // drop deactivated/terminated
+    return role==='driver';
   }).map(u=>{
     const usr=u.user||u;
     return {
@@ -1320,7 +1337,7 @@ async function fetchAllMotiveDrivers(){
       role: usr.role||''
     };
   }).filter(d=>d.name.length>1);
-  log(`Motive drivers: ${drivers.length} active in org (${all.length} total users)`,'info');
+  log(`Motive drivers: ${drivers.length} active in org (${all.length} total users, ${all.length-drivers.length} excluded as deactivated/non-driver)`,'info');
   return drivers;
 }
 
@@ -1470,6 +1487,7 @@ function buildDriverData(periods){
       b600Name:b600Match?.name||'',
       hasData:true,
       insufficientData:shiftMin<MIN_SHIFT_MIN && !b600Match
+      // _source/_inHub set by audit() merge step on the returned array (v3.10.1)
     };
   });
 }
@@ -1803,14 +1821,21 @@ async function runAudit(){
 
     // Step 3: Build driver data from periods
     const drivers=buildDriverData(periods);
+    // Tag everyone who came from driving_periods — they actually drove, so they're real
+    drivers.forEach(d=>{
+      d._source = 'driving';
+      d._inHub = isInHubRoster(d.name);
+    });
     log(`Built ${drivers.length} driver profiles from driving_periods`,'ok');
 
     // Step 3b: Merge in any Motive drivers that didn't show in driving_periods
     // (i.e. didn't drive that day, or yard-only, or co-driver setup)
+    // v3.10.1: Tag each merged driver with hub-roster cross-check so unknowns can be curated.
     const driversInPeriods=new Set(drivers.map(d=>d.name.toLowerCase()));
-    let added=0;
+    let added=0, addedInHub=0, addedUnknown=0;
     motiveDrivers.forEach(md=>{
       if(!md.name||driversInPeriods.has(md.name.toLowerCase()))return;
+      const inHub = isInHubRoster(md.name);
       drivers.push({
         name: md.name,
         driverId: md.id,
@@ -1822,12 +1847,19 @@ async function runAudit(){
         clockOut:null,
         truck:'',
         // Mark as no-GPS so scoring engine knows
-        _noMotiveActivity: true
+        _noMotiveActivity: true,
+        _source: 'motive_only',
+        _inHub: inHub
       });
       added++;
+      if(inHub) addedInHub++; else addedUnknown++;
     });
-    if(added>0) log(`Added ${added} drivers from Motive roster (no driving_periods that date)`,'info');
-    log(`Total drivers to audit: ${drivers.length}`,'ok');
+    if(added>0){
+      log(`Added ${added} drivers from Motive roster (no driving_periods that date): ${addedInHub} known, ${addedUnknown} ⚠️ NOT in hub roster — review`,'info');
+    }
+    // Total summary including hub-coverage breakdown
+    const totalUnknown = drivers.filter(d=>d._inHub===false).length;
+    log(`Total drivers to audit: ${drivers.length} (${drivers.length-totalUnknown} in canonical hub, ${totalUnknown} ⚠️ unknown — flagged for review)`,'ok');
 
     if(drivers.length===0){
       log('No driver data to analyze','warn');
@@ -2037,7 +2069,7 @@ function renderDriverCards(){
       <div class="dc-hd" onclick="toggleCard(this)">
         <div class="dc-rank">${String(i+1).padStart(2,'0')}</div>
         <div class="dc-info">
-          <h3>${d.name}${d.b600Matched?' <span style="color:var(--green);font-size:9px;">●B600</span>':''}${d.driverRole?` <span style="font-size:9px;color:var(--text2);font-weight:400;font-family:var(--mono);">${d.driverRole}${d.driverCo==='owner'?' (OO)':''}</span>`:''}</h3>
+          <h3>${d.name}${d.b600Matched?' <span style="color:var(--green);font-size:9px;">●B600</span>':''}${d.driverRole?` <span style="font-size:9px;color:var(--text2);font-weight:400;font-family:var(--mono);">${d.driverRole}${d.driverCo==='owner'?' (OO)':''}</span>`:''}${d._inHub===false?' <span title="This driver is not in the canonical hub roster — review and add to MarginIQ Data Hub if real, ignore if phantom" style="font-size:9px;color:var(--amber);font-weight:700;font-family:var(--mono);background:rgba(255,170,0,.12);border:1px solid rgba(255,170,0,.35);border-radius:3px;padding:1px 5px;margin-left:4px;">⚠ NOT IN HUB</span>':''}${d._source==='motive_only'?' <span title="No driving_periods that day — Motive user record only" style="font-size:9px;color:var(--text3);font-weight:400;font-family:var(--mono);margin-left:4px;">no-drive</span>':''}</h3>
           <div class="dc-meta">
             <span class="dc-tag">TRK <b>#${d.truck}</b></span>
             <span class="dc-tag">IN <b>${d.gps?.gpsClockIn||d.clockIn}</b></span>
