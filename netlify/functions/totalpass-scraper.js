@@ -151,13 +151,16 @@ async function fetchTimeclockData(startDate, endDate, env) {
     return { success: false, error: `Cannot reach B600: ${err.message}`, logs };
   }
 
-  // ── Step 2: Pull CSV export (eid=0 = All Employees) ──
+  // ── Step 2: Pull CSV export (eid=0 = All Employees, type=7 = Custom Date Range) ──
+  // type=7 is REQUIRED. Without it the B600 silently ignores from/to and dumps
+  // current-week-to-date data, even though the export looks successful (200, real
+  // CSV body). Symptom: requesting 04/10/26 returns 04/26-04/28 punches instead.
   const fromMD = toClockDate(startDate);
   const toMD = toClockDate(endDate);
-  const reportUrl = `${BASE}/report.html?rt=2&from=${fromMD}&to=${toMD}`;
+  const reportUrl = `${BASE}/report.html?rt=2&type=7&from=${fromMD}&to=${toMD}`;
   const exportUrl = `${reportUrl}&eid=0&stdexport=1`;
 
-  log(`Fetching CSV: ${fromMD} → ${toMD} (eid=0 / all employees)`);
+  log(`Fetching CSV: ${fromMD} → ${toMD} (eid=0 / all employees, type=7 / custom range)`);
   let csvText = '';
   try {
     const resp = await fetch(exportUrl, {
@@ -188,6 +191,25 @@ async function fetchTimeclockData(startDate, endDate, env) {
   // ── Step 3: Parse ──
   const records = parseCSV(csvText);
   log(`Parsed ${records.length} punch records`);
+
+  // Sanity check: if more than half the parsed dates are outside the requested
+  // window, the B600 ignored type=7 / from / to and is dumping a different scope.
+  // Fail loudly rather than silently returning wrong-week data.
+  if (records.length > 0) {
+    const winStart = startDate;
+    const winEnd = endDate;
+    const offRange = records.filter(r => r.date && (r.date < winStart || r.date > winEnd));
+    if (offRange.length > records.length / 2) {
+      const sample = [...new Set(records.slice(0, 5).map(r => r.date))].join(', ');
+      log(`⚠ B600 returned data outside requested window — ${offRange.length}/${records.length} rows off-range, sample dates: ${sample}`);
+      return {
+        success: false,
+        error: `B600 returned data outside requested window ${startDate} to ${endDate}; got dates: ${sample}. Likely missing type=7 param or session-side scope override.`,
+        logs
+      };
+    }
+  }
+
   return {
     success: true,
     records,
