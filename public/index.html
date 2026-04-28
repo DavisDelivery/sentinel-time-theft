@@ -430,9 +430,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
         <div id="stopScanResult" style="display:none;margin-top:10px;"></div>
       </div>
       <button onclick="runFleetAI()" style="background:linear-gradient(135deg,#7c3aed,#0077aa);color:#fff;border:none;border-radius:var(--radius);padding:12px 20px;cursor:pointer;font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:1px;white-space:nowrap;box-shadow:0 2px 8px rgba(124,58,237,.25);">🤖 AI FLEET<br>ANALYSIS</button>
-      <button onclick="runWeeklySync()" title="Manually pull last week's B600 punches (normally runs auto every Monday 6AM ET)" style="background:linear-gradient(135deg,#0077aa,#009ec2);color:#fff;border:none;border-radius:var(--radius);padding:12px 16px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,119,170,.25);">🔄 SYNC<br>B600</button>
     </div>
-    <div id="syncStatus" style="display:none;background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px 12px;margin-bottom:10px;font-family:var(--mono);font-size:11px;"></div>
 
     <!-- AI Fleet Output (always available) -->
     <div id="fleetAiOutput" style="display:none;background:linear-gradient(135deg,rgba(124,58,237,.08),rgba(0,119,170,.05));border:2px solid rgba(124,58,237,.25);border-radius:var(--radius);padding:16px;margin-bottom:14px;">
@@ -680,7 +678,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.8';
+const APP_VERSION = '3.10.9';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2599,28 +2597,6 @@ async function fetchNuVizzAPI(dates){
     }
   }catch(e){
     log(`NuVizz API error: ${e.message}`,'warn');
-  }
-}
-
-async function runWeeklySync(){
-  const el=document.getElementById('syncStatus');
-  el.style.display='block';
-  el.style.color='var(--energon)';
-  el.textContent='🔄 Syncing B600 (last week)... this may take 30-60s';
-  try{
-    const res=await fetch('/api/sync-b600-weekly');
-    const data=await res.json();
-    if(data.success){
-      el.style.color='var(--green)';
-      el.innerHTML=`✅ Sync complete: added <b>${data.added}</b> new punches (${data.range}). Total history: ${data.total}. Reloading page in 3s...`;
-      setTimeout(()=>location.reload(),3000);
-    } else {
-      el.style.color='var(--red)';
-      el.innerHTML=`❌ Sync failed: ${data.error||'unknown'}<br><span style="color:var(--text3);font-size:9px;">${(data.logs||[]).slice(-3).join(' · ')}</span>`;
-    }
-  }catch(e){
-    el.style.color='var(--red)';
-    el.textContent='❌ Error: '+e.message;
   }
 }
 

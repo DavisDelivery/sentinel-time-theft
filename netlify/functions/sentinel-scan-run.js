@@ -184,33 +184,165 @@ function processDriverPeriods(periods) {
   return Object.values(driverMap);
 }
 
-// ─── B600 HISTORY (loaded from public JSON via self-fetch) ────────────────────
-let _b600Cache = null;
-async function loadB600History(siteUrl) {
-  if (_b600Cache) return _b600Cache;
-  const res = await fetch(`${siteUrl}/b600-history.json`);
-  if (!res.ok) return [];
-  _b600Cache = await res.json();
-  return _b600Cache;
+// ─── DATA HUB CONFIG (v3.10.9) ────────────────────────────────────────────────
+// Server-side scan reads B600 + NuVizz from MarginIQ's Firestore directly,
+// matching the client-side cutover in v3.10.7 (B600) and v3.10.8 (NuVizz).
+// The hub is the single source of truth across both apps.
+const HUB_FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/davismarginiq/databases/(default)/documents';
+const HUB_FIRESTORE_KEY = 'AIzaSyDyRyjuiP_UD8T_2xmW2xLjvqx9RLCYCmo'; // public web key, security enforced via Firestore rules
+
+// Decode a Firestore document fields-map into a flat JS object.
+function _fsFields(fields) {
+  const out = {};
+  if (!fields) return out;
+  for (const [k, v] of Object.entries(fields)) {
+    if ('stringValue' in v) out[k] = v.stringValue;
+    else if ('doubleValue' in v) out[k] = Number(v.doubleValue);
+    else if ('integerValue' in v) out[k] = Number(v.integerValue);
+    else if ('booleanValue' in v) out[k] = v.booleanValue;
+    else if ('arrayValue' in v) out[k] = (v.arrayValue.values || []).map(x => {
+      if ('stringValue' in x) return x.stringValue;
+      if ('doubleValue' in x) return Number(x.doubleValue);
+      if ('integerValue' in x) return Number(x.integerValue);
+      if ('mapValue' in x) return _fsFields(x.mapValue.fields);
+      return null;
+    });
+    else if ('mapValue' in v) out[k] = _fsFields(v.mapValue.fields);
+  }
+  return out;
 }
 
-// ─── NUVIZZ HISTORY (loaded from yearly files) ────────────────────────────────
-let _nuvizzCache = null;
-async function loadNuvizzHistory(siteUrl, startDate, endDate) {
-  const startYear = startDate.slice(0, 4);
-  const endYear = endDate.slice(0, 4);
-  if (!_nuvizzCache) _nuvizzCache = [];
-  const years = [...new Set([startYear, endYear])];
-  const all = [];
-  for (const year of years) {
-    const res = await fetch(`${siteUrl}/nuvizz-${year}.json`);
-    if (!res.ok) continue;
-    const data = await res.json();
-    // Remap 5-field slimmed format to full
-    data.forEach(r => {
-      const rec = r.length === 5 ? [r[0], r[1], r[2], '', r[3], '', r[4]] : r;
-      all.push(rec);
+// ─── B600 HISTORY (loaded from MarginIQ Data Hub Firestore) ──────────────────
+let _b600Cache = null;
+async function loadB600History(_siteUrl) {
+  // _siteUrl param kept for backward compat with caller; ignored now.
+  if (_b600Cache) return _b600Cache;
+
+  // Pull last 120 days of timeclock_daily docs. Same default window as the
+  // browser side. Server-side scans typically cover a few specific days, so
+  // anything older could be lazy-loaded but for now we just return what fits
+  // in the preload window.
+  const today = new Date();
+  const earliest = new Date(today);
+  earliest.setDate(today.getDate() - 120);
+  const fromIso = earliest.toISOString().slice(0, 10);
+  const toIso = today.toISOString().slice(0, 10);
+
+  const query = {
+    structuredQuery: {
+      from: [{ collectionId: 'timeclock_daily' }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: [
+            { fieldFilter: { field: { fieldPath: 'date' }, op: 'GREATER_THAN_OR_EQUAL', value: { stringValue: fromIso } } },
+            { fieldFilter: { field: { fieldPath: 'date' }, op: 'LESS_THAN_OR_EQUAL', value: { stringValue: toIso } } }
+          ]
+        }
+      },
+      limit: 5000
+    }
+  };
+  try {
+    const url = `${HUB_FIRESTORE_BASE}:runQuery?key=${HUB_FIRESTORE_KEY}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query)
     });
+    if (!res.ok) {
+      console.error(`B600 hub query failed: HTTP ${res.status}`);
+      _b600Cache = [];
+      return _b600Cache;
+    }
+    const rows = await res.json();
+    const records = [];
+    for (const row of rows) {
+      if (!row.document) continue;
+      const f = _fsFields(row.document.fields);
+      if (!f.date || !f.display_name) continue;
+      records.push({
+        name: f.display_name,
+        clockIn: f.clock_in || '',
+        clockOut: f.clock_out || '',
+        date: f.date,
+      });
+    }
+    _b600Cache = records;
+    return records;
+  } catch (e) {
+    console.error('B600 hub load error:', e);
+    _b600Cache = [];
+    return _b600Cache;
+  }
+}
+
+// ─── NUVIZZ HISTORY (loaded from MarginIQ Data Hub Firestore) ───────────────
+async function loadNuvizzHistory(_siteUrl, startDate, endDate) {
+  // _siteUrl ignored (legacy param); query the hub directly.
+  // Returns same legacy 7-field array format the rest of the function expects:
+  //   [date, time, driver, customer, city, zip, stopNum]
+  // Time portion is "" since Firestore stores date-only delivery_date.
+  const all = [];
+  // Fetch in 7-day chunks to stay under the 5000-doc/runQuery limit
+  // (NuVizz can hit ~500 stops/day, so 7×500 = ~3500 fits comfortably).
+  const start = new Date(startDate + 'T00:00:00Z');
+  const end = new Date(endDate + 'T00:00:00Z');
+  const chunkDays = 7;
+  let cur = new Date(start);
+  while (cur <= end) {
+    const chunkEnd = new Date(cur);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + chunkDays - 1);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+    const fromIso = cur.toISOString().slice(0, 10);
+    const toIso = chunkEnd.toISOString().slice(0, 10);
+
+    const query = {
+      structuredQuery: {
+        from: [{ collectionId: 'nuvizz_stops' }],
+        where: {
+          compositeFilter: {
+            op: 'AND',
+            filters: [
+              { fieldFilter: { field: { fieldPath: 'delivery_date' }, op: 'GREATER_THAN_OR_EQUAL', value: { stringValue: fromIso } } },
+              { fieldFilter: { field: { fieldPath: 'delivery_date' }, op: 'LESS_THAN_OR_EQUAL', value: { stringValue: toIso } } }
+            ]
+          }
+        },
+        limit: 5000
+      }
+    };
+    try {
+      const url = `${HUB_FIRESTORE_BASE}:runQuery?key=${HUB_FIRESTORE_KEY}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(query)
+      });
+      if (!res.ok) {
+        console.warn(`NuVizz chunk ${fromIso}..${toIso}: HTTP ${res.status}`);
+        cur.setUTCDate(cur.getUTCDate() + chunkDays);
+        continue;
+      }
+      const rows = await res.json();
+      for (const row of rows) {
+        if (!row.document) continue;
+        const f = _fsFields(row.document.fields);
+        if (!f.delivery_date || !f.driver_name) continue;
+        all.push([
+          f.delivery_date,
+          '',
+          f.driver_name || '',
+          f.ship_to || '',
+          f.city || '',
+          f.zip || '',
+          f.stop_number || f.pro || ''
+        ]);
+      }
+    } catch (e) {
+      console.warn(`NuVizz hub chunk error ${fromIso}..${toIso}:`, e.message);
+    }
+    cur.setUTCDate(cur.getUTCDate() + chunkDays);
   }
   return all;
 }

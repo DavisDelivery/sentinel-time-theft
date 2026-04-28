@@ -213,7 +213,7 @@ async function fetchTimeclockData(startDate, endDate, env) {
   return {
     success: true,
     records,
-    csv: csvText, // keep raw CSV available for sync-b600-weekly
+    csv: csvText, // keep raw CSV available for client-side parsers
     date: startDate,
     endDate,
     source: 'B600 Live',
