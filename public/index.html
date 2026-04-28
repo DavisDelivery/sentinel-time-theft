@@ -680,7 +680,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.4';
+const APP_VERSION = '3.10.5';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1262,7 +1262,7 @@ async function fetchLiveClockData(){
   const date=document.getElementById('auditDate').value||new Date().toISOString().split('T')[0];
   log(`Attempting B600 tunnel for ${date}...`,'hi');setStatus('running');
   try{
-    const resp=await fetch(`/.netlify/functions/totalpass-scraper?date=${date}`);
+    const resp=await fetch(`/api/totalpass-scraper?date=${date}`);
     const data=await resp.json();
     if(data.logs)data.logs.forEach(l=>log(`[B600] ${l}`,'info'));
     if(data.success&&data.records&&data.records.length>0){
