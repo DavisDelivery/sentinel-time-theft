@@ -678,7 +678,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.9';
+const APP_VERSION = '3.10.10';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1454,8 +1454,18 @@ function buildDriverData(periods){
     const clockOut=latest?`${String(latest.getHours()).padStart(2,'0')}:${String(latest.getMinutes()).padStart(2,'0')}`:'';
 
     const vEntries=Object.entries(d.vehicles);
+    // v3.10.10: track ALL trucks the driver touched on this date, not just
+    // the first one. Same-day truck swaps (morning truck breaks down, drives
+    // a different one in afternoon) used to silently drop the second truck's
+    // GPS data, leaving incomplete time/motion math.
+    //
+    // Existing single-truck consumers see the same `truck` and `vehicleId`
+    // fields (= first truck encountered, for label/cache compatibility), and
+    // a new `allVehicles` array carries every {truck, vehicleId} pair so the
+    // GPS fetch loop can pull all of them and merge.
     const truck=vEntries.length?vEntries[0][0]:'';
     const vehicleId=vEntries.length?vEntries[0][1]:'';
+    const allVehicles=vEntries.map(([t,id])=>({truck:t, vehicleId:id}));
 
     const totalDriveSec=d.periods.reduce((sum,p)=>{
       const dur=p.duration_seconds||p.duration||0;
@@ -1490,6 +1500,7 @@ function buildDriverData(periods){
 
     return{
       name:d.name, driverId:d.driverId, truck, vehicleId,
+      allVehicles,                         // v3.10.10: all {truck, vehicleId} pairs for multi-truck days
       clockIn:derivedIn, clockOut:derivedOut,
       gpsClockIn, gpsClockOut,  // original Motive times for cross-reference
       drivingMin:totalDriveSec/60,
@@ -1890,29 +1901,66 @@ async function runAudit(){
       let gps=null;
 
       try{
-        if(d.vehicleId){
-          log(`[${i+1}/${drivers.length}] ${d.name} → truck #${d.truck} (vID: ${d.vehicleId})...`,'info');
-          const locs=await fetchVehicleLocations(d.vehicleId, startDate, endDate);
-          if(locs.length>0){
-            gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut), d.name);
-            if(gps){
-              log(`✅ ${d.name}: ${gps._filteredGpsPoints} pts (${gps._droppedGpsPoints} dropped), ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`,'ok');
+        // v3.10.10: support same-day multi-truck drivers. d.allVehicles holds
+        // every {truck, vehicleId} pair the driver touched on this date. We
+        // fetch GPS for each truck independently and merge into a single
+        // sorted timeline before processGPSData. This produces correct
+        // total miles, correct stop detection, and correct idle math even
+        // when the driver swapped trucks mid-day (morning truck broke
+        // down, afternoon truck took over, etc.).
+        //
+        // Single-truck case (the vast majority): allVehicles has 1 entry,
+        // behaves identically to the prior single-fetch path.
+        const vehiclesToFetch = (d.allVehicles && d.allVehicles.length)
+          ? d.allVehicles.filter(v => v.vehicleId)  // primary: use Motive IDs from periods
+          : [];
+        // Fallback: vehicleCache lookup if vehicleId is missing but we know the truck#
+        if (vehiclesToFetch.length === 0 && d.truck && vehicleCache[d.truck]) {
+          vehiclesToFetch.push({ truck: d.truck, vehicleId: vehicleCache[d.truck].id });
+        }
+
+        if (vehiclesToFetch.length > 1) {
+          // Multi-truck day — log explicitly so it's visible in the audit log
+          const truckList = vehiclesToFetch.map(v => `#${v.truck}`).join(', ');
+          log(`[${i+1}/${drivers.length}] ${d.name} → ${vehiclesToFetch.length} trucks (${truckList}) — fetching all and merging`, 'info');
+          let allLocs = [];
+          for (const v of vehiclesToFetch) {
+            const partial = await fetchVehicleLocations(v.vehicleId, startDate, endDate);
+            if (partial.length > 0) {
+              log(`   truck #${v.truck}: ${partial.length} GPS points`, 'info');
+              allLocs = allLocs.concat(partial);
+            }
+            await delay(150); // rate limit between fetches
+          }
+          // Sort merged points by timestamp so processGPSData sees a
+          // continuous chronological stream regardless of which truck
+          // produced each point. The driver's actual workday IS continuous
+          // across trucks, so this is the semantically correct merge.
+          allLocs.sort((a, b) => {
+            const ta = new Date(a.located_at || a.timestamp || a.recorded_at).getTime();
+            const tb = new Date(b.located_at || b.timestamp || b.recorded_at).getTime();
+            return ta - tb;
+          });
+          if (allLocs.length > 0) {
+            gps = processGPSData(allLocs, t2m(d.clockIn), t2m(d.clockOut), d.name);
+            if (gps) {
+              gps._multiTruck = true;
+              gps._trucks = vehiclesToFetch.map(v => v.truck);
+              log(`✅ ${d.name}: merged ${gps._filteredGpsPoints} pts across ${vehiclesToFetch.length} trucks (${gps._droppedGpsPoints} dropped), ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`, 'ok');
               gpsOk++;
-              totalDropped+=gps._droppedGpsPoints;
+              totalDropped += gps._droppedGpsPoints;
             }
           }
-        } else if(d.truck){
-          const cached=vehicleCache[d.truck];
-          if(cached){
-            log(`[${i+1}/${drivers.length}] ${d.name} → truck #${d.truck} (cache)...`,'info');
-            const locs=await fetchVehicleLocations(cached.id, startDate, endDate);
-            if(locs.length>0){
-              gps=processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut), d.name);
-              if(gps){
-                log(`✅ ${d.name}: ${gps._filteredGpsPoints} pts via cache (${gps._droppedGpsPoints} dropped)`,'ok');
-                gpsOk++;
-                totalDropped+=gps._droppedGpsPoints;
-              }
+        } else if (vehiclesToFetch.length === 1) {
+          const v = vehiclesToFetch[0];
+          log(`[${i+1}/${drivers.length}] ${d.name} → truck #${v.truck} (vID: ${v.vehicleId})...`, 'info');
+          const locs = await fetchVehicleLocations(v.vehicleId, startDate, endDate);
+          if (locs.length > 0) {
+            gps = processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut), d.name);
+            if (gps) {
+              log(`✅ ${d.name}: ${gps._filteredGpsPoints} pts (${gps._droppedGpsPoints} dropped), ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`, 'ok');
+              gpsOk++;
+              totalDropped += gps._droppedGpsPoints;
             }
           }
         }
@@ -2085,7 +2133,7 @@ function renderDriverCards(){
         <div class="dc-info">
           <h3>${d.name}${d.b600Matched?' <span style="color:var(--green);font-size:9px;">●B600</span>':''}${d.driverRole?` <span style="font-size:9px;color:var(--text2);font-weight:400;font-family:var(--mono);">${d.driverRole}${d.driverCo==='owner'?' (OO)':''}</span>`:''}${d._inHub===false?' <span title="This driver is not in the canonical hub roster — review and add to MarginIQ Data Hub if real, ignore if phantom" style="font-size:9px;color:var(--amber);font-weight:700;font-family:var(--mono);background:rgba(255,170,0,.12);border:1px solid rgba(255,170,0,.35);border-radius:3px;padding:1px 5px;margin-left:4px;">⚠ NOT IN HUB</span>':''}${d._source==='motive_only'?' <span title="No driving_periods that day — Motive user record only" style="font-size:9px;color:var(--text3);font-weight:400;font-family:var(--mono);margin-left:4px;">no-drive</span>':''}</h3>
           <div class="dc-meta">
-            <span class="dc-tag">TRK <b>#${d.truck}</b></span>
+            ${d.gps?._multiTruck?`<span class="dc-tag" title="Driver swapped trucks during this shift — GPS merged across all trucks below" style="background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.4);color:#b794ff;">TRK <b>#${d.gps._trucks.join(', #')}</b> 🔀</span>`:`<span class="dc-tag">TRK <b>#${d.truck}</b></span>`}
             <span class="dc-tag">IN <b>${d.gps?.gpsClockIn||d.clockIn}</b></span>
             <span class="dc-tag">OUT <b>${d.gps?.gpsClockOut||d.clockOut}</b></span>
             <span class="dc-tag">ENGINE <b>${(d.gps.engineOnMin/60).toFixed(1)}h</b></span>
