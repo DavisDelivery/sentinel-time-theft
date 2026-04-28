@@ -1,7 +1,24 @@
 // netlify/functions/totalpass-scraper.js
-// Scrapes the TotalPass B600 web interface to pull punch data for a given date
-// The B600 has a built-in web UI accessible via Cloudflare Tunnel — no official API exists
-// We log in via form POST, then hit the Reports/Timecard CSV export endpoint
+// Scrapes the TotalPass B600 web interface to pull punch data for a given date.
+//
+// v2 (Apr 2026 rewrite — Chad's session): Previous version blindly tried 6 wrong
+// URLs and returned 0 records. Reverse-engineered the actual login + export flow:
+//
+//   Login:    POST /login.html  with body: username=admin&password=...&buttonClicked=Submit
+//             (NOT just username/password — the buttonClicked=Submit field is required)
+//             Returns 301 + Set-Cookie: _appwebSessionId_=...
+//
+//   Export:   GET /report.html?rt=2&from=MM/DD/YY&to=MM/DD/YY&eid=0&stdexport=1
+//             rt=2     → Timecard Report
+//             eid=0    → ALL employees (eid=ss returns just one — the previously selected one)
+//             stdexport=1 → standard CSV download (vs export=1 which is "extended")
+//             Date format MUST be MM/DD/YY (2-digit year)
+//             Referer header must be set or the export gates to 0 bytes
+//
+// CSV columns returned:
+//   Display Name, Display ID, Payroll ID, Date, In Day, In Time, Out Day, Out Time,
+//   Department, Dept. Code, Lunch, ADJ, REG, OT1, OT2, VAC, SICK, PER, HOL, Total,
+//   Input, In Flags, Out Flags, In Note, Out Note
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -9,132 +26,177 @@ const CORS = {
   'Content-Type': 'application/json'
 };
 
-async function fetchTimeclockData(targetDate, env) {
-  const CLOCK_IP = env.get('TOTALPASS_IP') || 'b600.atlantafreightquotes.com';
+// Convert YYYY-MM-DD → MM/DD/YY (TotalPass requires 2-digit year format)
+function toClockDate(isoDate) {
+  const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return isoDate; // pass through unrecognized formats
+  return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
+}
+
+// Parse the standard TotalPass CSV.
+// Quoted fields with commas, CRLF line endings, time format like "06:33a" / "11:34p".
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.length);
+  if (lines.length < 2) return [];
+
+  // Tokenize one row respecting quoted fields
+  function tokenize(line) {
+    const cells = [];
+    let cur = '', inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQuote = !inQuote; continue; }
+      if (c === ',' && !inQuote) { cells.push(cur); cur = ''; continue; }
+      cur += c;
+    }
+    cells.push(cur);
+    return cells;
+  }
+
+  const header = tokenize(lines[0]).map(h => h.trim().toLowerCase());
+  const idx = (key) => header.findIndex(h => h === key);
+  const iName    = idx('display name');
+  const iDispId  = idx('display id');
+  const iPayId   = idx('payroll id');
+  const iDate    = idx('date');
+  const iInTime  = idx('in time');
+  const iOutTime = idx('out time');
+  const iTotal   = idx('total');
+
+  // Convert "06:33a" / "11:34p" → "06:33" / "23:34" (24h, used by SENTINEL t2m())
+  function to24h(s) {
+    if (!s) return '';
+    const m = s.match(/^(\d{1,2}):(\d{2})\s*([ap])$/i);
+    if (!m) return s; // already 24h or unrecognized
+    let hh = parseInt(m[1], 10);
+    const mm = m[2];
+    const ap = m[3].toLowerCase();
+    if (ap === 'p' && hh < 12) hh += 12;
+    if (ap === 'a' && hh === 12) hh = 0;
+    return `${String(hh).padStart(2,'0')}:${mm}`;
+  }
+
+  // Convert MM/DD/YY → YYYY-MM-DD
+  function isoDate(d) {
+    if (!d) return '';
+    const m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (!m) return d;
+    let [_, mo, da, yr] = m;
+    if (yr.length === 2) yr = '20' + yr;
+    return `${yr}-${String(mo).padStart(2,'0')}-${String(da).padStart(2,'0')}`;
+  }
+
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = tokenize(lines[i]);
+    const name = (c[iName] || '').trim();
+    const date = isoDate((c[iDate] || '').trim());
+    const inT  = to24h((c[iInTime] || '').trim());
+    const outT = to24h((c[iOutTime] || '').trim());
+    if (!name || !date) continue;
+    out.push({
+      name,
+      display_id: (c[iDispId] || '').trim(),
+      payroll_id: (c[iPayId] || '').trim(),
+      date,
+      clock_in: inT,
+      clock_out: outT,
+      total_hrs: parseFloat(c[iTotal] || '0') || 0
+    });
+  }
+  return out;
+}
+
+async function fetchTimeclockData(startDate, endDate, env) {
+  const CLOCK_HOST = env.get('TOTALPASS_IP') || 'b600.atlantafreightquotes.com';
   const CLOCK_PASSWORD = env.get('TOTALPASS_PASSWORD') || 'admin12345';
-  const CLOCK_PORT = parseInt(env.get('TOTALPASS_PORT') || '443');
-  const IS_TUNNEL = CLOCK_IP.includes('.') && !CLOCK_IP.match(/^\d+\.\d+\.\d+\.\d+$/);
-  const EFFECTIVE_PORT = IS_TUNNEL ? 443 : CLOCK_PORT;
-  const PROTO = (IS_TUNNEL || EFFECTIVE_PORT === 443) ? 'https' : 'http';
-  const BASE = `${PROTO}://${CLOCK_IP}${EFFECTIVE_PORT !== 443 && EFFECTIVE_PORT !== 80 ? ':' + EFFECTIVE_PORT : ''}`;
+  const CLOCK_USERNAME = env.get('TOTALPASS_USERNAME') || 'admin';
+  const IS_TUNNEL = !CLOCK_HOST.match(/^\d+\.\d+\.\d+\.\d+$/);
+  const PROTO = IS_TUNNEL ? 'https' : 'http';
+  const BASE = `${PROTO}://${CLOCK_HOST}`;
 
   const logs = [];
   function log(msg) { logs.push(msg); console.log(`[B600] ${msg}`); }
 
-  log(`Connecting to ${CLOCK_IP}:${EFFECTIVE_PORT} (tunnel:${IS_TUNNEL})`);
+  log(`Connecting to ${CLOCK_HOST} (tunnel:${IS_TUNNEL})`);
 
-  // Step 1: Login
+  // ── Step 1: Login (POST /login.html with buttonClicked=Submit) ──
   let cookie = '';
   try {
-    const loginResp = await fetch(`${BASE}/login`, {
+    const body = `username=${encodeURIComponent(CLOCK_USERNAME)}&password=${encodeURIComponent(CLOCK_PASSWORD)}&buttonClicked=Submit`;
+    const loginResp = await fetch(`${BASE}/login.html`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `username=admin&password=${encodeURIComponent(CLOCK_PASSWORD)}`,
+      body,
       redirect: 'manual'
     });
-
-    log(`Login response: ${loginResp.status}`);
+    log(`Login: HTTP ${loginResp.status}`);
+    // Successful login is 301 → /index.html with Set-Cookie: _appwebSessionId_
     const setCookies = loginResp.headers.getSetCookie?.() || [];
     cookie = setCookies.map(c => c.split(';')[0]).join('; ');
-
-    if (loginResp.status === 302 || loginResp.status === 200) {
-      log('Login successful');
-    } else {
-      log(`Login returned ${loginResp.status}`);
+    if (!cookie) {
+      // Fallback: try plain Set-Cookie header (some runtimes)
+      const sc = loginResp.headers.get('set-cookie');
+      if (sc) cookie = sc.split(',').map(s => s.split(';')[0].trim()).join('; ');
+    }
+    if (!cookie) {
+      log('No session cookie returned — login may have failed');
+      return { success: false, error: 'B600 login: no session cookie returned', logs };
+    }
+    if (loginResp.status !== 301 && loginResp.status !== 302 && loginResp.status !== 200) {
+      log(`Unexpected login status ${loginResp.status}`);
     }
   } catch (err) {
-    log(`Login failed: ${err.message}`);
+    log(`Login error: ${err.message}`);
     return { success: false, error: `Cannot reach B600: ${err.message}`, logs };
   }
 
-  // Step 2: Try to access report/export pages
-  const reportPaths = [
-    '/reports/timecard',
-    '/reports/payroll',
-    '/reports',
-    '/export',
-    '/api/punches',
-    '/api/timecard'
-  ];
+  // ── Step 2: Pull CSV export (eid=0 = All Employees) ──
+  const fromMD = toClockDate(startDate);
+  const toMD = toClockDate(endDate);
+  const reportUrl = `${BASE}/report.html?rt=2&from=${fromMD}&to=${toMD}`;
+  const exportUrl = `${reportUrl}&eid=0&stdexport=1`;
 
-  const customPath = env.get('TOTALPASS_EXPORT_PATH');
-  if (customPath) reportPaths.unshift(customPath);
-
-  for (const path of reportPaths) {
-    try {
-      log(`Trying ${path}...`);
-      const sep = path.includes('?') ? '&' : '?';
-      const resp = await fetch(`${BASE}${path}${sep}date=${targetDate}`, {
-        headers: { 'Cookie': cookie },
-        redirect: 'follow'
-      });
-
-      const body = await resp.text();
-      log(`${path}: HTTP ${resp.status} (${body.length} bytes)`);
-
-      // If we get CSV data, parse it
-      if (body.includes(',') && (body.includes('Name') || body.includes('Employee') || body.includes('In Time'))) {
-        log('Found CSV-like data!');
-        const records = parseCSV(body);
-        if (records.length > 0) {
-          return { success: true, records, date: targetDate, source: 'B600 Live', logs };
-        }
-      }
-
-      // If HTML with table, try to parse table
-      if (body.includes('<table') && body.includes('<tr')) {
-        log('Found HTML table, attempting parse...');
-        const records = parseHTMLTable(body);
-        if (records.length > 0) {
-          return { success: true, records, date: targetDate, source: 'B600 Live (HTML)', logs };
-        }
-      }
-    } catch (err) {
-      log(`${path}: ${err.message}`);
+  log(`Fetching CSV: ${fromMD} → ${toMD} (eid=0 / all employees)`);
+  let csvText = '';
+  try {
+    const resp = await fetch(exportUrl, {
+      headers: {
+        'Cookie': cookie,
+        'Referer': reportUrl,
+        'User-Agent': 'Mozilla/5.0 SENTINEL-B600-Scraper'
+      },
+      redirect: 'follow'
+    });
+    log(`CSV: HTTP ${resp.status}, content-type=${resp.headers.get('content-type') || 'none'}`);
+    csvText = await resp.text();
+    log(`CSV body: ${csvText.length} bytes`);
+    if (resp.status !== 200) {
+      return { success: false, error: `CSV export returned HTTP ${resp.status}`, logs };
     }
+  } catch (err) {
+    log(`CSV fetch error: ${err.message}`);
+    return { success: false, error: `CSV fetch failed: ${err.message}`, logs };
   }
 
+  // Empty body = no records in date range (not an error — just no punches)
+  if (!csvText.trim()) {
+    log('CSV body is empty — no punches in date range');
+    return { success: true, records: [], date: startDate, source: 'B600 Live (empty)', logs };
+  }
+
+  // ── Step 3: Parse ──
+  const records = parseCSV(csvText);
+  log(`Parsed ${records.length} punch records`);
   return {
-    success: false,
-    error: 'Could not find export data — upload CSV manually from B600 web UI',
-    logs,
-    hint: 'Go to http://192.168.20.94 → Reports → Export CSV, then upload to SENTINEL',
-    tried_paths: reportPaths
+    success: true,
+    records,
+    csv: csvText, // keep raw CSV available for sync-b600-weekly
+    date: startDate,
+    endDate,
+    source: 'B600 Live',
+    logs
   };
-}
-
-function parseCSV(text) {
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
-  return lines.slice(1).map(line => {
-    const vals = line.split(',').map(v => v.trim().replace(/"/g, ''));
-    const obj = {};
-    headers.forEach((h, i) => obj[h] = vals[i] || '');
-    return obj;
-  }).filter(r => r.name || r.employee || r['display name']);
-}
-
-function parseHTMLTable(html) {
-  const rows = [];
-  const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  const tdRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
-  let match;
-  while ((match = trRegex.exec(html)) !== null) {
-    const cells = [];
-    let cellMatch;
-    while ((cellMatch = tdRegex.exec(match[1])) !== null) {
-      cells.push(cellMatch[1].replace(/<[^>]+>/g, '').trim());
-    }
-    if (cells.length >= 3) rows.push(cells);
-  }
-  if (rows.length < 2) return [];
-  const headers = rows[0].map(h => h.toLowerCase());
-  return rows.slice(1).map(r => {
-    const obj = {};
-    headers.forEach((h, i) => obj[h] = r[i] || '');
-    return obj;
-  });
 }
 
 // ─── HANDLER ──────────────────────────────────────────────────────────────────
@@ -145,12 +207,15 @@ export default async (req) => {
   }
 
   const url = new URL(req.url);
-  const targetDate = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
+  // Accept either ?date=YYYY-MM-DD (single day) or ?startDate=&endDate= (range)
+  const single = url.searchParams.get('date');
+  const startDate = url.searchParams.get('startDate') || single || new Date().toISOString().split('T')[0];
+  const endDate = url.searchParams.get('endDate') || single || startDate;
 
-  console.log(`[Sentinel] TotalPass scrape for: ${targetDate}`);
+  console.log(`[Sentinel] TotalPass scrape: ${startDate} → ${endDate}`);
 
   try {
-    const result = await fetchTimeclockData(targetDate, Netlify.env);
+    const result = await fetchTimeclockData(startDate, endDate, Netlify.env);
     return new Response(JSON.stringify(result), {
       status: result.success ? 200 : 503,
       headers: CORS
@@ -162,4 +227,8 @@ export default async (req) => {
       headers: CORS
     });
   }
+};
+
+export const config = {
+  path: '/api/totalpass-scraper'
 };
