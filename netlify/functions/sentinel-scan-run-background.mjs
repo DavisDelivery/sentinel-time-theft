@@ -175,6 +175,9 @@ async function fetchDrivingPeriods(startDate, endDate, motiveUsers, onProgress) 
 }
 
 // ─── GPS PROCESSING ───────────────────────────────────────────────────────────
+// Aggregates driving_periods by driver and captures the full Motive metadata
+// (driver IDs, every vehicle they touched that day, raw fields per period) so
+// the UI can show every input we used for scoring.
 function processDriverPeriods(periods) {
   const driverMap = {};
   periods.forEach(p => {
@@ -186,17 +189,62 @@ function processDriverPeriods(periods) {
     if (!name || name.length < 2) return;
     const key = name.toLowerCase();
     if (!driverMap[key]) {
-      driverMap[key] = { name, periods: [], totalEngineMin: 0, totalMiles: 0, vehicle: vehicle.number || '' };
+      driverMap[key] = {
+        name,
+        // Motive driver record
+        motiveDriver: {
+          id: driver.id || null,
+          first_name: driver.first_name || '',
+          last_name: driver.last_name || '',
+          username: driver.username || '',
+          email: driver.email || '',
+          role: driver.role || '',
+          status: driver.status || ''
+        },
+        // Every vehicle this driver touched on this date
+        vehiclesUsed: {},   // keyed by vehicle.id → {id, number, make, model, year}
+        periods: [],
+        totalEngineMin: 0,
+        totalMiles: 0,
+        vehicle: vehicle.number || '' // primary truck (first one seen) for display
+      };
     }
     const dur = (dp.duration_seconds || 0) / 60;
     const miles = dp.distance_miles || 0;
     driverMap[key].totalEngineMin += dur;
     driverMap[key].totalMiles += miles;
+
+    // Track this vehicle if we haven't seen it yet
+    if (vehicle.id && !driverMap[key].vehiclesUsed[vehicle.id]) {
+      driverMap[key].vehiclesUsed[vehicle.id] = {
+        id: vehicle.id,
+        number: vehicle.number || '',
+        make: vehicle.make || '',
+        model: vehicle.model || '',
+        year: vehicle.year || null,
+        vin: vehicle.vin || ''
+      };
+    }
+
     driverMap[key].periods.push({
       start: dp.start_time || '',
       end: dp.end_time || '',
-      dur, miles,
-      type: dp.driving_period_type || ''
+      dur,
+      miles,
+      type: dp.driving_period_type || '',
+      // Per-period vehicle (in case the driver swapped trucks mid-day)
+      vehicleId: vehicle.id || null,
+      vehicleNumber: vehicle.number || '',
+      // Location data Motive returns when available
+      startLat: dp.start_location?.lat || null,
+      startLon: dp.start_location?.lon || null,
+      startAddr: dp.start_location?.description || dp.start_location?.address || '',
+      endLat: dp.end_location?.lat || null,
+      endLon: dp.end_location?.lon || null,
+      endAddr: dp.end_location?.description || dp.end_location?.address || '',
+      // Speed if present
+      maxSpeedMph: dp.max_speed_mph || null,
+      avgSpeedMph: dp.avg_speed_mph || null
     });
     if (!driverMap[key].vehicle && vehicle.number) driverMap[key].vehicle = vehicle.number;
   });
@@ -321,10 +369,12 @@ async function loadNuvizzHistory(_siteUrl, startDate, endDate) {
 
 // ─── SCORING ──────────────────────────────────────────────────────────────────
 function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
-  const { name, totalEngineMin, totalMiles, periods, vehicle } = driverData;
+  const { name, totalEngineMin, totalMiles, periods, vehicle, motiveDriver, vehiclesUsed } = driverData;
   const profile = getProfile(name);
   const wage = WAGES[profile.type] || WAGES.default;
   const canonical = toCanonical(name);
+  const rosterKey = name.toLowerCase().trim();
+  const inRoster = rosterKey in DRIVER_ROSTER;
 
   const b600 = b600History.find(r => {
     if (r.date !== scanDate) return false;
@@ -368,9 +418,20 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
   let stolenMin = 0;
 
   const isShuttle = profile.role === 'shuttle' || profile.role === 'loadshift';
-  const lateStartThresh = isShuttle ? 90 : 45;
-  const earlyStopThresh = isShuttle ? 60 : 30;
-  const engineGapThresh = isShuttle ? 120 : 75;
+  const thresholds = {
+    lateStartMin: isShuttle ? 90 : 45,
+    earlyStopMin: isShuttle ? 60 : 30,
+    engineGapMin: isShuttle ? 120 : 75,
+    velocityFloorMph: 8,
+    stopsPerHrMin: 1.5,
+    b600GpsClockInGapMin: 30,
+    riskMediumScore: 25,
+    riskHighScore: 50,
+    riskCriticalScore: 80
+  };
+  const lateStartThresh = thresholds.lateStartMin;
+  const earlyStopThresh = thresholds.earlyStopMin;
+  const engineGapThresh = thresholds.engineGapMin;
 
   if (b600 && gpsClockIn && lateStart > 30) {
     const pts = 30; score += pts; stolenMin += lateStart - 30;
@@ -458,15 +519,96 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
       firstMovement:  gpsClockIn,
       lastMovement:   gpsClockOut,
     },
-    // Raw Motive driving_periods for this driver+date — lets the UI verify
-    // we're not making numbers up. Each entry is what Motive returned: start,
-    // end, duration_minutes, distance_miles, vehicle, period type.
+    // Comprehensive `inputs` object — every raw value that fed into scoring.
+    // The UI uses this to surface "why this driver, why this score" so the
+    // operator can audit Sentinel against the source of truth (Motive + B600
+    // + NuVizz + roster).
+    inputs: {
+      // ── Motive driver assignment ──
+      motive: {
+        driverId: motiveDriver?.id || null,
+        firstName: motiveDriver?.first_name || '',
+        lastName: motiveDriver?.last_name || '',
+        username: motiveDriver?.username || '',
+        email: motiveDriver?.email || '',
+        role: motiveDriver?.role || '',
+        status: motiveDriver?.status || '',
+        // Every truck this driver touched on this date
+        vehicles: Object.values(vehiclesUsed || {}),
+        primaryTruck: vehicle || ''
+      },
+      // ── Roster lookup ──
+      roster: {
+        rawNameFromMotive: name,
+        rosterKey: rosterKey,
+        matchedInRoster: inRoster,
+        rosterEntry: inRoster ? DRIVER_ROSTER[rosterKey] : null,
+        canonicalName: canonical,
+        canonicalSource: CANONICAL[rosterKey] ? 'canonical-map' : 'auto-titlecase',
+        derivedRole: profile.role,
+        derivedType: profile.type,
+        wageRate: wage
+      },
+      // ── B600 punch (the clock-in/out we used) ──
+      b600: b600 ? {
+        matchedRecordName: b600.name,
+        clockIn: b600.clockIn,
+        clockOut: b600.clockOut,
+        date: b600.date,
+        clockInMinutes: t2m(b600.clockIn),
+        clockOutMinutes: t2m(b600.clockOut),
+        shiftMinutes: t2m(b600.clockOut) - t2m(b600.clockIn)
+      } : { matched: false, note: 'No B600 punch matched — used GPS first/last as fallback' },
+      // ── NuVizz stops (manifest count + raw rows) ──
+      nuvizz: {
+        stopCount: myStops.length,
+        stops: myStops.map(s => ({
+          date: s[0], deliveryEnd: s[1], driverName: s[2],
+          shipTo: s[3], city: s[4], zip: s[5], stopNumber: s[6]
+        }))
+      },
+      // ── Scoring thresholds applied (varies by role) ──
+      thresholds,
+      // ── Derived intermediate values ──
+      derived: {
+        clockInUsed: clockIn,
+        clockOutUsed: clockOut,
+        clockSource: b600 ? 'b600' : 'gps-fallback',
+        gpsFirstMovement: gpsClockIn,
+        gpsLastMovement: gpsClockOut,
+        clockInMin: ciMin,
+        clockOutMin: coMin,
+        shiftMin,
+        gpsFirstMin: gpsStart ? t2m(gpsClockIn) : 0,
+        gpsLastMin: gpsEnd ? t2m(gpsClockOut) : 0,
+        engineOnMin: +totalEngineMin.toFixed(1),
+        totalMilesRaw: +totalMiles.toFixed(2),
+        engineGapMin: +engineGapMin.toFixed(1),
+        lateStartMin: +lateStart.toFixed(1),
+        earlyStopMin: +earlyStop.toFixed(1),
+        effectiveMph: +effectiveMph.toFixed(2),
+        totalHrs: +totalHrs.toFixed(2)
+      }
+    },
+    // Raw Motive driving_periods — the source-of-truth records used. Each
+    // entry is what Motive returned: start, end, duration_minutes,
+    // distance_miles, vehicle, period type, location.
     rawPeriods: periods.map(p => ({
       start: p.start || '',
       end: p.end || '',
       durMin: +Number(p.dur || 0).toFixed(1),
       miles: +Number(p.miles || 0).toFixed(2),
-      type: p.type || ''
+      type: p.type || '',
+      vehicleNumber: p.vehicleNumber || '',
+      vehicleId: p.vehicleId || null,
+      startLat: p.startLat || null,
+      startLon: p.startLon || null,
+      startAddr: p.startAddr || '',
+      endLat: p.endLat || null,
+      endLon: p.endLon || null,
+      endAddr: p.endAddr || '',
+      maxSpeedMph: p.maxSpeedMph || null,
+      avgSpeedMph: p.avgSpeedMph || null
     }))
   };
 }

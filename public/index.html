@@ -696,7 +696,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.14';
+const APP_VERSION = '3.10.15';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2907,45 +2907,226 @@ function renderUnifiedHistory(){
           }).join('');
           html += `</div>`;
         }
-        // Raw Motive periods toggle — lets you verify the source data
-        if(d.rawPeriods && d.rawPeriods.length){
-          const rawId = `raw_${(d.canonicalName||d.name).replace(/[^a-z0-9]/gi,'_')}_${scan.scanId}`;
-          html += `<div style="margin-top:10px;">
-            <button onclick="(function(){const e=document.getElementById('${rawId}');e.style.display=e.style.display==='none'?'block':'none';})()" style="background:var(--s2);color:var(--blue3);border:1px solid var(--blue3);border-radius:var(--radius);padding:4px 10px;cursor:pointer;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">📊 RAW MOTIVE (${d.rawPeriods.length} PERIODS)</button>
-            <div id="${rawId}" style="display:none;margin-top:8px;background:rgba(0,0,0,.04);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;max-height:300px;overflow-y:auto;">
-              <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:6px;">Raw driving_periods returned by Motive API for this driver on ${scan.startDate}${scan.startDate!==scan.endDate?' → '+scan.endDate:''}. These are the source records used to compute everything above.</div>
-              <table style="width:100%;font-family:var(--mono);font-size:10px;border-collapse:collapse;">
-                <thead><tr style="border-bottom:1px solid var(--b1);">
-                  <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">START (UTC)</th>
-                  <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">END (UTC)</th>
-                  <th style="text-align:right;padding:3px 6px;color:var(--text3);font-size:9px;">DUR (MIN)</th>
-                  <th style="text-align:right;padding:3px 6px;color:var(--text3);font-size:9px;">MILES</th>
-                  <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">TYPE</th>
-                </tr></thead>
-                <tbody>
-                  ${d.rawPeriods.map(p=>`<tr style="border-bottom:1px solid rgba(0,0,0,.04);">
-                    <td style="padding:3px 6px;color:var(--text);">${(p.start||'').replace('T',' ').slice(0,19)}</td>
-                    <td style="padding:3px 6px;color:var(--text);">${(p.end||'').replace('T',' ').slice(0,19)}</td>
-                    <td style="text-align:right;padding:3px 6px;color:var(--blue3);font-weight:600;">${(p.durMin||0).toFixed(1)}</td>
-                    <td style="text-align:right;padding:3px 6px;color:var(--text);">${(p.miles||0).toFixed(2)}</td>
-                    <td style="padding:3px 6px;color:var(--text2);">${p.type||'—'}</td>
-                  </tr>`).join('')}
-                </tbody>
-              </table>
-              <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:6px;text-align:right;">
-                Sum: ${d.rawPeriods.reduce((a,p)=>a+(p.durMin||0),0).toFixed(1)} min · ${d.rawPeriods.reduce((a,p)=>a+(p.miles||0),0).toFixed(2)} mi
-              </div>
-            </div>
-          </div>`;
-        } else if(d.hasData) {
-          html += `<div style="margin-top:10px;font-family:var(--mono);font-size:9px;color:var(--text3);">Raw Motive periods not saved for this scan (run a new scan to capture them).</div>`;
-        }
+        // ALL INPUTS panel — comprehensive view of every raw value Sentinel
+        // used to score this driver. Multi-section, scrollable, copy-able.
+        html += renderAllInputsPanel(d, scan);
         html += `</div></td></tr>`;
       }
     }
   });
   html += `</tbody></table></div>`;
   el.innerHTML = html;
+}
+
+
+// ─── ALL INPUTS PANEL — drill-down detail of every raw input used for scoring
+// Sections: Motive Driver, Vehicles Used, Roster Lookup, B600 Punch, NuVizz
+// Stops, Thresholds Applied, Derived Values, Raw Driving Periods.
+function renderAllInputsPanel(d, scan){
+  if(!d) return '';
+  const inputs = d.inputs || null;
+  const hasInputs = !!inputs;
+  const hasRaw = d.rawPeriods && d.rawPeriods.length;
+  const panelId = `inp_${(d.canonicalName||d.name).replace(/[^a-z0-9]/gi,'_')}_${scan.scanId}`;
+  const tgl = `(function(){const e=document.getElementById('${panelId}');e.style.display=e.style.display==='none'?'block':'none';})()`;
+
+  if(!hasInputs && !hasRaw){
+    return `<div style="margin-top:10px;font-family:var(--mono);font-size:9px;color:var(--text3);">⚠️ Detailed inputs not saved for this scan (pre-v3.10.15). Run a new scan to capture them.</div>`;
+  }
+
+  const _kv = (k, v, color) => `<tr><td style="padding:2px 8px 2px 0;color:var(--text3);font-size:9px;white-space:nowrap;">${k}</td><td style="padding:2px 0;color:${color||'var(--text)'};font-family:var(--mono);font-size:10px;word-break:break-all;">${v ?? '<i style=\'color:var(--text3);\'>—</i>'}</td></tr>`;
+
+  let html = `<div style="margin-top:10px;">
+    <button onclick="${tgl}" style="background:var(--s2);color:var(--blue3);border:1px solid var(--blue3);border-radius:var(--radius);padding:4px 10px;cursor:pointer;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">📋 ALL INPUTS USED</button>
+    <div id="${panelId}" style="display:none;margin-top:8px;background:rgba(0,0,0,.04);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;max-height:600px;overflow-y:auto;">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:10px;">Every raw value Sentinel used to compute this driver's score. Verify against Motive directly to confirm accuracy.</div>`;
+
+  // ── 1. MOTIVE DRIVER ASSIGNMENT ──
+  const m = inputs?.motive || {};
+  html += `<div style="margin-bottom:14px;">
+    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ MOTIVE DRIVER ASSIGNMENT</div>
+    <table style="border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+      ${_kv('Motive driver_id', m.driverId)}
+      ${_kv('Raw name (Motive)', `${m.firstName||''} ${m.lastName||''}`.trim())}
+      ${_kv('Username', m.username)}
+      ${_kv('Email', m.email)}
+      ${_kv('Role', m.role)}
+      ${_kv('Status', m.status, m.status==='active'?'var(--green)':'var(--amber)')}
+      ${_kv('Primary truck', m.primaryTruck ? '#'+m.primaryTruck : null)}
+    </table>
+  </div>`;
+
+  // ── 2. VEHICLES USED ──
+  const vehicles = m.vehicles || [];
+  if(vehicles.length){
+    html += `<div style="margin-bottom:14px;">
+      <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ VEHICLES USED (${vehicles.length})</div>
+      <table style="width:100%;font-family:var(--mono);font-size:10px;border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--b1);">
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">TRUCK #</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">MOTIVE ID</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">YEAR</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">MAKE</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">MODEL</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">VIN</th>
+        </tr></thead>
+        <tbody>
+        ${vehicles.map(v=>`<tr style="border-bottom:1px solid rgba(0,0,0,.04);">
+          <td style="padding:3px 6px;color:var(--text);font-weight:600;">#${v.number||'—'}</td>
+          <td style="padding:3px 6px;color:var(--text2);">${v.id||'—'}</td>
+          <td style="padding:3px 6px;color:var(--text2);">${v.year||'—'}</td>
+          <td style="padding:3px 6px;color:var(--text2);">${v.make||'—'}</td>
+          <td style="padding:3px 6px;color:var(--text2);">${v.model||'—'}</td>
+          <td style="padding:3px 6px;color:var(--text3);font-size:9px;">${v.vin||'—'}</td>
+        </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  }
+
+  // ── 3. ROSTER LOOKUP ──
+  const r = inputs?.roster || {};
+  html += `<div style="margin-bottom:14px;">
+    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ ROSTER LOOKUP</div>
+    <table style="border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+      ${_kv('Raw name from Motive', r.rawNameFromMotive)}
+      ${_kv('Roster lookup key', `"${r.rosterKey||''}"`)}
+      ${_kv('Matched in roster?', r.matchedInRoster ? '✅ YES' : '❌ NO — defaulted to "straight"', r.matchedInRoster?'var(--green)':'var(--amber)')}
+      ${_kv('Roster entry value', r.rosterEntry)}
+      ${_kv('Canonical name used', r.canonicalName, 'var(--blue3)')}
+      ${_kv('Canonical source', r.canonicalSource)}
+      ${_kv('Derived role', r.derivedRole)}
+      ${_kv('Derived type', r.derivedType)}
+      ${_kv('Wage rate ($/hr)', '$'+(r.wageRate||0).toFixed(2))}
+    </table>
+  </div>`;
+
+  // ── 4. B600 PUNCH ──
+  const b = inputs?.b600 || {};
+  html += `<div style="margin-bottom:14px;">
+    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ B600 PUNCH${b.matchedRecordName?' ✅ MATCHED':' ❌ NOT MATCHED'}</div>
+    <table style="border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+      ${b.matchedRecordName ? `
+        ${_kv('B600 record name', b.matchedRecordName, 'var(--green)')}
+        ${_kv('Date', b.date)}
+        ${_kv('Clock IN', b.clockIn)}
+        ${_kv('Clock OUT', b.clockOut)}
+        ${_kv('Clock IN minutes', b.clockInMinutes)}
+        ${_kv('Clock OUT minutes', b.clockOutMinutes)}
+        ${_kv('Shift minutes', b.shiftMinutes)}
+        ${_kv('Shift hours', `${(b.shiftMinutes/60).toFixed(2)}h`)}
+      ` : `
+        <tr><td colspan="2" style="padding:4px 0;color:var(--amber);font-family:var(--mono);font-size:10px;">${b.note||'No B600 punch matched. Used GPS first/last movement as fallback.'}</td></tr>
+      `}
+    </table>
+  </div>`;
+
+  // ── 5. NUVIZZ STOPS ──
+  const n = inputs?.nuvizz || { stopCount:0, stops:[] };
+  html += `<div style="margin-bottom:14px;">
+    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ NUVIZZ STOPS (${n.stopCount||0})</div>`;
+  if(n.stops && n.stops.length){
+    html += `<table style="width:100%;font-family:var(--mono);font-size:10px;border-collapse:collapse;">
+      <thead><tr style="border-bottom:1px solid var(--b1);">
+        <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">DATE</th>
+        <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">SHIP TO</th>
+        <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">CITY</th>
+        <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">ZIP</th>
+        <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">STOP #</th>
+      </tr></thead>
+      <tbody>
+      ${n.stops.map(s=>`<tr style="border-bottom:1px solid rgba(0,0,0,.04);">
+        <td style="padding:3px 6px;color:var(--text2);">${s.date||'—'}</td>
+        <td style="padding:3px 6px;color:var(--text);">${s.shipTo||'—'}</td>
+        <td style="padding:3px 6px;color:var(--text2);">${s.city||'—'}</td>
+        <td style="padding:3px 6px;color:var(--text2);">${s.zip||'—'}</td>
+        <td style="padding:3px 6px;color:var(--text3);">${s.stopNumber||'—'}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>`;
+  } else {
+    html += `<div style="font-family:var(--mono);font-size:10px;color:var(--text3);">No NuVizz stops matched for this driver on this date.</div>`;
+  }
+  html += `</div>`;
+
+  // ── 6. THRESHOLDS APPLIED ──
+  const t = inputs?.thresholds || {};
+  html += `<div style="margin-bottom:14px;">
+    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ THRESHOLDS APPLIED (role-specific)</div>
+    <table style="border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+      ${_kv('Late start (min)', t.lateStartMin)}
+      ${_kv('Early stop (min)', t.earlyStopMin)}
+      ${_kv('Engine gap (min)', t.engineGapMin)}
+      ${_kv('Velocity floor (mph)', t.velocityFloorMph)}
+      ${_kv('Stops/hr min', t.stopsPerHrMin)}
+      ${_kv('B600→GPS gap (min)', t.b600GpsClockInGapMin)}
+      ${_kv('Risk: medium ≥', t.riskMediumScore)}
+      ${_kv('Risk: high ≥', t.riskHighScore)}
+      ${_kv('Risk: critical ≥', t.riskCriticalScore)}
+    </table>
+  </div>`;
+
+  // ── 7. DERIVED VALUES ──
+  const dv = inputs?.derived || {};
+  html += `<div style="margin-bottom:14px;">
+    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ DERIVED VALUES (used in scoring)</div>
+    <table style="border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+      ${_kv('Clock IN used', dv.clockInUsed)}
+      ${_kv('Clock OUT used', dv.clockOutUsed)}
+      ${_kv('Clock source', dv.clockSource, dv.clockSource==='b600'?'var(--green)':'var(--amber)')}
+      ${_kv('GPS first movement', dv.gpsFirstMovement)}
+      ${_kv('GPS last movement', dv.gpsLastMovement)}
+      ${_kv('Shift minutes', dv.shiftMin)}
+      ${_kv('Engine on (min)', dv.engineOnMin)}
+      ${_kv('Engine gap (min)', dv.engineGapMin, (dv.engineGapMin>60)?'var(--amber)':'var(--text)')}
+      ${_kv('Late start (min)', dv.lateStartMin, (dv.lateStartMin>30)?'var(--amber)':'var(--text)')}
+      ${_kv('Early stop (min)', dv.earlyStopMin, (dv.earlyStopMin>30)?'var(--amber)':'var(--text)')}
+      ${_kv('Total miles', dv.totalMilesRaw)}
+      ${_kv('Effective MPH', dv.effectiveMph)}
+      ${_kv('Total hours', dv.totalHrs)}
+    </table>
+  </div>`;
+
+  // ── 8. RAW DRIVING PERIODS ──
+  if(hasRaw){
+    html += `<div style="margin-bottom:6px;">
+      <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ RAW DRIVING_PERIODS FROM MOTIVE (${d.rawPeriods.length})</div>
+      <div style="overflow-x:auto;">
+      <table style="width:100%;min-width:900px;font-family:var(--mono);font-size:10px;border-collapse:collapse;">
+        <thead><tr style="border-bottom:1px solid var(--b1);">
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">START (UTC)</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">END (UTC)</th>
+          <th style="text-align:right;padding:3px 6px;color:var(--text3);font-size:9px;">DUR MIN</th>
+          <th style="text-align:right;padding:3px 6px;color:var(--text3);font-size:9px;">MILES</th>
+          <th style="text-align:right;padding:3px 6px;color:var(--text3);font-size:9px;">AVG/MAX MPH</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">TRUCK</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">TYPE</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">START LOC</th>
+          <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">END LOC</th>
+        </tr></thead>
+        <tbody>
+        ${d.rawPeriods.map(p=>`<tr style="border-bottom:1px solid rgba(0,0,0,.04);">
+          <td style="padding:3px 6px;color:var(--text);">${(p.start||'').replace('T',' ').slice(0,19)}</td>
+          <td style="padding:3px 6px;color:var(--text);">${(p.end||'').replace('T',' ').slice(0,19)}</td>
+          <td style="text-align:right;padding:3px 6px;color:var(--blue3);font-weight:600;">${(p.durMin||0).toFixed(1)}</td>
+          <td style="text-align:right;padding:3px 6px;color:var(--text);">${(p.miles||0).toFixed(2)}</td>
+          <td style="text-align:right;padding:3px 6px;color:var(--text2);">${p.avgSpeedMph!=null?p.avgSpeedMph.toFixed(0):'—'} / ${p.maxSpeedMph!=null?p.maxSpeedMph.toFixed(0):'—'}</td>
+          <td style="padding:3px 6px;color:var(--text2);">${p.vehicleNumber?'#'+p.vehicleNumber:'—'}</td>
+          <td style="padding:3px 6px;color:var(--text2);">${p.type||'—'}</td>
+          <td style="padding:3px 6px;color:var(--text3);font-size:9px;" title="${p.startAddr||''}">${(p.startAddr||'').slice(0,28)||(p.startLat?p.startLat.toFixed(3)+','+p.startLon.toFixed(3):'—')}</td>
+          <td style="padding:3px 6px;color:var(--text3);font-size:9px;" title="${p.endAddr||''}">${(p.endAddr||'').slice(0,28)||(p.endLat?p.endLat.toFixed(3)+','+p.endLon.toFixed(3):'—')}</td>
+        </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:6px;text-align:right;">
+        Sum: ${d.rawPeriods.reduce((a,p)=>a+(p.durMin||0),0).toFixed(1)} min · ${d.rawPeriods.reduce((a,p)=>a+(p.miles||0),0).toFixed(2)} mi
+      </div>
+    </div>`;
+  }
+
+  html += `</div></div>`;
+  return html;
 }
 
 // renderHistory kept as alias so any existing call sites don't break
