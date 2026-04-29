@@ -13,20 +13,11 @@ const CORS = {
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const MOTIVE_KEY = () => Netlify.env.get('MOTIVE_API_KEY');
-const MOTIVE_BASE = 'https://api.keeptruckin.com/v1';
+const MOTIVE_BASE = 'https://api.gomotive.com/v1';  // fixed: was api.keeptruckin.com
 const SCAN_SECRET = () => Netlify.env.get('SCAN_SECRET') || 'sentinel2026';
 
 // Wage rates
 const WAGES = { tractor: 27.50, straight: 23.00, default: 23.00 };
-
-// Fleet benchmarks (from 40K stop analysis)
-const FLEET_BENCH = {
-  gap: { median: 18, p75: 28, p90: 42, p95: 56 },
-  firstDel: { median: 8.55, p90: 11.0 },
-  stopsDay: { median: 13, p90: 19 },
-  gapWarn: 28, gapFlag: 42, gapCrit: 56,
-  shift: { mean: 8.9 }
-};
 
 // Driver roster — canonical name → profile
 const DRIVER_ROSTER = {
@@ -115,31 +106,12 @@ async function motiveGet(path, params = {}) {
   return await res.json();
 }
 
-async function fetchDrivingPeriods(startDate, endDate) {
+// Fetch all users WITH their numeric IDs
+async function fetchMotiveUsersWithIds() {
   const all = [];
   let page = 1, total = null;
   while (page <= 20) {
-    const data = await motiveGet('driving_periods', {
-      start_date: startDate, end_date: endDate,
-      per_page: 100, page_no: page
-    });
-    const periods = data.driving_periods || [];
-    if (!periods.length) break;
-    all.push(...periods);
-    const pg = data.pagination || {};
-    if (typeof pg.total === 'number') total = pg.total;
-    if (total !== null && all.length >= total) break;
-    if (periods.length < 100) break;
-    page++;
-  }
-  return all;
-}
-
-async function fetchMotiveUsers() {
-  const all = [];
-  let page = 1, total = null;
-  while (page <= 20) {
-    const data = await motiveGet('users', { per_page: 100, page_no: page });
+    const data = await motiveGet('users', { per_page: 100, page_no: page, role: 'driver' });
     const users = data.users || [];
     if (!users.length) break;
     all.push(...users);
@@ -151,8 +123,54 @@ async function fetchMotiveUsers() {
   }
   return all.map(u => {
     const usr = u.user || u;
-    return ((usr.first_name || '') + ' ' + (usr.last_name || '')).trim();
-  }).filter(n => n.length > 1);
+    const name = ((usr.first_name || '') + ' ' + (usr.last_name || '')).trim();
+    return { id: usr.id, name };
+  }).filter(u => u.name.length > 1);
+}
+
+// Fetch driving periods for ONE driver by driver_id
+async function fetchDriverPeriods(driverId, startDate, endDate) {
+  const all = [];
+  let page = 1;
+  while (page <= 10) {
+    let data;
+    try {
+      data = await motiveGet('driving_periods', {
+        driver_id: driverId,
+        start_date: startDate,
+        end_date: endDate,
+        per_page: 100,
+        page_no: page
+      });
+    } catch (e) {
+      break;
+    }
+    const periods = data.driving_periods || [];
+    if (!periods.length) break;
+    all.push(...periods);
+    const pg = data.pagination || {};
+    const tot = typeof pg.total === 'number' ? pg.total : null;
+    if (tot !== null && all.length >= tot) break;
+    if (periods.length < 100) break;
+    page++;
+  }
+  return all;
+}
+
+// Fetch driving periods for ALL drivers in batches of 10 concurrent requests
+async function fetchDrivingPeriods(startDate, endDate, motiveUsers) {
+  const all = [];
+  const BATCH = 10;
+  for (let i = 0; i < motiveUsers.length; i += BATCH) {
+    const batch = motiveUsers.slice(i, i + BATCH);
+    const results = await Promise.allSettled(
+      batch.map(u => fetchDriverPeriods(u.id, startDate, endDate))
+    );
+    results.forEach(r => {
+      if (r.status === 'fulfilled') all.push(...r.value);
+    });
+  }
+  return all;
 }
 
 // ─── GPS PROCESSING ───────────────────────────────────────────────────────────
@@ -184,14 +202,10 @@ function processDriverPeriods(periods) {
   return Object.values(driverMap);
 }
 
-// ─── DATA HUB CONFIG (v3.10.9) ────────────────────────────────────────────────
-// Server-side scan reads B600 + NuVizz from MarginIQ's Firestore directly,
-// matching the client-side cutover in v3.10.7 (B600) and v3.10.8 (NuVizz).
-// The hub is the single source of truth across both apps.
+// ─── DATA HUB CONFIG ─────────────────────────────────────────────────────────
 const HUB_FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/davismarginiq/databases/(default)/documents';
-const HUB_FIRESTORE_KEY = 'AIzaSyDyRyjuiP_UD8T_2xmW2xLjvqx9RLCYCmo'; // public web key, security enforced via Firestore rules
+const HUB_FIRESTORE_KEY = 'AIzaSyDyRyjuiP_UD8T_2xmW2xLjvqx9RLCYCmo';
 
-// Decode a Firestore document fields-map into a flat JS object.
 function _fsFields(fields) {
   const out = {};
   if (!fields) return out;
@@ -212,22 +226,15 @@ function _fsFields(fields) {
   return out;
 }
 
-// ─── B600 HISTORY (loaded from MarginIQ Data Hub Firestore) ──────────────────
+// ─── B600 HISTORY ────────────────────────────────────────────────────────────
 let _b600Cache = null;
 async function loadB600History(_siteUrl) {
-  // _siteUrl param kept for backward compat with caller; ignored now.
   if (_b600Cache) return _b600Cache;
-
-  // Pull last 120 days of timeclock_daily docs. Same default window as the
-  // browser side. Server-side scans typically cover a few specific days, so
-  // anything older could be lazy-loaded but for now we just return what fits
-  // in the preload window.
   const today = new Date();
   const earliest = new Date(today);
   earliest.setDate(today.getDate() - 120);
   const fromIso = earliest.toISOString().slice(0, 10);
   const toIso = today.toISOString().slice(0, 10);
-
   const query = {
     structuredQuery: {
       from: [{ collectionId: 'timeclock_daily' }],
@@ -245,28 +252,15 @@ async function loadB600History(_siteUrl) {
   };
   try {
     const url = `${HUB_FIRESTORE_BASE}:runQuery?key=${HUB_FIRESTORE_KEY}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(query)
-    });
-    if (!res.ok) {
-      console.error(`B600 hub query failed: HTTP ${res.status}`);
-      _b600Cache = [];
-      return _b600Cache;
-    }
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(query) });
+    if (!res.ok) { console.error(`B600 hub query failed: HTTP ${res.status}`); _b600Cache = []; return _b600Cache; }
     const rows = await res.json();
     const records = [];
     for (const row of rows) {
       if (!row.document) continue;
       const f = _fsFields(row.document.fields);
       if (!f.date || !f.display_name) continue;
-      records.push({
-        name: f.display_name,
-        clockIn: f.clock_in || '',
-        clockOut: f.clock_out || '',
-        date: f.date,
-      });
+      records.push({ name: f.display_name, clockIn: f.clock_in || '', clockOut: f.clock_out || '', date: f.date });
     }
     _b600Cache = records;
     return records;
@@ -277,15 +271,9 @@ async function loadB600History(_siteUrl) {
   }
 }
 
-// ─── NUVIZZ HISTORY (loaded from MarginIQ Data Hub Firestore) ───────────────
+// ─── NUVIZZ HISTORY ──────────────────────────────────────────────────────────
 async function loadNuvizzHistory(_siteUrl, startDate, endDate) {
-  // _siteUrl ignored (legacy param); query the hub directly.
-  // Returns same legacy 7-field array format the rest of the function expects:
-  //   [date, time, driver, customer, city, zip, stopNum]
-  // Time portion is "" since Firestore stores date-only delivery_date.
   const all = [];
-  // Fetch in 7-day chunks to stay under the 5000-doc/runQuery limit
-  // (NuVizz can hit ~500 stops/day, so 7×500 = ~3500 fits comfortably).
   const start = new Date(startDate + 'T00:00:00Z');
   const end = new Date(endDate + 'T00:00:00Z');
   const chunkDays = 7;
@@ -296,7 +284,6 @@ async function loadNuvizzHistory(_siteUrl, startDate, endDate) {
     if (chunkEnd > end) chunkEnd.setTime(end.getTime());
     const fromIso = cur.toISOString().slice(0, 10);
     const toIso = chunkEnd.toISOString().slice(0, 10);
-
     const query = {
       structuredQuery: {
         from: [{ collectionId: 'nuvizz_stops' }],
@@ -314,30 +301,14 @@ async function loadNuvizzHistory(_siteUrl, startDate, endDate) {
     };
     try {
       const url = `${HUB_FIRESTORE_BASE}:runQuery?key=${HUB_FIRESTORE_KEY}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query)
-      });
-      if (!res.ok) {
-        console.warn(`NuVizz chunk ${fromIso}..${toIso}: HTTP ${res.status}`);
-        cur.setUTCDate(cur.getUTCDate() + chunkDays);
-        continue;
-      }
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(query) });
+      if (!res.ok) { console.warn(`NuVizz chunk ${fromIso}..${toIso}: HTTP ${res.status}`); cur.setUTCDate(cur.getUTCDate() + chunkDays); continue; }
       const rows = await res.json();
       for (const row of rows) {
         if (!row.document) continue;
         const f = _fsFields(row.document.fields);
         if (!f.delivery_date || !f.driver_name) continue;
-        all.push([
-          f.delivery_date,
-          '',
-          f.driver_name || '',
-          f.ship_to || '',
-          f.city || '',
-          f.zip || '',
-          f.stop_number || f.pro || ''
-        ]);
+        all.push([f.delivery_date, '', f.driver_name || '', f.ship_to || '', f.city || '', f.zip || '', f.stop_number || f.pro || '']);
       }
     } catch (e) {
       console.warn(`NuVizz hub chunk error ${fromIso}..${toIso}:`, e.message);
@@ -354,7 +325,6 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
   const wage = WAGES[profile.type] || WAGES.default;
   const canonical = toCanonical(name);
 
-  // Find B600 match for scan date
   const b600 = b600History.find(r => {
     if (r.date !== scanDate) return false;
     const rn = r.name.toLowerCase();
@@ -364,7 +334,6 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
     return rl.length > 2 && rl === dl;
   });
 
-  // Find NuVizz stops for scan date
   const myStops = nuvizzStops.filter(r => {
     if (r[0] !== scanDate) return false;
     const rn = r[2].toLowerCase().trim();
@@ -382,7 +351,6 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
   const coMin = t2m(clockOut);
   const shiftMin = coMin - ciMin;
 
-  // GPS first/last movement
   const sortedPeriods = periods.sort((a, b) => a.start.localeCompare(b.start));
   const gpsStart = sortedPeriods[0]?.start ? new Date(sortedPeriods[0].start) : null;
   const gpsEnd = sortedPeriods[sortedPeriods.length - 1]?.end ? new Date(sortedPeriods[sortedPeriods.length - 1].end) : null;
@@ -398,43 +366,31 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
   let score = 0;
   let stolenMin = 0;
 
-  // Thresholds by role
   const isShuttle = profile.role === 'shuttle' || profile.role === 'loadshift';
   const lateStartThresh = isShuttle ? 90 : 45;
   const earlyStopThresh = isShuttle ? 60 : 30;
   const engineGapThresh = isShuttle ? 120 : 75;
 
-  // Flag: B600 clock-in vs GPS first movement
   if (b600 && gpsClockIn && lateStart > 30) {
     const pts = 30; score += pts; stolenMin += lateStart - 30;
     flags.push({ ico: '🔴', sev: 'critical', title: 'B600→GPS Clock-In Gap', detail: `Punched B600 at ${clockIn} but first GPS movement at ${gpsClockIn} — ${lateStart.toFixed(0)}min gap`, pts });
   }
-
-  // Flag: late first movement
   if (!isShuttle && lateStart > lateStartThresh) {
     const pts = 20; score += pts; stolenMin += lateStart - lateStartThresh;
     flags.push({ ico: '🌅', sev: 'high', title: 'Late First Movement', detail: `No movement for ${lateStart.toFixed(0)}min after clock-in`, pts });
   }
-
-  // Flag: early last movement
   if (earlyStop > earlyStopThresh) {
     const pts = 20; score += pts; stolenMin += earlyStop - earlyStopThresh;
     flags.push({ ico: '🏁', sev: 'high', title: 'Stopped Before Clock-Out', detail: `Last GPS movement ${earlyStop.toFixed(0)}min before clock-out`, pts });
   }
-
-  // Flag: clock/engine gap
   if (engineGapMin > engineGapThresh) {
     const pts = 35; score += pts; stolenMin += (engineGapMin - engineGapThresh) * 0.7;
     flags.push({ ico: '⏱️', sev: 'critical', title: 'Clock/Engine Time Gap', detail: `Clocked ${(shiftMin / 60).toFixed(1)}h but engine on ${(totalEngineMin / 60).toFixed(1)}h — ${engineGapMin.toFixed(0)}min gap`, pts });
   }
-
-  // Flag: low velocity
   if (!isShuttle && effectiveMph < 8 && totalMiles > 5) {
     const pts = 25; score += pts;
     flags.push({ ico: '🐢', sev: 'high', title: 'Low Route Velocity', detail: `${effectiveMph.toFixed(1)} mph effective`, pts });
   }
-
-  // Flag: NuVizz stops vs GPS miles (low stops + high idle time)
   if (!isShuttle && myStops.length > 0) {
     const stopsPerHr = myStops.length / Math.max(totalHrs, 1);
     if (stopsPerHr < 1.5 && totalHrs > 4) {
@@ -452,21 +408,14 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
   const stolenDollars = stolenHrs * wage;
 
   return {
-    name,
-    canonicalName: canonical,
-    driverType: profile.type,
-    driverRole: profile.role,
-    truck: vehicle,
-    clockIn,
-    clockOut,
+    name, canonicalName: canonical,
+    driverType: profile.type, driverRole: profile.role,
+    truck: vehicle, clockIn, clockOut,
     totalHrs: +totalHrs.toFixed(2),
-    score,
-    risk,
-    flags,
+    score, risk, flags,
     stolenHrs: +stolenHrs.toFixed(2),
     stolenDollars: +stolenDollars.toFixed(2),
-    hasData: true,
-    b600Matched: !!b600,
+    hasData: true, b600Matched: !!b600,
     gps: {
       deliveryStops: myStops.length,
       actualMiles: +totalMiles.toFixed(1),
@@ -475,8 +424,7 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
       lateStart: +lateStart.toFixed(0),
       earlyStop: +earlyStop.toFixed(0),
       engineGapMin: +engineGapMin.toFixed(0),
-      gpsClockIn,
-      gpsClockOut,
+      gpsClockIn, gpsClockOut,
     }
   };
 }
@@ -489,7 +437,6 @@ export default async (req) => {
   const log = (msg) => { logs.push(`[${new Date().toISOString().slice(11, 19)}] ${msg}`); console.log('[SCAN-RUN]', msg); };
 
   try {
-    // Auth check
     const url = new URL(req.url);
     let startDate, endDate, secret;
 
@@ -505,7 +452,6 @@ export default async (req) => {
     if (secret !== SCAN_SECRET()) {
       return new Response(JSON.stringify({ error: 'Unauthorized — wrong secret' }), { status: 401, headers: CORS });
     }
-
     if (!startDate || !endDate) {
       return new Response(JSON.stringify({ error: 'startDate and endDate required (YYYY-MM-DD)' }), { status: 400, headers: CORS });
     }
@@ -513,16 +459,17 @@ export default async (req) => {
     const siteUrl = Netlify.env.get('URL') || 'https://sentinel-time-theft.netlify.app';
     log(`Scan: ${startDate} → ${endDate}`);
 
-    // Step 1: Fetch Motive data
-    log('Fetching driving_periods from Motive...');
-    const periods = await fetchDrivingPeriods(startDate, endDate);
-    log(`Got ${periods.length} driving periods`);
+    // Step 1: Fetch Motive drivers WITH IDs
+    log('Fetching Motive driver roster (with IDs)...');
+    const motiveUsers = await fetchMotiveUsersWithIds();
+    log(`Got ${motiveUsers.length} Motive drivers`);
 
-    log('Fetching Motive user roster...');
-    const motiveUsers = await fetchMotiveUsers();
-    log(`Got ${motiveUsers.length} Motive users`);
+    // Step 2: Fetch driving periods PER DRIVER — fixes the 12-driver bug
+    log('Fetching driving_periods per driver (batches of 10)...');
+    const periods = await fetchDrivingPeriods(startDate, endDate, motiveUsers);
+    log(`Got ${periods.length} driving periods across all drivers`);
 
-    // Step 2: Load stored data
+    // Step 3: Load B600 + NuVizz
     log('Loading B600 history...');
     const b600History = await loadB600History(siteUrl);
     log(`B600: ${b600History.length} punches`);
@@ -531,12 +478,12 @@ export default async (req) => {
     const nuvizzStops = await loadNuvizzHistory(siteUrl, startDate, endDate);
     log(`NuVizz: ${nuvizzStops.length} stops for date range`);
 
-    // Step 3: Process each day in range
+    // Step 4: Score each driver per day
     const results = [];
     const dateList = [];
     let d = new Date(startDate);
-    const end = new Date(endDate);
-    while (d <= end) {
+    const endD = new Date(endDate);
+    while (d <= endD) {
       dateList.push(d.toISOString().split('T')[0]);
       d.setDate(d.getDate() + 1);
     }
@@ -552,15 +499,14 @@ export default async (req) => {
       const drivers = processDriverPeriods(dayPeriods);
       log(`  ${drivers.length} drivers with GPS on ${scanDate}`);
 
-      // Add roster drivers with no GPS
-      const driverNames = new Set(drivers.map(d => d.name.toLowerCase()));
-      motiveUsers.forEach(name => {
-        if (!name || driverNames.has(name.toLowerCase())) return;
-        if (!DRIVER_ROSTER[name.toLowerCase()]) return; // only roster drivers
-        drivers.push({ name, periods: [], totalEngineMin: 0, totalMiles: 0, vehicle: '' });
+      // Add roster drivers with no GPS this day
+      const driverNames = new Set(drivers.map(dr => dr.name.toLowerCase()));
+      motiveUsers.forEach(u => {
+        if (!u.name || driverNames.has(u.name.toLowerCase())) return;
+        if (!DRIVER_ROSTER[u.name.toLowerCase()]) return;
+        drivers.push({ name: u.name, periods: [], totalEngineMin: 0, totalMiles: 0, vehicle: '' });
       });
 
-      // Score each driver
       const dayResults = drivers.map(driver => {
         if (!driver.periods.length) {
           return {
@@ -580,7 +526,7 @@ export default async (req) => {
 
     log(`Scored ${results.length} driver-day records`);
 
-    // Step 4: Save to Firestore
+    // Step 5: Save to Firestore
     const scanId = `scan_${startDate}_${endDate}_${Date.now()}`;
     const flagged = results.filter(r => r.risk !== 'low' && r.risk !== 'nodata');
     const totalStolen = results.reduce((a, r) => a + r.stolenHrs, 0);
