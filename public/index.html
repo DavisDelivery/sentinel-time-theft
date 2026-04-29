@@ -407,10 +407,9 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 <div class="tab-bar">
   <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
   <button class="tab" onclick="showTab('driver',this)">👤 Driver Intel</button>
-  <button class="tab" onclick="showTab('scans',this)">💾 Scan History</button>
+  <button class="tab" onclick="showTab('history',this);loadUnifiedHistory()">📈 History</button>
   <button class="tab" onclick="showTab('match',this);renderMatchAudit()">🔗 Name Match</button>
   <button class="tab" onclick="showTab('report',this)">📊 Report</button>
-  <button class="tab" onclick="showTab('history',this)">📈 History</button>
   <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
 </div>
 
@@ -499,45 +498,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     <div id="diContent" style="display:none;"></div>
   </div>
 
-  <!-- SCAN HISTORY -->
-  <div id="tab-scans" class="content">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
-      <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">💾 SCAN HISTORY</div>
-      <button onclick="loadScanHistory()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🔄 REFRESH</button>
-    </div>
-
-    <!-- SERVER SCAN TRIGGER -->
-    <div style="background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:14px;margin-bottom:16px;">
-      <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">⚡ RUN SERVER SCAN</div>
-      <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:10px;">Runs the full audit server-side. No browser needed — close the app and check back. Results save automatically to Scan History.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">START DATE</div>
-          <input type="date" id="serverScanStart" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;">
-        </div>
-        <div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">END DATE</div>
-          <input type="date" id="serverScanEnd" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;">
-        </div>
-        <div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">SECRET</div>
-          <input type="password" id="serverScanSecret" placeholder="scan secret" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;width:130px;">
-        </div>
-        <button onclick="runServerScan()" style="background:linear-gradient(135deg,var(--energon),#005580);color:#fff;border:none;border-radius:var(--radius);padding:8px 20px;cursor:pointer;font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:1px;margin-top:12px;">⚡ SCAN</button>
-      </div>
-      <div id="serverScanStatus" style="display:none;margin-top:10px;font-family:var(--mono);font-size:11px;line-height:1.7;"></div>
-    </div>
-    <div style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
-      Every ENGAGE scan is auto-saved to Firestore. Click any row to reload its Threat Board without re-running the scan. Data never changes once captured.
-    </div>
-    <div id="scanHistoryEmpty" style="text-align:center;padding:40px 0;color:var(--text2);">
-      <div style="font-size:32px;margin-bottom:10px;">💾</div>
-      <p style="font-family:var(--ui);font-size:14px;">No saved scans yet.</p>
-      <p style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;">Run ENGAGE on the Threat Board — results will persist here automatically.</p>
-    </div>
-    <div id="scanHistoryList" style="display:none;"></div>
-  </div>
-
   <!-- NAME MATCH AUDIT -->
   <div id="tab-match" class="content">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
@@ -573,13 +533,41 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
     </div>
   </div>
 
-  <!-- HISTORY -->
+  <!-- HISTORY (unified) -->
   <div id="tab-history" class="content">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-      <div style="font-family:var(--ui);font-size:16px;font-weight:700;">Audit History</div>
-      <button class="src-btn" onclick="clearHistory()" style="font-size:10px;">🗑 Clear</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+      <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">📈 HISTORY</div>
+      <button onclick="loadUnifiedHistory()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🔄 REFRESH</button>
     </div>
-    <div id="historyContent"></div>
+
+    <!-- SERVER SCAN TRIGGER -->
+    <div style="background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:14px;margin-bottom:16px;">
+      <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">⚡ RUN SERVER SCAN</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:10px;">Runs server-side. Close the app — results save to History automatically. ~30-120s per day scanned.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">START</div>
+          <input type="date" id="serverScanStart" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;">
+        </div>
+        <div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">END</div>
+          <input type="date" id="serverScanEnd" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;">
+        </div>
+        <div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px;">SECRET</div>
+          <input type="password" id="serverScanSecret" placeholder="scan secret" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 8px;font-family:var(--mono);font-size:11px;width:130px;">
+        </div>
+        <button onclick="runServerScan()" style="background:linear-gradient(135deg,var(--energon),#005580);color:#fff;border:none;border-radius:var(--radius);padding:8px 20px;cursor:pointer;font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:1px;">⚡ SCAN</button>
+      </div>
+      <div id="serverScanStatus" style="display:none;margin-top:10px;font-family:var(--mono);font-size:11px;line-height:1.7;"></div>
+    </div>
+
+    <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:8px;line-height:1.6;">
+      All scans saved to Firestore. Click a row to load that scan. Check up to 3 to compare drivers side-by-side.
+    </div>
+    <div id="historyContent">
+      <div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:11px;">Loading scans...</div>
+    </div>
   </div>
 
   <!-- ALGORITHM -->
@@ -678,7 +666,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.10';
+const APP_VERSION = '3.10.11';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2718,1656 +2706,229 @@ async function saveScanToFirestore(){
   }
 }
 
-async function loadScanHistory(){
-  const listEl=document.getElementById('scanHistoryList');
-  const emptyEl=document.getElementById('scanHistoryEmpty');
-  listEl.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-family:var(--mono);font-size:11px;">Loading...</div>';
-  listEl.style.display='block';
-  emptyEl.style.display='none';
+// ═══════════════════════════════════════════════════════════════════════════
+// UNIFIED HISTORY (server-driven, Firestore-backed) — v3.10.11
+// One source of truth: Firestore /sentinelScans collection.
+// Lists all scans, supports click-to-load, multi-select up to 3 for compare,
+// drill-into per-driver detail.
+// ═══════════════════════════════════════════════════════════════════════════
+let _serverScans = [];        // summary list from /api/sentinel-scan-list
+let _loadedScans = {};        // scanId → full scan doc (lazy-loaded on click)
+let _histSelectedRunIds = []; // up to 3 scanIds selected for side-by-side
+let _histSort = { col: 'createdAt', dir: 'desc' };
+let _histExpanded = null;     // {scanId, driverName} for inline drill-down
+let _histLoadingScanId = null;
 
-  try{
-    const res=await fetch('/api/sentinel-scan-list?limit=50');
-    const data=await res.json();
-    if(!data.success||!data.scans||data.scans.length===0){
-      listEl.style.display='none';
-      emptyEl.style.display='block';
+async function loadUnifiedHistory(){
+  const el = document.getElementById('historyContent');
+  if(!el) return;
+  el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3);font-family:var(--mono);font-size:11px;">Loading scans from Firestore…</div>';
+  try {
+    const res = await fetch('/api/sentinel-scan-list?limit=100');
+    const data = await res.json();
+    if(!data.success){
+      el.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px;padding:14px;background:var(--s1);border:1px solid var(--red);border-radius:var(--radius);">Error loading history: ${data.error||'unknown'}</div>`;
       return;
     }
-
-    listEl.innerHTML=`
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;">
-          <thead>
-            <tr style="border-bottom:2px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;">
-              <th style="padding:6px 8px;">DATE RANGE</th>
-              <th style="padding:6px 8px;">SAVED</th>
-              <th style="padding:6px 8px;">DRIVERS</th>
-              <th style="padding:6px 8px;">FLAGGED</th>
-              <th style="padding:6px 8px;">CRIT</th>
-              <th style="padding:6px 8px;">HIGH</th>
-              <th style="padding:6px 8px;">STOLEN</th>
-              <th style="padding:6px 8px;">$ LOST</th>
-              <th style="padding:6px 8px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${data.scans.map(s=>{
-              const savedDate=s.createdAt?new Date(s.createdAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'—';
-              const dateRange=s.startDate===s.endDate?s.startDate:`${s.startDate} → ${s.endDate}`;
-              return `<tr style="border-bottom:1px solid rgba(0,0,0,.04);cursor:pointer;" onclick="loadSavedScan('${s.scanId}')" onmouseover="this.style.background='var(--s1)'" onmouseout="this.style.background=''">
-                <td style="padding:6px 8px;color:var(--text);font-weight:600;">${dateRange}</td>
-                <td style="padding:6px 8px;color:var(--text2);">${savedDate}</td>
-                <td style="padding:6px 8px;color:var(--blue3);">${s.driverCount||0}</td>
-                <td style="padding:6px 8px;color:${s.flaggedCount>0?'var(--red)':'var(--text2)'};font-weight:${s.flaggedCount>0?'700':'400'};">${s.flaggedCount||0}</td>
-                <td style="padding:6px 8px;color:${s.critical>0?'var(--red)':'var(--text3)'};">${s.critical||0}</td>
-                <td style="padding:6px 8px;color:${s.high>0?'var(--amber)':'var(--text3)'};">${s.high||0}</td>
-                <td style="padding:6px 8px;color:var(--text);">${(s.totalStolenHrs||0).toFixed(1)}h</td>
-                <td style="padding:6px 8px;color:var(--text);">$${(s.totalCost||0).toFixed(0)}</td>
-                <td style="padding:6px 8px;color:var(--energon);font-size:9px;">→ LOAD</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:8px;text-align:center;">Showing ${data.scans.length} most recent scans</div>
-    `;
-  }catch(e){
-    listEl.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;padding:20px;">Error loading scans: ${e.message}</div>`;
+    _serverScans = data.scans || [];
+    // Drop selected IDs that no longer exist
+    const idSet = new Set(_serverScans.map(s=>s.scanId));
+    _histSelectedRunIds = _histSelectedRunIds.filter(id=>idSet.has(id));
+    renderUnifiedHistory();
+  } catch(e){
+    el.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px;padding:14px;">Network error: ${e.message}</div>`;
   }
 }
+// Backward-compat alias — anything still calling loadScanHistory now refreshes the unified view
+const loadScanHistory = loadUnifiedHistory;
 
 async function loadSavedScan(scanId){
-  const listEl=document.getElementById('scanHistoryList');
-  // Remove any existing detail panel
-  const existing=document.getElementById('scanDetailPanel');
-  if(existing) existing.remove();
-
-  // Insert loading panel
-  const panel=document.createElement('div');
-  panel.id='scanDetailPanel';
-  panel.style.cssText='background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:16px;margin-bottom:14px;';
-  panel.innerHTML=`<div style="font-family:var(--mono);font-size:11px;color:var(--energon);">Loading scan ${scanId}...</div>`;
-  listEl.parentNode.insertBefore(panel, listEl);
-
-  try{
-    const res=await fetch(`/api/sentinel-scan-list?scanId=${scanId}`);
-    const data=await res.json();
-    if(!data.success||!data.scan){ panel.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">Error: ${data.error||'not found'}</div>`; return; }
-
-    const scan=data.scan;
-    const drivers=scan.drivers||[];
-    const flagged=drivers.filter(d=>d.risk!=='low'&&d.risk!=='nodata').sort((a,b)=>b.score-a.score);
-    const clean=drivers.filter(d=>d.risk==='low');
-    const nodata=drivers.filter(d=>d.risk==='nodata');
-
-    const riskCol=r=>r==='critical'?'var(--red2)':r==='high'?'var(--amber)':r==='medium'?'var(--amber2)':'var(--green)';
-    const riskBg=r=>r==='critical'?'rgba(204,17,17,.06)':r==='high'?'rgba(204,136,0,.05)':r==='medium'?'rgba(204,136,0,.03)':'';
-
-    panel.innerHTML=`
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
-        <div>
-          <div style="font-family:var(--head);font-size:13px;color:var(--text);font-weight:700;">${scan.startDate===scan.endDate?scan.startDate:`${scan.startDate} → ${scan.endDate}`}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Saved ${new Date(scan.createdAt).toLocaleString()} · ${scan.source==='server'?'Server scan':'Browser scan'} · ID: ${scanId}</div>
-        </div>
-        <button onclick="document.getElementById('scanDetailPanel').remove()" style="background:var(--s1);color:var(--text2);border:1px solid var(--b1);border-radius:var(--radius);padding:4px 12px;cursor:pointer;font-family:var(--mono);font-size:10px;">✕ Close</button>
-      </div>
-
-      <!-- Summary KPIs -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:14px;">
-        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">DRIVERS</div>
-          <div style="font-family:var(--head);font-size:18px;color:var(--blue3);">${drivers.length}</div>
-        </div>
-        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">FLAGGED</div>
-          <div style="font-family:var(--head);font-size:18px;color:var(--red);">${scan.flaggedCount||flagged.length}</div>
-        </div>
-        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">CRITICAL</div>
-          <div style="font-family:var(--head);font-size:18px;color:var(--red2);">${scan.critical||0}</div>
-        </div>
-        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">HIGH</div>
-          <div style="font-family:var(--head);font-size:18px;color:var(--amber);">${scan.high||0}</div>
-        </div>
-        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">EST STOLEN</div>
-          <div style="font-family:var(--head);font-size:16px;color:var(--red2);">${(scan.totalStolenHrs||0).toFixed(1)}h</div>
-        </div>
-        <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">$ LOST</div>
-          <div style="font-family:var(--head);font-size:16px;color:var(--red2);">$${(scan.totalCost||0).toFixed(0)}</div>
-        </div>
-      </div>
-
-      <!-- Flagged drivers -->
-      ${flagged.length?`
-      <div style="font-family:var(--head);font-size:10px;color:var(--red);letter-spacing:1px;margin-bottom:8px;">⚠️ FLAGGED DRIVERS (${flagged.length})</div>
-      <div style="border:1px solid var(--b1);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;">
-        ${flagged.map(d=>`
-          <div style="background:${riskBg(d.risk)};border-bottom:1px solid rgba(0,0,0,.05);padding:10px 12px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
-              <div>
-                <span style="font-family:var(--head);font-size:12px;color:var(--text);font-weight:700;">${d.name}</span>
-                <span style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-left:8px;">${d.driverType==='tractor'?'🚛':'🚚'} ${d.truck||'—'}</span>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <span style="background:${riskCol(d.risk)};color:#fff;padding:2px 8px;border-radius:3px;font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;">${d.risk}</span>
-                <span style="font-family:var(--mono);font-size:10px;color:var(--text2);">Score: ${d.score}</span>
-                ${d.stolenHrs>0?`<span style="font-family:var(--mono);font-size:10px;color:var(--red2);">${d.stolenHrs.toFixed(1)}h / $${d.stolenDollars.toFixed(0)}</span>`:''}
-              </div>
-            </div>
-            <div style="display:flex;gap:12px;margin-top:4px;font-family:var(--mono);font-size:9px;color:var(--text3);flex-wrap:wrap;">
-              ${d.clockIn?`<span>Clock: ${d.clockIn}–${d.clockOut||'?'}</span>`:''}
-              ${d.gps?.actualMiles?`<span>Miles: ${d.gps.actualMiles}</span>`:''}
-              ${d.gps?.deliveryStops?`<span>Stops: ${d.gps.deliveryStops}</span>`:''}
-              ${d.gps?.engineOnMin?`<span>Engine: ${(d.gps.engineOnMin/60).toFixed(1)}h</span>`:''}
-            </div>
-            ${(d.flags||[]).length?`
-            <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
-              ${d.flags.map(f=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:2px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);">${f.ico||'⚑'} ${f.title||f}</span>`).join('')}
-            </div>`:''}
-          </div>`).join('')}
-      </div>`:''}
-
-      <!-- Clean drivers -->
-      ${clean.length?`
-      <details style="margin-bottom:8px;">
-        <summary style="font-family:var(--head);font-size:10px;color:var(--green);letter-spacing:1px;cursor:pointer;padding:6px 0;">✓ CLEAN DRIVERS (${clean.length})</summary>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;">
-          ${clean.map(d=>`<span style="background:rgba(0,153,77,.06);border:1px solid rgba(0,153,77,.2);border-radius:3px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--green);">${d.name}</span>`).join('')}
-        </div>
-      </details>`:''}
-
-      <!-- No data -->
-      ${nodata.length?`
-      <details>
-        <summary style="font-family:var(--head);font-size:10px;color:var(--text3);letter-spacing:1px;cursor:pointer;padding:6px 0;">— NO DATA (${nodata.length})</summary>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;">
-          ${nodata.map(d=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--text3);">${d.name}</span>`).join('')}
-        </div>
-      </details>`:''}
-
-      <div style="margin-top:12px;display:flex;gap:8px;">
-        <button onclick="loadScanToThreatBoard('${scanId}')" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:7px 16px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">→ OPEN IN THREAT BOARD</button>
-      </div>
-    `;
-
-  }catch(e){
-    panel.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">Error: ${e.message}</div>`;
+  // Fetch full scan once and cache it
+  if(_loadedScans[scanId]) return _loadedScans[scanId];
+  _histLoadingScanId = scanId;
+  renderUnifiedHistory();
+  try {
+    const res = await fetch(`/api/sentinel-scan-list?scanId=${encodeURIComponent(scanId)}`);
+    const data = await res.json();
+    _histLoadingScanId = null;
+    if(!data.success || !data.scan){ alert(`Could not load scan: ${data.error||'not found'}`); renderUnifiedHistory(); return null; }
+    _loadedScans[scanId] = data.scan;
+    renderUnifiedHistory();
+    return data.scan;
+  } catch(e){
+    _histLoadingScanId = null;
+    alert('Network error: '+e.message);
+    renderUnifiedHistory();
+    return null;
   }
 }
 
-async function loadScanToThreatBoard(scanId){
-  try{
-    const res=await fetch(`/api/sentinel-scan-list?scanId=${scanId}`);
-    const data=await res.json();
-    if(!data.success||!data.scan) return;
-    const scan=data.scan;
-    results=(scan.drivers||[]).map(d=>({
-      ...d, flags:d.flags||[], gps:d.gps||{}, timeline:[], manifestStops:[],
-      layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0}
-    }));
-    auditStartDate=scan.startDate;
-    auditEndDate=scan.endDate;
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    document.querySelector('.tab[onclick*="flags"]').classList.add('active');
-    document.querySelectorAll('.content').forEach(c=>c.classList.remove('visible'));
-    document.getElementById('tab-flags').classList.add('visible');
-    updateHeader();updateStats();renderFlags();renderReport();
-    log(`✅ Loaded scan ${scanId} into Threat Board`,'ok');
-  }catch(e){ alert('Error: '+e.message); }
-}
-
-async function loadDriverHistory(driverName){
-  try{
-    const canonical=toCanonical(driverName);
-    const res=await fetch(`/api/sentinel-scan-list?driver=${encodeURIComponent(canonical)}`);
-    const data=await res.json();
-    if(!data.success||!data.history) return null;
-    return data.history;
-  }catch(e){ return null; }
-}
-
-function renderDiHistoryPanel(driverName, history){
-  const el=document.getElementById('diHistory');
-  if(!el) return;
-  if(!history || !history.totalScans){
-    el.style.display='none';
-    return;
-  }
-  el.style.display='block';
-
-  const rc=history.riskCounts||{};
-  const flagFreq=history.flagFrequency||{};
-  const topFlags=Object.entries(flagFreq).sort((a,b)=>b[1]-a[1]).slice(0,5);
-
-  el.innerHTML=`
-    <div style="background:linear-gradient(135deg,rgba(0,119,170,.06),rgba(124,58,237,.04));border:1px solid rgba(0,119,170,.25);border-radius:var(--radius);padding:14px;margin-bottom:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-        <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;">📊 SENTINEL HISTORY — across all saved scans</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">${history.totalScans} scan${history.totalScans>1?'s':''} · first seen ${history.firstSeen?.split('T')[0]||'—'}</div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:10px;">
-        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">SCANS</div>
-          <div style="font-family:var(--head);font-size:18px;color:var(--blue3);">${history.totalScans||0}</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">CRITICAL</div>
-          <div style="font-family:var(--head);font-size:18px;color:${rc.critical>0?'var(--red)':'var(--text3)'};">${rc.critical||0}</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">HIGH</div>
-          <div style="font-family:var(--head);font-size:18px;color:${rc.high>0?'var(--amber)':'var(--text3)'};">${rc.high||0}</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">MEDIUM</div>
-          <div style="font-family:var(--head);font-size:18px;color:${rc.medium>0?'var(--amber2)':'var(--text3)'};">${rc.medium||0}</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">CLEAN</div>
-          <div style="font-family:var(--head);font-size:18px;color:var(--green);">${rc.low||0}</div>
-        </div>
-        <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">TOT STOLEN</div>
-          <div style="font-family:var(--head);font-size:16px;color:var(--red2);">${(history.totalStolenHrs||0).toFixed(1)}h</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">$${(history.totalCost||0).toFixed(0)}</div>
-        </div>
-      </div>
-      ${topFlags.length?`<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:4px;">TOP RECURRING FLAGS:</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${topFlags.map(([f,n])=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:3px 8px;font-family:var(--mono);font-size:10px;"><span style="color:var(--text2);">${f}</span> <span style="color:var(--red);font-weight:700;">×${n}</span></span>`).join('')}</div>`:''}
-    </div>
-  `;
-}
-
-// ═══════════════════════════════════════════
-// STOP SCAN + FLEET AI
-// ═══════════════════════════════════════════
-async function scanStop(){
-  const input=document.getElementById('stopScanInput');
-  const out=document.getElementById('stopScanResult');
-  const stopNbr=input.value.trim();
-  if(!stopNbr){ out.style.display='none'; return; }
-  out.style.display='block';
-  out.innerHTML=`<div style="font-family:var(--mono);font-size:11px;color:var(--text2);">Scanning ${stopNbr}...</div>`;
-
-  try{
-    const res=await fetch(`/api/nuvizz-stops?stopNbr=${encodeURIComponent(stopNbr)}`);
-    const data=await res.json();
-    if(!res.ok||data.error){
-      out.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">${data.error||'Stop not found'}</div>`;
-      return;
-    }
-
-    const s=data.stop||data.Stop?.stop||data;
-    const load=data.Stop?.load||data.load||{};
-    const exec=data.Stop?.stopExecutionInfo||data.stopExecutionInfo||{};
-    const addr=(s.to||{}).address||s.address||{};
-    const sched=(s.to||{}).schedule||{};
-    const arrival=exec.to?.actualArrival||exec.actualArrival||'—';
-    const departure=exec.to?.actualDeparture||exec.actualDeparture||'—';
-
-    out.innerHTML=`
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:var(--mono);font-size:10px;">
-        <div><span style="color:var(--text3);">STOP#</span> <span style="color:var(--text);font-weight:700;">${s.stopNbr||stopNbr}</span></div>
-        <div><span style="color:var(--text3);">PRO</span> <span style="color:var(--text);">${s.proNumber||'—'}</span></div>
-        <div><span style="color:var(--text3);">STATUS</span> <span style="color:${exec.stopStatus>=90?'var(--green)':'var(--amber)'};">${exec.stopStatus||'?'}</span></div>
-        <div><span style="color:var(--text3);">TYPE</span> <span style="color:var(--text);">${s.stopType==='DO'?'Delivery':'Pickup'}</span></div>
-        <div style="grid-column:1/-1;border-top:1px solid var(--b1);padding-top:6px;">
-          <span style="color:var(--text3);">CUSTOMER</span>
-          <div style="color:var(--text);font-weight:700;">${addr.name||'—'}</div>
-          <div style="color:var(--text2);">${addr.addr1||''} ${addr.city||''}, ${addr.state||''} ${addr.zip||''}</div>
-        </div>
-        <div><span style="color:var(--text3);">DRIVER</span> <span style="color:var(--energon);font-weight:700;">${load.driverName||'—'}</span></div>
-        <div><span style="color:var(--text3);">ROUTE</span> <span style="color:var(--text);">${load.routeName||load.loadNbr||'—'}</span></div>
-        <div><span style="color:var(--text3);">TRUCK</span> <span style="color:var(--text);">${load.vehicleNbr||'—'}</span></div>
-        <div><span style="color:var(--text3);">WEIGHT</span> <span style="color:var(--text);">${s.weight||'—'} ${s.weightUOM||'lbs'}</span></div>
-        <div><span style="color:var(--text3);">PALLETS</span> <span style="color:var(--text);">${s.totalPallets||'—'}</span></div>
-        <div><span style="color:var(--text3);">CARTONS</span> <span style="color:var(--text);">${s.totalCartons||'—'}</span></div>
-        <div style="grid-column:1/-1;border-top:1px solid var(--b1);padding-top:6px;">
-          <span style="color:var(--text3);">WINDOW</span> <span style="color:var(--text);">${sched.timeFrom||'—'} → ${sched.timeTo||'—'}</span>
-        </div>
-        <div><span style="color:var(--text3);">ARRIVED</span> <span style="color:var(--green);">${arrival}</span></div>
-        <div><span style="color:var(--text3);">DEPARTED</span> <span style="color:var(--text);">${departure}</span></div>
-        ${s.sealNbr?`<div><span style="color:var(--text3);">SEAL#</span> <span style="color:var(--text);">${s.sealNbr}</span></div>`:''}
-      </div>
-    `;
-  }catch(e){
-    out.innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:11px;">Error: ${e.message}</div>`;
-  }
-}
-
-async function runFleetAI(){
-  if(!results.length){ alert('Run an ENGAGE scan first to generate data for AI analysis.'); return; }
-  const out=document.getElementById('fleetAiOutput');
-  const txt=document.getElementById('fleetAiText');
-  const status=document.getElementById('fleetAiStatus');
-  out.style.display='block';
-  txt.textContent='';
-  status.textContent='Analyzing fleet...';
-  status.style.color='#9333ea';
-
-  const flagged=results.filter(r=>r.risk!=='low'&&r.risk!=='nodata');
-  const withData=results.filter(r=>r.hasData);
-  const totalStolen=withData.reduce((a,r)=>a+r.stolenHrs,0);
-  const totalCost=withData.reduce((a,r)=>a+r.stolenDollars,0);
-
-  const driverSummaries=flagged.slice(0,20).map(r=>{
-    const flags=r.flags?r.flags.map(f=>f.title||f).join(', '):'none';
-    return `${r.name} (${r.driverRole||'?'} ${r.driverType||'?'}, score:${r.score}, risk:${r.risk}, stolen:${r.stolenHrs.toFixed(1)}h/$${r.stolenDollars.toFixed(0)}, truck:${r.truck||'?'}, clock:${r.clockIn}-${r.clockOut}, stops:${r.gps?.deliveryStops||0}, miles:${r.gps?.actualMiles?.toFixed(0)||'?'}, mph:${r.gps?.effectiveMph?.toFixed(1)||'?'}, engineH:${r.gps?.engineOnMin?((r.gps.engineOnMin)/60).toFixed(1):'?'}, b600:${r.b600Matched?'yes':'no'}, flags:[${flags}])`;
-  }).join('\n');
-
-  const cleanCount=results.filter(r=>r.risk==='low'&&r.hasData).length;
-
-  const prompt=`SENTINEL FLEET SCAN RESULTS — analyze for time theft patterns across the entire fleet.
-
-SCAN PERIOD: ${auditStartDate} → ${auditEndDate}
-TOTAL DRIVERS SCANNED: ${results.length}
-WITH GPS DATA: ${withData.length}
-FLAGGED: ${flagged.length} (${results.filter(r=>r.risk==='critical').length} critical, ${results.filter(r=>r.risk==='high').length} high, ${results.filter(r=>r.risk==='medium').length} medium)
-CLEAN: ${cleanCount}
-TOTAL EST STOLEN HOURS: ${totalStolen.toFixed(1)}h
-TOTAL EST COST: $${totalCost.toFixed(0)}
-
-FLEET BENCHMARKS:
-- Inter-delivery gap: median ${FLEET_BENCH.gap.median}m, P90 ${FLEET_BENCH.gap.p90}m
-- First delivery: median ${FLEET_BENCH.firstDel.median}h
-- Stops/day: median ${FLEET_BENCH.stopsDay.median}
-
-TOP ${Math.min(flagged.length,20)} FLAGGED DRIVERS (sorted by score):
-${driverSummaries}
-
-Analyze this fleet scan. Identify:
-1. PATTERNS — are multiple drivers doing the same suspicious thing? Same time of day? Same behavior?
-2. WORST OFFENDERS — who needs immediate attention and why?
-3. COST IMPACT — where is the most money being lost?
-4. RECOMMENDATIONS — specific actions to take (confrontations, route changes, policy changes)
-5. COMPARISON — how does this day/period compare to fleet benchmarks?
-
-Be specific with names, numbers, and actionable recommendations.`;
-
-  try{
-    const res=await fetch('/api/sentinel-ai',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        driverName:'FLEET SCAN',
-        driverType:'fleet',
-        driverCo:'davis',
-        kpis:{totalDrivers:results.length,flagged:flagged.length,totalStolen:totalStolen.toFixed(1),totalCost:totalCost.toFixed(0)},
-        clockToFirst:[],
-        dailyRows:[],
-        topCustomers:[],
-        topCities:[],
-        fleetBench:FLEET_BENCH,
-        typeBench:TYPE_BENCH.straight,
-        _rawPrompt:prompt
-      })
-    });
-    const data=await res.json();
-    if(data.success){
-      txt.textContent=data.analysis;
-      status.textContent=`Complete · ${data.usage?.input_tokens||0}+${data.usage?.output_tokens||0} tokens`;
-      status.style.color='var(--green)';
-    } else {
-      txt.textContent='Error: '+(data.error||'Unknown')+'\n'+(data.detail||'');
-      status.textContent='Failed';
-      status.style.color='var(--red)';
-    }
-  }catch(e){
-    txt.textContent='Error: '+e.message;
-    status.textContent='Failed';
-    status.style.color='var(--red)';
-  }
-}
-
-// ═══════════════════════════════════════════
-// SENTINEL AI + DASHCAM
-// ═══════════════════════════════════════════
-async function runSentinelAI(driverName, driverType, driverCo){
-  const out=document.getElementById('diAiOutput');
-  const txt=document.getElementById('diAiText');
-  const status=document.getElementById('diAiStatus');
-  if(!out||!txt) return;
-  out.style.display='block';
-  txt.textContent='';
-  status.textContent='Analyzing...';
-  status.style.color='#c084fc';
-
-  // Gather all the data we already computed in renderDriverIntel
-  const pick=document.getElementById('diDriverPick');
-  const FB=FLEET_BENCH;
-  const TB=TYPE_BENCH[driverType]||TYPE_BENCH.straight;
-
-  // Re-gather data for API call
-  const cutoff=diDateRange();
-  const b600=[],stops=[];
-  if(window._b600History) window._b600History.forEach(r=>{
-    if(diMatchDriver(r.name,driverName) && new Date(r.date)>=cutoff) b600.push(r);
-  });
-  if(window._nuvizzHistory) window._nuvizzHistory.forEach(r=>{
-    if(diMatchDriver(r[2],driverName) && new Date(r[0])>=cutoff) stops.push({date:r[0],time:r[1],customer:r[3],city:r[4]});
-  });
-
-  function parseClk(t){if(!t)return null;t=t.trim().toLowerCase();const m=t.match(/(\d+):(\d+)\s*(a|p)/);if(!m)return null;let h=parseInt(m[1]),mn=parseInt(m[2]);if(m[3]==='p'&&h!==12)h+=12;if(m[3]==='a'&&h===12)h=0;return h+mn/60;}
-
-  const byDate={};
-  stops.forEach(s=>{if(!byDate[s.date])byDate[s.date]=[];byDate[s.date].push(s);});
-
-  const dailyRows=[], clockToFirst=[], allGaps=[];
-  Object.keys(byDate).sort().forEach(date=>{
-    const ds=byDate[date].sort((a,b)=>a.time.localeCompare(b.time));
-    const fh=parseInt(ds[0].time.split(':')[0])+parseInt(ds[0].time.split(':')[1])/60;
-    const lh=parseInt(ds[ds.length-1].time.split(':')[0])+parseInt(ds[ds.length-1].time.split(':')[1])/60;
-    const dayGaps=[];
-    for(let i=1;i<ds.length;i++){const t1=ds[i-1].time.split(':').map(Number),t2=ds[i].time.split(':').map(Number);const g=(t2[0]*60+t2[1])-(t1[0]*60+t1[1]);if(g>0&&g<480){dayGaps.push(g);allGaps.push(g);}}
-    const b6=b600.find(r=>r.date===date);
-    const row={date,stops:ds.length,first:ds[0].time,last:ds[ds.length-1].time,avgGap:dayGaps.length?dayGaps.reduce((a,v)=>a+v,0)/dayGaps.length:0,maxGap:dayGaps.length?Math.max(...dayGaps):0,clockIn:b6?.clockIn||'—',clockOut:b6?.clockOut||'—',totalHrs:b6?.totalHrs||0,cities:[...new Set(ds.map(s=>s.city))]};
-    dailyRows.push(row);
-    if(b6?.clockIn){const ci=parseClk(b6.clockIn);if(ci!==null){const gapMin=Math.round((fh-ci)*60);if(gapMin>=0&&gapMin<600)clockToFirst.push({date,clockIn:b6.clockIn,firstDel:ds[0].time,gapMin,stops:ds.length});}}
-  });
-  clockToFirst.sort((a,b)=>b.gapMin-a.gapMin);
-
-  const avgGap=allGaps.length?allGaps.reduce((a,v)=>a+v,0)/allGaps.length:0;
-  const medGap=allGaps.length?allGaps.sort((a,b)=>a-b)[Math.floor(allGaps.length/2)]:0;
-  const p90Gap=allGaps.length?allGaps[Math.floor(allGaps.length*0.9)]:0;
-  const custCount={},cityCount={};
-  stops.forEach(s=>{custCount[s.customer]=(custCount[s.customer]||0)+1;if(s.city)cityCount[s.city]=(cityCount[s.city]||0)+1;});
-
-  const clockIns=b600.map(r=>parseClk(r.clockIn)).filter(v=>v!==null);
-  function fmt(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return `${hh}:${String(mm).padStart(2,'0')}`;}
-
-  try{
-    const res=await fetch('/api/sentinel-ai',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        driverName, driverType, driverCo,
-        kpis:{
-          avgStopsDay: dailyRows.length? (stops.length/dailyRows.length).toFixed(1) : '?',
-          avgShift: b600.length? (b600.reduce((a,r)=>a+(r.totalHrs||0),0)/b600.length).toFixed(1) : '?',
-          avgFirstDel: clockToFirst.length? fmt(clockToFirst.reduce((a,r)=>a+parseInt(r.firstDel.split(':')[0])+parseInt(r.firstDel.split(':')[1])/60,0)/clockToFirst.length) : '?',
-          avgGap: avgGap.toFixed(0), medGap: medGap.toFixed(0), p90Gap: p90Gap.toFixed(0),
-          avgClockIn: clockIns.length? fmt(clockIns.reduce((a,v)=>a+v,0)/clockIns.length) : '?',
-          totalStops: stops.length
-        },
-        clockToFirst: clockToFirst.slice(0,30),
-        dailyRows: dailyRows.slice(0,30),
-        topCustomers: Object.entries(custCount).sort((a,b)=>b[1]-a[1]).slice(0,8),
-        topCities: Object.entries(cityCount).sort((a,b)=>b[1]-a[1]).slice(0,6),
-        fleetBench: FB,
-        typeBench: TB
-      })
-    });
-    const data=await res.json();
-    if(data.success){
-      txt.textContent=data.analysis;
-      status.textContent=`Analysis complete · ${data.usage?.input_tokens||0}+${data.usage?.output_tokens||0} tokens`;
-      status.style.color='var(--green)';
-    } else {
-      txt.textContent='Error: '+(data.error||'Unknown error')+'\n'+(data.detail||'');
-      status.textContent='Failed';
-      status.style.color='var(--red2)';
-    }
-  }catch(e){
-    txt.textContent='Error: '+e.message;
-    status.textContent='Failed';
-    status.style.color='var(--red2)';
-  }
-}
-
-async function requestDashcam(driverName, date, time, vehicleId){
-  const ts=`${date}T${time}:00`;
-  log(`📹 Requesting dashcam for ${driverName} at ${ts} (vehicle ${vehicleId||'unknown'})...`,'hi');
-
-  // Find vehicle ID from cache if not provided
-  let vid=vehicleId;
-  if(!vid){
-    // Try to find from roster/cache
-    const profile=getDriverProfile(driverName);
-    for(const [num,v] of Object.entries(vehicleCache)){
-      if(v.currentDriver&&diMatchDriver(v.currentDriver,driverName)){vid=v.id;break;}
-    }
-  }
-
-  if(!vid){
-    alert(`Cannot request dashcam: no vehicle ID found for ${driverName}. Run an ENGAGE scan for this date first to populate vehicle data.`);
-    return;
-  }
-
-  try{
-    const res=await fetch(`/api/motive-dashcam?action=video_request&vehicle_id=${vid}&start_time=${encodeURIComponent(ts)}`);
-    const data=await res.json();
-    if(res.ok){
-      alert(`✅ Dashcam footage requested for ${driverName} at ${time} on ${date}.\n\nRequest ID: ${data.request_id||'pending'}\nFootage will be sent to your Motive email within ~5 minutes.`);
-      log(`✅ Dashcam request submitted: ${driverName} at ${ts}`,'ok');
-    } else {
-      alert(`Dashcam request failed: ${data.error||JSON.stringify(data)}`);
-      log(`⚠️ Dashcam request failed: ${data.error||'unknown'}`,'warn');
-    }
-  }catch(e){
-    alert(`Dashcam request error: ${e.message}`);
-    log(`⚠️ Dashcam error: ${e.message}`,'err');
-  }
-}
-
-// ═══════════════════════════════════════════
-// DRIVER INTEL
-// ═══════════════════════════════════════════
-let diRange = 'month';
-
-function diSetRange(r){
-  diRange=r;
-  document.querySelectorAll('#tab-driver .fb-btn').forEach(b=>b.classList.remove('active'));
-  const idMap={week:'diWeek',month:'diMonth','90d':'di90d','6mo':'di6mo','1yr':'di1yr',all:'diAll'};
-  const el=document.getElementById(idMap[r]);
-  if(el) el.classList.add('active');
-  const pick=document.getElementById('diDriverPick');
-  if(pick.value) renderDriverIntel(pick.value);
-}
-
-// Canonical name map — every alias resolves to one display name (GLOBAL)
-const CANONICAL_NAME = {
-  'james':'James Davis','james davis':'James Davis',
-  'leslie':'Leslie Thomas','leslie thomas':'Leslie Thomas',
-  'brent bryd':'Brent Byrd','brenton byrd':'Brent Byrd','brent boyd':'Brent Byrd',
-  'chris head':'Chris Head','c head':'Chris Head',
-  'denis salkic':'Denis Salkic','denis salikic':'Denis Salkic',
-  'junior thomas':'Junior Thomas','junior thoamas':'Junior Thomas',
-  'mandi malbrough':'Mandi Malbrough','mandi malborough':'Mandi Malbrough','mandi marlboroug':'Mandi Malbrough',
-  'terrence taylor':'Terrence Taylor','terrance taylor':'Terrence Taylor',
-  'terry gambrell':'Terry Gambrell','t gambrell':'Terry Gambrell',
-  'william tillery':'William Tillery','bill tillery':'William Tillery',
-  'jonathan sailors':'Jonathan Sailors','johnathan sailers':'Jonathan Sailors',
-  'alfred andi':'Alfred Andi','fred andi':'Alfred Andi',
-  'jean delsoin':'Jean Delsoin','jean delsion':'Jean Delsoin',
-  'kobe boakye':'Kobe Boakye','kobe kawakabe':'Kobe Boakye',
-  'jovenski gibbs':'Jovenski Gibbs','joe gibbs':'Jovenski Gibbs',
-};
-function toCanonical(name){
-  if(!name) return '';
-  const k=name.toLowerCase().trim();
-  return CANONICAL_NAME[k] || name.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
-}
-
-// ═══════════════════════════════════════════
-// NAME MATCHING AUDIT
-// Cross-references: DRIVER_ROSTER ↔ Motive ↔ B600 ↔ NuVizz
-// ═══════════════════════════════════════════
-function fuzzyMatch(name, candidates){
-  if(!name) return [];
-  const n=name.toLowerCase().trim();
-  const np=n.split(/\s+/);
-  const nFirst=np[0]||'', nLast=np[np.length-1]||'';
-  const matches=[];
-  for(const c of candidates){
-    const cl=c.toLowerCase().trim();
-    if(cl===n) { matches.push({name:c, type:'exact', score:100}); continue; }
-    const cp=cl.split(/\s+/);
-    const cFirst=cp[0]||'', cLast=cp[cp.length-1]||'';
-    // First+last match
-    if(np.length>=2 && cp.length>=2 && nFirst===cFirst && nLast===cLast){
-      matches.push({name:c, type:'first+last', score:95}); continue;
-    }
-    // Last name + first initial
-    if(nLast.length>2 && cLast.length>2 && nLast===cLast && nFirst[0]===cFirst[0]){
-      matches.push({name:c, type:'last+initial', score:85}); continue;
-    }
-    // Last name only (longer = more specific)
-    if(nLast.length>3 && cLast.length>3 && nLast===cLast){
-      matches.push({name:c, type:'last', score:70}); continue;
-    }
-    // First name only with same type? Lower score
-    if(nFirst.length>3 && cFirst.length>3 && nFirst===cFirst){
-      matches.push({name:c, type:'first', score:50}); continue;
-    }
-    // Substring (catches typos like "Mandi Marlboroug")
-    if(nLast.length>4 && cLast.length>4){
-      const minLen=Math.min(nLast.length,cLast.length);
-      let common=0;
-      for(let i=0;i<minLen;i++) if(nLast[i]===cLast[i]) common++; else break;
-      if(common>=4) {
-        matches.push({name:c, type:'partial-last', score:40+common}); continue;
-      }
-    }
-  }
-  return matches.sort((a,b)=>b.score-a.score);
-}
-
-let _lastMotiveDrivers=[]; // cached from last audit run
-
-async function renderMatchAudit(forceRefetch){
-  const el=document.getElementById('matchAuditContent');
-  if(!el) return;
-  el.innerHTML=`<div style="text-align:center;padding:30px;color:var(--text2);font-family:var(--mono);font-size:11px;">Running match audit...</div>`;
-
-  // Fetch Motive drivers if needed
-  let motiveDrivers=_lastMotiveDrivers;
-  if(forceRefetch || !motiveDrivers.length){
-    try{
-      el.innerHTML=`<div style="text-align:center;padding:30px;color:var(--text2);font-family:var(--mono);font-size:11px;">Fetching Motive driver roster...</div>`;
-      motiveDrivers=await fetchAllMotiveDrivers();
-      _lastMotiveDrivers=motiveDrivers;
-    }catch(e){
-      log(`Match audit: Motive fetch failed - ${e.message}`,'warn');
-      motiveDrivers=[];
-    }
-  }
-
-  // Build canonical sets
-  const rosterCanonicals=new Set();
-  for(const k of Object.keys(DRIVER_ROSTER)) rosterCanonicals.add(toCanonical(k));
-  const rosterArr=[...rosterCanonicals];
-
-  // B600: unique driver names
-  const b600Names=new Set();
-  if(window._b600History) window._b600History.forEach(r=>b600Names.add(r.name));
-
-  // NuVizz: unique driver names
-  const nuvizzNames=new Set();
-  if(window._nuvizzHistory) window._nuvizzHistory.forEach(r=>nuvizzNames.add(r[2]));
-
-  // Motive: unique names
-  const motiveNames=new Set(motiveDrivers.map(d=>d.name));
-
-  // For each canonical roster name, find best match in each source
-  const matchRows=[];
-  for(const canon of rosterArr){
-    const profile=getDriverProfile(canon);
-    // Get all aliases for this canonical name
-    const aliases=Object.keys(DRIVER_ROSTER).filter(k=>toCanonical(k)===canon);
-
-    // Try matching with each alias, take best match per source
-    function bestMatch(targetSet){
-      const targetArr=[...targetSet];
-      let best=null;
-      for(const a of aliases){
-        const matches=fuzzyMatch(a, targetArr);
-        if(matches.length && (!best || matches[0].score>best.score)){
-          best=matches[0];
-        }
-      }
-      return best;
-    }
-
-    const motiveMatch=bestMatch(motiveNames);
-    const b600Match=bestMatch(b600Names);
-    const nuvizzMatch=bestMatch(nuvizzNames);
-
-    // Status: full match, partial, missing
-    const sources=[motiveMatch, b600Match, nuvizzMatch];
-    const presentCount=sources.filter(m=>m && m.score>=70).length;
-    const lowConfCount=sources.filter(m=>m && m.score>=40 && m.score<70).length;
-    let status='good';
-    if(presentCount===0) status='missing';
-    else if(presentCount<3 || lowConfCount>0) status='partial';
-
-    matchRows.push({
-      canonical: canon,
-      type: profile.type||'?',
-      role: profile.role||'?',
-      co: profile.co||'?',
-      aliases,
-      motive: motiveMatch,
-      b600: b600Match,
-      nuvizz: nuvizzMatch,
-      status
-    });
-  }
-
-  // Find ORPHANS — names in data but not in any roster alias
-  const allCanonicals=new Set(rosterArr.map(n=>n.toLowerCase()));
-  const allAliases=new Set(Object.keys(DRIVER_ROSTER));
-  function isOrphan(name){
-    if(!name) return false;
-    const lower=name.toLowerCase().trim();
-    if(allAliases.has(lower)) return false;
-    // Check if it fuzzy-matches a roster name
-    const matches=fuzzyMatch(name, rosterArr);
-    return !(matches.length && matches[0].score>=70);
-  }
-  const orphansMotive=[...motiveNames].filter(n=>isOrphan(n));
-  const orphansB600=[...b600Names].filter(n=>isOrphan(n));
-  const orphansNuvizz=[...nuvizzNames].filter(n=>isOrphan(n));
-
-  // Sort: missing first, then partial, then good
-  matchRows.sort((a,b)=>{
-    const order={missing:0,partial:1,good:2};
-    if(order[a.status]!==order[b.status]) return order[a.status]-order[b.status];
-    return a.canonical.localeCompare(b.canonical);
-  });
-
-  const stats={
-    total: matchRows.length,
-    good: matchRows.filter(r=>r.status==='good').length,
-    partial: matchRows.filter(r=>r.status==='partial').length,
-    missing: matchRows.filter(r=>r.status==='missing').length
-  };
-
-  function renderMatchCell(m){
-    if(!m) return '<span style="color:var(--text3);">—</span>';
-    const col = m.score>=95?'var(--green)' : m.score>=70?'var(--amber)' : 'var(--red)';
-    const label = m.score>=95?'✓' : m.score>=70?'~' : '?';
-    return `<span style="color:${col};font-weight:600;" title="${m.type} match (score ${m.score})">${label}</span> <span style="color:var(--text2);">${m.name}</span>`;
-  }
-
-  // Build sorted name lists for dropdowns
-  const motiveArr=['(no match)',...[...motiveNames].sort()];
-  const b600Arr=['(no match)',...[...b600Names].sort()];
-  const nuvizzArr=['(no match)',...[...nuvizzNames].sort()];
-
-  // Save for export
-  window._lastMatchRows=matchRows;
-  window._lastOrphans={motive:orphansMotive, b600:orphansB600, nuvizz:orphansNuvizz};
-  window._matchMotiveArr=motiveArr;
-  window._matchB600Arr=b600Arr;
-  window._matchNuvizzArr=nuvizzArr;
-
-  el.innerHTML=`
-    <!-- Stats -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:14px;">
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">ROSTER</div>
-        <div style="font-family:var(--head);font-size:20px;color:var(--blue3);">${stats.total}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">FULL MATCH</div>
-        <div style="font-family:var(--head);font-size:20px;color:var(--green);" id="matchStatGood">${stats.good}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">PARTIAL</div>
-        <div style="font-family:var(--head);font-size:20px;color:var(--amber);" id="matchStatPartial">${stats.partial}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">MISSING</div>
-        <div style="font-family:var(--head);font-size:20px;color:var(--red);" id="matchStatMissing">${stats.missing}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:10px;text-align:center;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">ORPHANS</div>
-        <div style="font-family:var(--head);font-size:20px;color:${(orphansMotive.length+orphansB600.length+orphansNuvizz.length)>0?'var(--red)':'var(--green)'};">${orphansMotive.length+orphansB600.length+orphansNuvizz.length}</div>
-        <div style="font-family:var(--mono);font-size:8px;color:var(--text3);">M:${orphansMotive.length} B:${orphansB600.length} N:${orphansNuvizz.length}</div>
-      </div>
-    </div>
-
-    <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:10px;">
-      Click any <span style="color:var(--blue3);">MOTIVE</span> / <span style="color:var(--amber);">B600</span> / <span style="color:var(--green);">NUVIZZ</span> cell to pick the correct name from that data source. Changes are saved locally and exportable.
-    </div>
-
-    <!-- Match table — editable -->
-    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;overflow-x:auto;margin-bottom:14px;">
-      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;" id="matchTable">
-        <thead>
-          <tr style="border-bottom:2px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;">
-            <th style="padding:6px 8px;min-width:140px;">CANONICAL NAME</th>
-            <th style="padding:6px 8px;">TYPE</th>
-            <th style="padding:6px 8px;color:var(--blue3);min-width:160px;">🔵 MOTIVE</th>
-            <th style="padding:6px 8px;color:var(--amber);min-width:160px;">🟡 B600</th>
-            <th style="padding:6px 8px;color:var(--green);min-width:160px;">🟢 NUVIZZ</th>
-            <th style="padding:6px 8px;min-width:60px;">STATUS</th>
-          </tr>
-        </thead>
-        <tbody id="matchTableBody">
-          ${matchRows.map((r,i)=>{
-            const rowBg=r.status==='missing'?'rgba(204,17,17,.04)':r.status==='partial'?'rgba(204,136,0,.03)':'';
-            const statusDot=r.status==='good'?'<span style="color:var(--green);">✓</span>':r.status==='partial'?'<span style="color:var(--amber);">~</span>':'<span style="color:var(--red);">✗</span>';
-            const makeSelect=(source,current,arr,idx)=>{
-              const val=current?current.name:'(no match)';
-              const col=source==='motive'?'var(--blue3)':source==='b600'?'var(--amber)':'var(--green)';
-              const opts=arr.map(n=>`<option value="${n.replace(/"/g,'&quot;')}"${n===val?' selected':''}>${n}</option>`).join('');
-              return `<select onchange="matchCellChanged(${idx},'${source}',this.value)"
-                style="width:100%;background:${current&&current.score>=95?'rgba(0,153,77,.08)':current&&current.score>=70?'rgba(204,136,0,.08)':'rgba(204,17,17,.06)'};
-                color:var(--text);border:1px solid ${current&&current.score>=95?'var(--green)':current&&current.score>=70?'var(--amber)':'rgba(204,17,17,.3)'};
-                border-radius:3px;padding:4px 6px;font-family:var(--mono);font-size:10px;cursor:pointer;outline:none;">${opts}</select>`;
-            };
-            return `<tr id="matchRow_${i}" style="border-bottom:1px solid rgba(0,0,0,.04);background:${rowBg};">
-              <td style="padding:5px 8px;color:var(--text);font-weight:700;">${r.canonical}</td>
-              <td style="padding:5px 8px;color:var(--text2);white-space:nowrap;">${r.type==='tractor'?'🚛':'🚚'} ${r.type}</td>
-              <td style="padding:4px 6px;">${makeSelect('motive',r.motive,motiveArr,i)}</td>
-              <td style="padding:4px 6px;">${makeSelect('b600',r.b600,b600Arr,i)}</td>
-              <td style="padding:4px 6px;">${makeSelect('nuvizz',r.nuvizz,nuvizzArr,i)}</td>
-              <td style="padding:5px 8px;text-align:center;">${statusDot}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-      <button onclick="saveMatchEdits()" style="background:var(--green);color:#fff;border:none;border-radius:var(--radius);padding:8px 18px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">💾 SAVE & APPLY ALIASES</button>
-      <button onclick="exportMatchReport()" style="background:var(--s2);color:var(--text);border:1px solid var(--b1);border-radius:var(--radius);padding:8px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;">📥 EXPORT CSV</button>
-      <div id="matchSaveStatus" style="font-family:var(--mono);font-size:10px;color:var(--text2);padding:8px 0;"></div>
-    </div>
-
-    <!-- Orphans -->
-    ${orphansMotive.length||orphansB600.length||orphansNuvizz.length ? `
-    <div style="background:rgba(204,17,17,.04);border:1px solid rgba(204,17,17,.2);border-radius:var(--radius);padding:14px;">
-      <div style="font-family:var(--head);font-size:11px;color:var(--red);letter-spacing:1px;margin-bottom:10px;">⚠️ ORPHANS — in data but not matched to any roster driver</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
-        ${orphansMotive.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--blue3);margin-bottom:4px;">MOTIVE (${orphansMotive.length})</div>${orphansMotive.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:3px 8px;background:var(--s2);border-radius:3px;margin-bottom:2px;border:1px solid var(--b1);">${n}</div>`).join('')}</div>`:''}
-        ${orphansB600.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--amber);margin-bottom:4px;">B600 (${orphansB600.length})</div>${orphansB600.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:3px 8px;background:var(--s2);border-radius:3px;margin-bottom:2px;border:1px solid var(--b1);">${n}</div>`).join('')}</div>`:''}
-        ${orphansNuvizz.length?`<div><div style="font-family:var(--mono);font-size:9px;color:var(--green);margin-bottom:4px;">NUVIZZ (${orphansNuvizz.length})</div>${orphansNuvizz.map(n=>`<div style="font-family:var(--mono);font-size:10px;color:var(--text);padding:3px 8px;background:var(--s2);border-radius:3px;margin-bottom:2px;border:1px solid var(--b1);">${n}</div>`).join('')}</div>`:''}
-      </div>
-    </div>` : `<div style="background:rgba(0,153,77,.04);border:1px solid rgba(0,153,77,.2);border-radius:var(--radius);padding:14px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--green);">✅ No orphans — every name in the data maps to a roster entry.</div>`}
-  `;
-  // Apply current filter after render
-  applyMatchFilter();
-}
-
-let _matchFilter='all';
-function setMatchFilter(f){
-  _matchFilter=f;
-  document.querySelectorAll('[id^="mf-"]').forEach(b=>b.classList.remove('active'));
-  const el=document.getElementById('mf-'+f);
-  if(el) el.classList.add('active');
-  applyMatchFilter();
-}
-
-function applyMatchFilter(){
-  if(!window._lastMatchRows) return;
-  document.querySelectorAll('#matchTableBody tr').forEach((tr,i)=>{
-    const r=window._lastMatchRows[i];
-    if(!r){ tr.style.display=''; return; }
-    let show=true;
-    if(_matchFilter==='davis') show=r.co==='davis';
-    else if(_matchFilter==='owner') show=r.co==='owner';
-    else if(_matchFilter==='tractor') show=r.type==='tractor';
-    else if(_matchFilter==='straight') show=r.type==='straight'||r.type==='box';
-    else if(_matchFilter==='partial') show=r.status==='partial';
-    else if(_matchFilter==='missing') show=r.status==='missing';
-    tr.style.display=show?'':'none';
-  });
-}
-
-function matchCellChanged(rowIdx, source, value){
-  if(!window._lastMatchRows) return;
-  const row=window._lastMatchRows[rowIdx];
-  if(!row) return;
-  const isMatch = value && value !== '(no match)';
-  row[source] = isMatch ? { name: value, score: 100, type: 'manual' } : null;
-
-  // Update row status and background
-  const sources=['motive','b600','nuvizz'];
-  const presentCount=sources.filter(s=>row[s]&&row[s].score>=70).length;
-  row.status = presentCount===3 ? 'good' : presentCount>0 ? 'partial' : 'missing';
-
-  const tr=document.getElementById(`matchRow_${rowIdx}`);
-  if(tr){
-    tr.style.background=row.status==='missing'?'rgba(204,17,17,.04)':row.status==='partial'?'rgba(204,136,0,.03)':'';
-    const statusCell=tr.cells[tr.cells.length-1];
-    statusCell.innerHTML=row.status==='good'?'<span style="color:var(--green);">✓</span>':row.status==='partial'?'<span style="color:var(--amber);">~</span>':'<span style="color:var(--red);">✗</span>';
-
-    // Update the select border color
-    const selIdx=['motive','b600','nuvizz'].indexOf(source)+2;
-    const sel=tr.cells[selIdx]?.querySelector('select');
-    if(sel){
-      sel.style.background=isMatch?'rgba(0,153,77,.08)':'rgba(204,17,17,.06)';
-      sel.style.borderColor=isMatch?'var(--green)':'rgba(204,17,17,.3)';
-    }
-  }
-
-  const status=document.getElementById('matchSaveStatus');
-  if(status) status.textContent=`Edited: ${row.canonical} → ${source} = "${value}"`;
-}
-
-function saveMatchEdits(){
-  if(!window._lastMatchRows){ alert('Run match audit first'); return; }
-  // Build new aliases to add to CANONICAL_NAME
-  const newAliases=[];
-  window._lastMatchRows.forEach(r=>{
-    ['motive','b600','nuvizz'].forEach(src=>{
-      const m=r[src];
-      if(!m||m.type!=='manual') return;
-      const alias=m.name.toLowerCase().trim();
-      const canonical=r.canonical;
-      if(alias&&canonical&&toCanonical(m.name)!==canonical){
-        newAliases.push({alias, canonical, source:src});
-        // Apply to runtime CANONICAL_NAME map immediately
-        CANONICAL_NAME[alias]=canonical;
-      }
-    });
-  });
-
-  const status=document.getElementById('matchSaveStatus');
-  if(newAliases.length===0){
-    status.style.color='var(--text2)';
-    status.textContent='No manual edits to save — all matches are already in the canonical map.';
-    return;
-  }
-
-  // Show what aliases were added
-  status.style.color='var(--green)';
-  status.innerHTML=`✅ Applied ${newAliases.length} alias${newAliases.length>1?'es':''} to CANONICAL_NAME (active for this session):<br>${newAliases.map(a=>`<span style="color:var(--text2);">"${a.alias}" → "${a.canonical}" (${a.source})</span>`).join('<br>')}`;
-
-  // Repopulate driver picker with new aliases
-  populateDriverPicker();
-  log(`Match audit: ${newAliases.length} manual aliases applied`,'ok');
-
-  // Show code to paste into the CANONICAL_NAME map for permanent fix
-  const code=newAliases.map(a=>`  '${a.alias}':'${a.canonical}',`).join('\n');
-  const codeBox=document.createElement('div');
-  codeBox.style.cssText='margin-top:10px;background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:10px;font-family:var(--mono);font-size:9px;color:var(--text);white-space:pre;overflow-x:auto;';
-  codeBox.textContent=`Add to CANONICAL_NAME to make permanent:\n${code}`;
-  status.appendChild(codeBox);
-}
-
-function exportMatchReport(){
-  if(!window._lastMatchRows){ alert('Run match audit first'); return; }
-  const rows=window._lastMatchRows;
-  const orphans=window._lastOrphans||{};
-  let csv='Canonical,Type,Motive Match,Motive Score,Motive Manual,B600 Match,B600 Score,B600 Manual,NuVizz Match,NuVizz Score,NuVizz Manual,Status\n';
-  rows.forEach(r=>{
-    csv+=`"${r.canonical}",${r.type},"${r.motive?.name||''}",${r.motive?.score||''},"${r.motive?.type==='manual'?'YES':''}","${r.b600?.name||''}",${r.b600?.score||''},"${r.b600?.type==='manual'?'YES':''}","${r.nuvizz?.name||''}",${r.nuvizz?.score||''},"${r.nuvizz?.type==='manual'?'YES':''}",${r.status}\n`;
-  });
-  csv+='\nOrphans\nSource,Name\n';
-  (orphans.motive||[]).forEach(n=>csv+=`Motive,"${n}"\n`);
-  (orphans.b600||[]).forEach(n=>csv+=`B600,"${n}"\n`);
-  (orphans.nuvizz||[]).forEach(n=>csv+=`NuVizz,"${n}"\n`);
-  const blob=new Blob([csv],{type:'text/csv'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`sentinel-match-audit-${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}
-
-// ═══════════════════════════════════════════
-// NAME MATCHING (legacy diMatchDriver)
-
-function populateDriverPicker(){
-  const pick=document.getElementById('diDriverPick');
-  if(!pick) return;
-  const seen=new Set();
-  const byGroup={shuttle:[],loadshift:[],tractor:[],straight:[],owner_tractor:[],owner_straight:[]};
-  for(const [key,info] of Object.entries(DRIVER_ROSTER)){
-    const name=toCanonical(key);
-    if(seen.has(name)) continue;
-    seen.add(name);
-    const group = info.co==='owner'
-      ? (info.type==='tractor'?'owner_tractor':'owner_straight')
-      : info.role==='shuttle'?'shuttle'
-      : info.role==='loadshift'?'loadshift'
-      : info.type==='tractor'?'tractor':'straight';
-    byGroup[group].push({name,type:info.type,role:info.role,co:info.co});
-  }
-  pick.innerHTML='<option value="">— Select Driver —</option>';
-  const labels={tractor:'TRACTOR DRIVERS (Davis)',straight:'BOX/STRAIGHT DRIVERS (Davis)',
-    shuttle:'SHUTTLE DRIVERS',loadshift:'LOAD/SHIFT',
-    owner_tractor:'CONTRACTORS — TRACTOR',owner_straight:'CONTRACTORS — BOX/STRAIGHT'};
-  ['tractor','straight','shuttle','loadshift','owner_tractor','owner_straight'].forEach(g=>{
-    const list=byGroup[g];
-    if(!list.length) return;
-    list.sort((a,b)=>a.name.localeCompare(b.name));
-    pick.innerHTML+=`<optgroup label="${labels[g]}">`;
-    list.forEach(d=>{
-      const tag=d.type==='tractor'?'🚛':'🚚';
-      pick.innerHTML+=`<option value="${d.name.replace(/"/g,'&quot;')}">${tag} ${d.name}</option>`;
-    });
-    pick.innerHTML+=`</optgroup>`;
-  });
-}
-
-function diDateRange(){
-  const now=new Date();
-  if(diRange==='week') return new Date(now-7*864e5);
-  if(diRange==='month') return new Date(now-30*864e5);
-  if(diRange==='90d') return new Date(now-90*864e5);
-  if(diRange==='6mo') return new Date(now-182*864e5);
-  if(diRange==='1yr') return new Date(now-365*864e5);
-  if(diRange==='custom'){
-    const s=document.getElementById('diCustomStart')?.value;
-    if(s) return new Date(s);
-  }
-  return new Date('2020-01-01');
-}
-
-function diDateRangeEnd(){
-  if(diRange==='custom'){
-    const e=document.getElementById('diCustomEnd')?.value;
-    if(e) return new Date(e+'T23:59:59');
-  }
-  return new Date();
-}
-
-// Canonical name groups — all names that refer to the same person
-function diMatchDriver(a, b){
-  if(!a||!b) return false;
-  return toCanonical(a)===toCanonical(b);
-}
-
-function renderDriverIntel(driverName){
-  if(!driverName){ document.getElementById('diContent').style.display='none'; document.getElementById('diEmpty').style.display=''; return; }
-  document.getElementById('diEmpty').style.display='none';
-  document.getElementById('diContent').style.display='block';
-
-  // Async-load flag history from Firestore (non-blocking)
-  loadDriverHistory(driverName).then(history=>renderDiHistoryPanel(driverName, history));
-
-  const cutoff=diDateRange();
-  const cutoffEnd=diDateRangeEnd();
-
-  // Gather B600 data for this driver
-  const b600=[];
-  if(window._b600History){
-    window._b600History.forEach(r=>{
-      if(!diMatchDriver(r.name, driverName)) return;
-      const d=new Date(r.date);
-      if(d>=cutoff && d<=cutoffEnd) b600.push(r);
-    });
-  }
-
-  // Gather NuVizz stops for this driver
-  const stops=[];
-  if(window._nuvizzHistory){
-    window._nuvizzHistory.forEach(r=>{
-      // r = [date, time, driver, customer, city, zip, stopNum]
-      if(!diMatchDriver(r[2], driverName)) return;
-      const d=new Date(r[0]);
-      if(d>=cutoff && d<=cutoffEnd) stops.push({date:r[0], time:r[1], customer:r[3], city:r[4], zip:r[5], stopNum:r[6]});
-    });
-  }
-
-  // Compute B600 stats
-  const b600Days=b600.length;
-  const b600TotalHrs=b600.reduce((a,r)=>a+(r.totalHrs||0),0);
-  const b600AvgShift=b600Days? (b600TotalHrs/b600Days) : 0;
-
-  // Parse B600 clock-in times to decimal hours
-  function parseClk(t){
-    if(!t) return null;
-    t=t.trim().toLowerCase();
-    const m=t.match(/(\d+):(\d+)\s*(a|p)/);
-    if(!m) return null;
-    let h=parseInt(m[1]),mn=parseInt(m[2]);
-    if(m[3]==='p'&&h!==12) h+=12;
-    if(m[3]==='a'&&h===12) h=0;
-    return h+mn/60;
-  }
-  const clockIns=b600.map(r=>parseClk(r.clockIn)).filter(v=>v!==null);
-  const avgClockIn=clockIns.length? clockIns.reduce((a,v)=>a+v,0)/clockIns.length : null;
-
-  // Compute NuVizz stats
-  const byDate={};
-  stops.forEach(s=>{
-    if(!byDate[s.date]) byDate[s.date]=[];
-    byDate[s.date].push(s);
-  });
-  const stopDates=Object.keys(byDate).sort();
-  const totalStops=stops.length;
-  const daysWithStops=stopDates.length;
-  const avgStopsDay=daysWithStops? totalStops/daysWithStops : 0;
-
-  // First/last delivery per day + gaps
-  const firstDelTimes=[], lastDelTimes=[], allGaps=[];
-  const dailyRows=[];
-  stopDates.forEach(date=>{
-    const dayStops=byDate[date].sort((a,b)=>a.time.localeCompare(b.time));
-    const first=dayStops[0], last=dayStops[dayStops.length-1];
-    const fh=parseInt(first.time.split(':')[0])+parseInt(first.time.split(':')[1])/60;
-    const lh=parseInt(last.time.split(':')[0])+parseInt(last.time.split(':')[1])/60;
-    firstDelTimes.push(fh);
-    lastDelTimes.push(lh);
-    const spanHrs=lh-fh;
-    const stopsPerHr=spanHrs>0? dayStops.length/spanHrs : 0;
-
-    // Compute gaps
-    const dayGaps=[];
-    for(let i=1;i<dayStops.length;i++){
-      const t1=dayStops[i-1].time.split(':').map(Number), t2=dayStops[i].time.split(':').map(Number);
-      const gap=(t2[0]*60+t2[1])-(t1[0]*60+t1[1]);
-      if(gap>0 && gap<480){ dayGaps.push(gap); allGaps.push(gap); }
-    }
-    const avgGap=dayGaps.length? dayGaps.reduce((a,v)=>a+v,0)/dayGaps.length : 0;
-    const maxGap=dayGaps.length? Math.max(...dayGaps) : 0;
-
-    // Find B600 for this date
-    const b6=b600.find(r=>r.date===date);
-
-    dailyRows.push({date, stops:dayStops.length, first:first.time, last:last.time, spanHrs, stopsPerHr, avgGap, maxGap, clockIn:b6?.clockIn||'—', clockOut:b6?.clockOut||'—', totalHrs:b6?.totalHrs||0, cities:[...new Set(dayStops.map(s=>s.city))]});
-  });
-
-  const avgFirst=firstDelTimes.length? firstDelTimes.reduce((a,v)=>a+v,0)/firstDelTimes.length : 0;
-  const avgLast=lastDelTimes.length? lastDelTimes.reduce((a,v)=>a+v,0)/lastDelTimes.length : 0;
-  const avgGap=allGaps.length? allGaps.reduce((a,v)=>a+v,0)/allGaps.length : 0;
-  const medGap=allGaps.length? allGaps.sort((a,b)=>a-b)[Math.floor(allGaps.length/2)] : 0;
-  const p90Gap=allGaps.length? allGaps[Math.floor(allGaps.length*0.9)] : 0;
-
-  // CLOCK-IN → FIRST DELIVERY GAP (the key metric)
-  const clockToFirst=[];
-  dailyRows.forEach(r=>{
-    if(r.clockIn==='—'||!r.first) return;
-    const ci=parseClk(r.clockIn);
-    const fh=parseInt(r.first.split(':')[0])+parseInt(r.first.split(':')[1])/60;
-    if(ci===null||!fh) return;
-    const gapMin=Math.round((fh-ci)*60);
-    if(gapMin<0||gapMin>600) return; // skip nonsense
-    clockToFirst.push({date:r.date, clockIn:r.clockIn, firstDel:r.first, gapMin, stops:r.stops, clockInH:ci, firstDelH:fh});
-  });
-  clockToFirst.sort((a,b)=>b.gapMin-a.gapMin);
-  const avgC2F=clockToFirst.length? clockToFirst.reduce((a,r)=>a+r.gapMin,0)/clockToFirst.length : 0;
-  const medC2F=clockToFirst.length? clockToFirst.sort((a,b)=>a.gapMin-b.gapMin)[Math.floor(clockToFirst.length/2)].gapMin : 0;
-  const critC2F=clockToFirst.filter(r=>r.gapMin>=240).length;
-  const warnC2F=clockToFirst.filter(r=>r.gapMin>=180&&r.gapMin<240).length;
-  clockToFirst.sort((a,b)=>b.gapMin-a.gapMin); // re-sort worst first
-
-  // Top customers
-  const custCount={};
-  stops.forEach(s=>{ const c=s.customer||s.city; custCount[c]=(custCount[c]||0)+1; });
-  const topCust=Object.entries(custCount).sort((a,b)=>b[1]-a[1]).slice(0,10);
-
-  // Top cities
-  const cityCount={};
-  stops.forEach(s=>{ if(s.city) cityCount[s.city]=(cityCount[s.city]||0)+1; });
-  const topCities=Object.entries(cityCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
-
-  // Fleet comparison
-  const FB=FLEET_BENCH;
-  const profile=getDriverProfile(driverName);
-  const TB=TYPE_BENCH[profile.type]||TYPE_BENCH.straight;
-  const typeLabel=TB.label||profile.type;
-  const coLabel=profile.co==='owner'?'Contractor':'Davis';
-
-  function fmt(h){ const hh=Math.floor(h); const mm=Math.round((h-hh)*60); return `${hh}:${String(mm).padStart(2,'0')}`; }
-  function compare(val,bench,lower){
-    if(!val||!bench) return '';
-    const pct=((val-bench)/bench*100);
-    const bad=lower? pct<-10 : pct>10;
-    const good=lower? pct>10 : pct<-10;
-    const col=bad?'var(--red2)':good?'var(--green)':'var(--text)';
-    return `<span style="color:${col};font-size:9px;margin-left:4px;">(${pct>0?'+':''}${pct.toFixed(0)}% vs fleet)</span>`;
-  }
-  function compareType(val,bench,lower){
-    if(!val||!bench) return '';
-    const pct=((val-bench)/bench*100);
-    const bad=lower? pct<-10 : pct>10;
-    const good=lower? pct>10 : pct<-10;
-    const col=bad?'var(--red2)':good?'var(--green)':'var(--text2)';
-    return `<span style="color:${col};font-size:9px;margin-left:2px;">(${pct>0?'+':''}${pct.toFixed(0)}% vs ${typeLabel})</span>`;
-  }
-
-  // Render
-  const el=document.getElementById('diContent');
-  el.innerHTML=`
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-      <div style="font-family:var(--head);font-size:16px;color:var(--text);letter-spacing:1px;">${driverName}</div>
-      <span style="background:${profile.type==='tractor'?'rgba(0,102,255,.15)':'rgba(0,230,118,.12)'};color:${profile.type==='tractor'?'var(--blue3)':'var(--green)'};border:1px solid ${profile.type==='tractor'?'rgba(0,102,255,.3)':'rgba(0,230,118,.25)'};padding:3px 10px;border-radius:3px;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">${profile.type==='tractor'?'🚛':'🚚'} ${typeLabel.toUpperCase()}</span>
-      <span style="background:rgba(255,255,255,.04);color:var(--text2);border:1px solid var(--b1);padding:3px 10px;border-radius:3px;font-family:var(--mono);font-size:9px;">${coLabel} · ${profile.role}</span>
-      <button onclick="runSentinelAI('${driverName.replace(/'/g,"\\'")}','${profile.type}','${profile.co}')" style="margin-left:auto;background:linear-gradient(135deg,rgba(138,43,226,.2),rgba(0,212,255,.15));border:1px solid rgba(138,43,226,.4);border-radius:var(--radius);color:#c084fc;padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🤖 AI ANALYSIS</button>
-    </div>
-    <div id="diAiOutput" style="display:none;background:linear-gradient(135deg,rgba(138,43,226,.06),rgba(0,212,255,.04));border:1px solid rgba(138,43,226,.25);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-        <span style="font-family:var(--head);font-size:10px;color:#c084fc;letter-spacing:1px;">🤖 SENTINEL AI</span>
-        <span id="diAiStatus" style="font-family:var(--mono);font-size:9px;color:var(--text3);"></span>
-      </div>
-      <div id="diAiText" style="font-family:var(--ui);font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;"></div>
-    </div>
-
-    <!-- DRIVER FLAG HISTORY (from Firestore) -->
-    <div id="diHistory" style="display:none;"></div>
-
-    <!-- KPI CARDS -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;">
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Days Worked</div>
-        <div style="font-family:var(--head);font-size:22px;color:var(--cyan);margin-top:4px;">${Math.max(b600Days,daysWithStops)}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Total Stops</div>
-        <div style="font-family:var(--head);font-size:22px;color:var(--blue3);margin-top:4px;">${totalStops}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Stops/Day</div>
-        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${avgStopsDay.toFixed(1)}</div>
-        <div>${compare(avgStopsDay,FB.stopsDay.median,false)}${compareType(avgStopsDay,TB.stopsDay.median,false)}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Shift</div>
-        <div style="font-family:var(--head);font-size:22px;color:var(--text);margin-top:4px;">${b600AvgShift?b600AvgShift.toFixed(1)+'h':'—'}</div>
-        <div>${b600AvgShift?compare(b600AvgShift,FB.shift.mean,false):''}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg 1st Delivery</div>
-        <div style="font-family:var(--head);font-size:22px;color:${avgFirst>FB.firstDel.p90?'var(--red2)':'var(--green)'};margin-top:4px;">${avgFirst?fmt(avgFirst):'—'}</div>
-        <div>${avgFirst?compare(avgFirst,FB.firstDel.median,true):''}${avgFirst?compareType(avgFirst,TB.firstDel.median,true):''}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Last Delivery</div>
-        <div style="font-family:var(--head);font-size:18px;color:var(--text);margin-top:4px;">${avgLast?fmt(avgLast):'—'}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Gap</div>
-        <div style="font-family:var(--head);font-size:22px;color:${avgGap>FB.gapFlag?'var(--red2)':avgGap>FB.gapWarn?'var(--amber)':'var(--green)'};margin-top:4px;">${avgGap?avgGap.toFixed(0)+'m':'—'}</div>
-        <div>${avgGap?compare(avgGap,FB.gap.median,true):''}${avgGap?compareType(avgGap,TB.gap.median,true):''}</div>
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;">Avg Clock-In</div>
-        <div style="font-family:var(--head);font-size:18px;color:var(--text);margin-top:4px;">${avgClockIn?fmt(avgClockIn):'—'}</div>
-      </div>
-    </div>
-
-    <!-- PACE METRICS -->
-
-    <!-- CLOCK-IN → FIRST DELIVERY (KEY METRIC) -->
-    <div style="background:var(--s2);border:1px solid ${avgC2F>180?'var(--red)':avgC2F>120?'var(--amber)':'var(--b1)'};border-radius:var(--radius);padding:16px;margin-bottom:16px;${avgC2F>180?'box-shadow:0 0 12px rgba(255,26,26,.15);':''}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <div style="font-family:var(--head);font-size:11px;color:${avgC2F>180?'var(--red2)':'var(--energon)'};letter-spacing:1px;">⏱ CLOCK-IN → FIRST DELIVERY</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">${clockToFirst.length} days with both data sources</div>
-      </div>
-
-      <!-- Summary stats -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-bottom:14px;">
-        <div style="text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">AVG GAP</div>
-          <div style="font-family:var(--head);font-size:20px;color:${avgC2F>180?'var(--red2)':avgC2F>120?'var(--amber)':'var(--green)'};">${avgC2F?Math.round(avgC2F)+'m':'—'}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">${avgC2F?(avgC2F/60).toFixed(1)+'h':''}</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">MEDIAN</div>
-          <div style="font-family:var(--head);font-size:20px;color:${medC2F>180?'var(--red2)':medC2F>120?'var(--amber)':'var(--green)'};">${medC2F}m</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Fleet: ${Math.round(FLEET_BENCH.firstDel.median*60-360)}m</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">4+ HRS</div>
-          <div style="font-family:var(--head);font-size:20px;color:${critC2F>0?'var(--red2)':'var(--green)'};">${critC2F}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">critical days</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">3+ HRS</div>
-          <div style="font-family:var(--head);font-size:20px;color:${warnC2F>0?'var(--amber)':'var(--green)'};">${warnC2F}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">warning days</div>
-        </div>
-      </div>
-
-      <!-- Every instance table -->
-      <div style="max-height:320px;overflow-y:auto;border-top:1px solid var(--b1);padding-top:8px;">
-        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
-          <thead>
-            <tr style="border-bottom:1px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;position:sticky;top:0;background:var(--s2);">
-              <th style="padding:5px 8px;">DATE</th>
-              <th style="padding:5px 8px;">CLOCK IN</th>
-              <th style="padding:5px 8px;">1ST DELIVERY</th>
-              <th style="padding:5px 8px;">GAP</th>
-              <th style="padding:5px 8px;">VISUAL</th>
-              <th style="padding:5px 8px;">STOPS</th>
-              <th style="padding:5px 8px;">📹</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${clockToFirst.map(r=>{
-              const sev=r.gapMin>=240?'crit':r.gapMin>=180?'high':r.gapMin>=120?'med':'ok';
-              const col=sev==='crit'?'var(--red2)':sev==='high'?'var(--amber)':sev==='med'?'var(--amber2)':'var(--green)';
-              const barPct=Math.min(100, r.gapMin/360*100);
-              const accPct=120/360*100; // 2hr acceptable line
-              const showCam=r.gapMin>=120;
-              return `<tr style="border-bottom:1px solid rgba(255,255,255,.04);">
-                <td style="padding:5px 8px;color:var(--text2);">${r.date}</td>
-                <td style="padding:5px 8px;color:var(--text);">${r.clockIn}</td>
-                <td style="padding:5px 8px;color:var(--cyan);font-weight:600;">${r.firstDel}</td>
-                <td style="padding:5px 8px;font-weight:700;color:${col};">${r.gapMin}m <span style="font-weight:400;font-size:9px;">(${(r.gapMin/60).toFixed(1)}h)</span></td>
-                <td style="padding:5px 8px;min-width:120px;">
-                  <div style="position:relative;height:14px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden;border:1px solid rgba(255,255,255,.06);">
-                    <div style="position:absolute;left:${accPct}%;top:0;height:100%;width:1px;background:var(--text3);z-index:1;"></div>
-                    <div style="height:100%;width:${barPct}%;background:linear-gradient(90deg,${col}80,${col});border-radius:2px;box-shadow:0 0 6px ${col}30;"></div>
-                  </div>
-                  <div style="font-size:7px;color:var(--text3);margin-top:1px;">|— 2hr —|</div>
-                </td>
-                <td style="padding:5px 8px;color:var(--blue3);">${r.stops}</td>
-                <td style="padding:5px 8px;">${showCam?`<button onclick="requestDashcam('${driverName.replace(/'/g,"\\\\'")}','${r.date}','${r.clockIn.replace(/[ap]$/i,'')}',null)" style="background:rgba(255,26,26,.1);border:1px solid rgba(255,26,26,.3);border-radius:3px;color:var(--red2);padding:2px 6px;cursor:pointer;font-size:9px;font-family:var(--mono);">📹</button>`:''}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-        ${clockToFirst.length===0?'<div style="text-align:center;padding:16px;color:var(--text3);font-size:11px;">No days with both B600 clock-in and NuVizz delivery data in this range.</div>':''}
-      </div>
-    </div>
-
-    <!-- PACE METRICS -->
-    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
-      <div style="font-family:var(--head);font-size:11px;color:var(--energon);letter-spacing:1px;margin-bottom:12px;">DELIVERY PACE — vs FLEET &amp; ${typeLabel.toUpperCase()} PEERS</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-family:var(--mono);font-size:11px;">
-        <div>
-          <div style="color:var(--text3);font-size:9px;">MEDIAN GAP</div>
-          <div style="color:${medGap>TB.gap.p75?'var(--amber)':'var(--green)'};font-size:16px;font-weight:700;">${medGap}m</div>
-          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.median}m · ${typeLabel}: ${TB.gap.median}m</div>
-        </div>
-        <div>
-          <div style="color:var(--text3);font-size:9px;">P90 GAP</div>
-          <div style="color:${p90Gap>TB.gap.p90?'var(--red2)':'var(--text)'};font-size:16px;font-weight:700;">${p90Gap}m</div>
-          <div style="color:var(--text3);font-size:9px;">Fleet: ${FB.gap.p90}m · ${typeLabel}: ${TB.gap.p90}m</div>
-        </div>
-        <div>
-          <div style="color:var(--text3);font-size:9px;">STOPS/HR</div>
-          <div style="font-size:16px;font-weight:700;color:var(--blue3);">${dailyRows.length?( dailyRows.reduce((a,r)=>a+r.stopsPerHr,0)/dailyRows.length ).toFixed(1):'—'}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TOP CUSTOMERS + CITIES -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;">
-        <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">TOP CUSTOMERS</div>
-        ${topCust.map(([c,n])=>`<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--b1);font-family:var(--mono);font-size:10px;"><span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${c}</span><span style="color:var(--text2);">${n}</span></div>`).join('')}
-      </div>
-      <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;">
-        <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">CITIES SERVED</div>
-        ${topCities.map(([c,n])=>`<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--b1);font-family:var(--mono);font-size:10px;"><span style="color:var(--text);">${c}</span><span style="color:var(--text2);">${n}</span></div>`).join('')}
-      </div>
-    </div>
-
-    <!-- DAY-BY-DAY TABLE -->
-    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:14px;overflow-x:auto;">
-      <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:10px;">DAY-BY-DAY BREAKDOWN</div>
-      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
-        <thead>
-          <tr style="border-bottom:1px solid var(--b2);color:var(--text3);font-size:9px;text-align:left;">
-            <th style="padding:6px 8px;">DATE</th>
-            <th style="padding:6px 8px;">CLOCK IN</th>
-            <th style="padding:6px 8px;">1ST DEL</th>
-            <th style="padding:6px 8px;">LAST DEL</th>
-            <th style="padding:6px 8px;">CLOCK OUT</th>
-            <th style="padding:6px 8px;">STOPS</th>
-            <th style="padding:6px 8px;">SPAN</th>
-            <th style="padding:6px 8px;">ST/HR</th>
-            <th style="padding:6px 8px;">AVG GAP</th>
-            <th style="padding:6px 8px;">MAX GAP</th>
-            <th style="padding:6px 8px;">HRS</th>
-            <th style="padding:6px 8px;">CITIES</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${dailyRows.sort((a,b)=>b.date.localeCompare(a.date)).map(r=>{
-            const gapCol=r.avgGap>FB.gapFlag?'var(--red2)':r.avgGap>FB.gapWarn?'var(--amber)':'var(--text)';
-            const maxCol=r.maxGap>FB.gapCrit?'var(--red2)':r.maxGap>FB.gapFlag?'var(--amber)':'var(--text)';
-            return `<tr style="border-bottom:1px solid rgba(255,255,255,.04);">
-              <td style="padding:5px 8px;color:var(--text2);">${r.date}</td>
-              <td style="padding:5px 8px;">${r.clockIn}</td>
-              <td style="padding:5px 8px;color:var(--green);">${r.first}</td>
-              <td style="padding:5px 8px;color:var(--amber);">${r.last}</td>
-              <td style="padding:5px 8px;">${r.clockOut}</td>
-              <td style="padding:5px 8px;color:var(--blue3);font-weight:700;">${r.stops}</td>
-              <td style="padding:5px 8px;">${r.spanHrs.toFixed(1)}h</td>
-              <td style="padding:5px 8px;color:var(--cyan);">${r.stopsPerHr.toFixed(1)}</td>
-              <td style="padding:5px 8px;color:${gapCol};">${r.avgGap.toFixed(0)}m</td>
-              <td style="padding:5px 8px;color:${maxCol};font-weight:${r.maxGap>FB.gapFlag?'700':'400'};">${r.maxGap}m${r.maxGap>=60?` <button onclick="requestDashcam('${driverName.replace(/'/g,"\\\\'")}','${r.date}','${r.first}',null)" style="background:rgba(255,26,26,.1);border:1px solid rgba(255,26,26,.3);border-radius:3px;color:var(--red2);padding:1px 4px;cursor:pointer;font-size:8px;margin-left:3px;">📹</button>`:''}</td>
-              <td style="padding:5px 8px;">${r.totalHrs?r.totalHrs.toFixed(1):''}</td>
-              <td style="padding:5px 8px;font-size:9px;color:var(--text3);">${r.cities.join(', ')}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-// ═══════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════
-document.addEventListener('DOMContentLoaded',()=>{
-  const d=new Date().toISOString().split('T')[0];
-  auditStartDate=d;auditEndDate=d;
-  document.getElementById('auditDate').value=d;
-  document.getElementById('auditDateEnd').value=d;
-  updateDateDisplay();
-  loadSettings();
-  loadAuditHistory();
-  const wi=document.getElementById('pickWeekInput');if(wi)wi.addEventListener('input',updateWeekHint);
-  log(`SENTINEL v${APP_VERSION} — Real data only | Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng} | Shift filter: -${SHIFT_BUFFER_BEFORE}min/+${SHIFT_BUFFER_AFTER}min | Timezone: Eastern`,'hi');
-  document.getElementById('versionBadge').textContent='v'+APP_VERSION;
-  // v3.10.0: Load canonical roster from Davis Data Hub before history/picker init.
-  // populateDriverPicker() and downstream name-matching depend on DRIVER_ROSTER.
-  loadRosterFromHub().finally(()=>{
-    Promise.all([loadB600History(), loadNuVizzHistory()]).then(()=>populateDriverPicker());
-  });
-});
-
-// ═══════════════════════════════════════════
-// AUDIT HISTORY (localStorage)
-// ═══════════════════════════════════════════
-function saveAuditRun(){
-  if(!results.length)return;
-  const dataResults=results.filter(r=>r.hasData);
-  const run={
-    id:Date.now(),
-    date:auditStartDate,
-    endDate:auditEndDate,
-    period:auditPeriod,
-    ranAt:new Date().toISOString(),
-    driverCount:results.length,
-    dataCount:dataResults.length,
-    flaggedCount:dataResults.filter(r=>r.risk!=='low').length,
-    criticalCount:dataResults.filter(r=>r.risk==='critical').length,
-    totalStolenHrs:dataResults.reduce((a,r)=>a+r.stolenHrs,0),
-    totalStolenDollars:dataResults.reduce((a,r)=>a+r.stolenDollars,0),
-    topFlags:dataResults.filter(r=>r.score>=50).map(r=>({name:r.name,score:r.score,risk:r.risk,flags:r.flags.length,stolen:r.stolenHrs})).slice(0,10)
-  };
-  try{
-    const hist=JSON.parse(localStorage.getItem('sentinel_history')||'[]');
-    hist.unshift(run);
-    if(hist.length>50)hist.length=50; // keep last 50 runs
-    localStorage.setItem('sentinel_history',JSON.stringify(hist));
-    log('Audit saved to history','ok');
-  }catch(e){log('Could not save history: '+e.message,'warn');}
-  // v3.10.3: Per-driver-day snapshots for the History viewer (slim — no GPS arrays).
-  // Stored separately under sentinel_history_v2 so the original summary list stays untouched.
-  try{
-    const snapshot={
-      id:run.id,
-      date:auditStartDate,
-      endDate:auditEndDate,
-      period:auditPeriod,
-      ranAt:run.ranAt,
-      summary:{
-        driverCount:run.driverCount,
-        dataCount:run.dataCount,
-        flaggedCount:run.flaggedCount,
-        criticalCount:run.criticalCount,
-        totalStolenHrs:run.totalStolenHrs,
-        totalStolenDollars:run.totalStolenDollars
-      },
-      drivers:results.map(r=>({
-        name:r.name,
-        truck:r.truck||'',
-        score:r.score||0,
-        risk:r.risk||'nodata',
-        flagCount:(r.flags||[]).length,
-        flagTitles:(r.flags||[]).map(f=>f.title||f.name||'').filter(Boolean),
-        clockIn:r.clockIn||'',
-        clockOut:r.clockOut||'',
-        gpsClockIn:r.gpsClockIn||'',
-        gpsClockOut:r.gpsClockOut||'',
-        drivingMin:r.drivingMin||0,
-        engineGapMin:r.engineGapMin||0,
-        actualMiles:r.gps?.actualMiles||0,
-        effectiveMph:r.gps?.effectiveMph||0,
-        unexplainedStops:(r.gps?.unexplained||[]).length,
-        stolenHrs:r.stolenHrs||0,
-        stolenDollars:r.stolenDollars||0,
-        hasData:!!r.hasData,
-        b600Matched:!!r.b600Matched,
-        driverRole:r.driverRole||'',
-        driverCo:r.driverCo||'',
-        _source:r._source||'',
-        _inHub:r._inHub
-      }))
-    };
-    const v2=JSON.parse(localStorage.getItem('sentinel_history_v2')||'[]');
-    v2.unshift(snapshot);
-    // Cap at 30 runs — full per-driver data is bigger; keeps us under 5MB localStorage cap.
-    if(v2.length>30)v2.length=30;
-    localStorage.setItem('sentinel_history_v2',JSON.stringify(v2));
-  }catch(e){
-    // QuotaExceededError most likely — drop oldest and retry once
-    try{
-      const v2=JSON.parse(localStorage.getItem('sentinel_history_v2')||'[]');
-      while(v2.length>10){v2.pop();}
-      localStorage.setItem('sentinel_history_v2',JSON.stringify(v2));
-      log('History storage trimmed to fit (kept newest 10 runs with details)','warn');
-    }catch(e2){log('History details could not be saved: '+e2.message,'warn');}
-  }
-  renderHistory();
-}
-
-function loadAuditHistory(){
-  try{
-    const hist=JSON.parse(localStorage.getItem('sentinel_history')||'[]');
-    if(hist.length)log(`${hist.length} past audit runs in history`,'info');
-    renderHistory();
-  }catch(e){}
-}
-
-// ═══════════════════════════════════════════
-// v3.10.3: HISTORY VIEWER
-// Side-by-side comparison + drill into per-driver-day detail.
-// State lives in module-scope vars; re-renders read state on each call.
-// ═══════════════════════════════════════════
-let _histSelectedRunIds = []; // up to 3 run IDs for side-by-side
-let _histSort = { col: 'score', dir: 'desc' }; // sort state for the comparison table
-let _histExpanded = null; // {runId, driverName} when a cell is expanded
-
-function _histGetV2(){
-  try{ return JSON.parse(localStorage.getItem('sentinel_history_v2')||'[]'); }catch(e){ return []; }
-}
-function _histGetSummary(){
-  try{ return JSON.parse(localStorage.getItem('sentinel_history')||'[]'); }catch(e){ return []; }
-}
-function _histStorageBytes(){
-  let b=0;
-  try{ b += (localStorage.getItem('sentinel_history')||'').length; }catch(e){}
-  try{ b += (localStorage.getItem('sentinel_history_v2')||'').length; }catch(e){}
-  return b;
-}
 function _histRiskColor(risk){
-  return risk==='critical'?'var(--red2)':risk==='high'?'var(--red)':risk==='medium'?'var(--amber)':risk==='low'?'var(--green)':'var(--text3)';
+  return risk==='critical'?'var(--red2)':risk==='high'?'var(--amber)':risk==='medium'?'var(--amber2)':risk==='low'?'var(--green)':'var(--text3)';
 }
-function _histDateLabel(h){
-  return (h.period==='day' || !h.endDate || h.date===h.endDate) ? h.date : `${h.date} → ${h.endDate}`;
-}
-
-function histToggleRun(id){
-  const i=_histSelectedRunIds.indexOf(id);
-  if(i>=0) _histSelectedRunIds.splice(i,1);
-  else {
-    if(_histSelectedRunIds.length>=3) _histSelectedRunIds.shift(); // FIFO eviction at cap
-    _histSelectedRunIds.push(id);
+function _histScanLabel(s){
+  if(!s) return '—';
+  if(s.startDate && s.endDate){
+    return s.startDate===s.endDate ? s.startDate : `${s.startDate} → ${s.endDate}`;
   }
-  _histExpanded=null;
-  renderHistory();
+  return s.scanId || '—';
 }
-
+async function histToggleRun(scanId){
+  const i = _histSelectedRunIds.indexOf(scanId);
+  if(i>=0){
+    _histSelectedRunIds.splice(i,1);
+  } else {
+    if(_histSelectedRunIds.length>=3) _histSelectedRunIds.shift();
+    _histSelectedRunIds.push(scanId);
+    // Lazy-load full detail if not already cached
+    if(!_loadedScans[scanId]) await loadSavedScan(scanId);
+  }
+  _histExpanded = null;
+  renderUnifiedHistory();
+}
 function histSetSort(col){
   if(_histSort.col===col) _histSort.dir = _histSort.dir==='asc'?'desc':'asc';
   else { _histSort.col=col; _histSort.dir = (col==='name'||col==='truck')?'asc':'desc'; }
-  renderHistory();
+  renderUnifiedHistory();
 }
-
-function histToggleExpand(runId, driverName){
-  if(_histExpanded && _histExpanded.runId===runId && _histExpanded.driverName===driverName) _histExpanded=null;
-  else _histExpanded={runId, driverName};
-  renderHistory();
+function histToggleExpand(scanId, driverName){
+  if(_histExpanded && _histExpanded.scanId===scanId && _histExpanded.driverName===driverName) _histExpanded=null;
+  else _histExpanded={scanId, driverName};
+  renderUnifiedHistory();
 }
-
+async function histDeleteScan(scanId){
+  const secret = prompt('Enter scan secret to delete this scan:');
+  if(!secret) return;
+  if(!confirm(`Delete scan ${scanId}? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/sentinel-scan-list?scanId=${encodeURIComponent(scanId)}&secret=${encodeURIComponent(secret)}`, { method:'DELETE' });
+    const data = await res.json();
+    if(data.success){ delete _loadedScans[scanId]; loadUnifiedHistory(); }
+    else alert('Delete failed: '+(data.error||'unknown'));
+  } catch(e){ alert('Network error: '+e.message); }
+}
 function _histSortDrivers(rows, col, dir){
-  const mul = dir==='asc'?1:-1;
-  return rows.slice().sort((a,b)=>{
+  const m = dir==='asc'?1:-1;
+  return [...rows].sort((a,b)=>{
     const av=a[col], bv=b[col];
-    if(typeof av==='number' && typeof bv==='number') return (av-bv)*mul;
-    return String(av||'').localeCompare(String(bv||''))*mul;
+    if(typeof av==='number') return (av-bv)*m;
+    return String(av||'').localeCompare(String(bv||''))*m;
   });
 }
-
-function _histSortHeader(label, col){
+function _histSortHeader(label, col, align='center'){
   const isActive = _histSort.col===col;
   const arrow = isActive ? (_histSort.dir==='asc'?' ▲':' ▼') : '';
-  return `<th onclick="histSetSort('${col}')" style="cursor:pointer;user-select:none;text-align:left;padding:6px 8px;font-family:var(--mono);font-size:9px;color:${isActive?'var(--blue3)':'var(--text2)'};border-bottom:1px solid var(--b1);white-space:nowrap;">${label}${arrow}</th>`;
+  return `<th onclick="histSetSort('${col}')" style="cursor:pointer;text-align:${align};padding:6px 8px;font-family:var(--mono);font-size:9px;color:${isActive?'var(--energon)':'var(--text2)'};border-bottom:1px solid var(--b1);white-space:nowrap;user-select:none;">${label}${arrow}</th>`;
 }
 
-function renderHistory(){
-  const el=document.getElementById('historyContent');
-  if(!el)return;
-  const summary=_histGetSummary();
-  const v2=_histGetV2();
-  if(!summary.length && !v2.length){
-    el.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--text3);">No audit history yet. Run your first scan.</div>';
+function renderUnifiedHistory(){
+  const el = document.getElementById('historyContent');
+  if(!el) return;
+  if(!_serverScans.length){
+    el.innerHTML = `
+      <div style="text-align:center;padding:30px 0;color:var(--text2);">
+        <div style="font-size:32px;margin-bottom:10px;">💾</div>
+        <p style="font-family:var(--ui);font-size:14px;">No saved scans yet.</p>
+        <p style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;">Run a Server Scan above — results land here automatically.</p>
+      </div>`;
     return;
   }
-  // Index v2 snapshots by id for fast lookup
-  const v2ById={};
-  v2.forEach(s=>{v2ById[s.id]=s;});
-  // Use v2 list as the authoritative one for selection (it has drill-in data); fall back to summary.
-  const runs = v2.length ? v2 : summary;
-  // Drop selected IDs that no longer exist
-  _histSelectedRunIds = _histSelectedRunIds.filter(id=>v2ById[id]);
 
-  const bytes=_histStorageBytes();
-  const kb=(bytes/1024).toFixed(0);
+  // Sort scan list per current sort
+  const scans = _histSortDrivers(_serverScans, _histSort.col==='name'||_histSort.col==='truck'||_histSort.col==='avgScore'||_histSort.col==='stolenHrs'||_histSort.col==='score' ? 'createdAt' : _histSort.col, _histSort.col==='createdAt'?_histSort.dir:'desc');
 
   let html = `
     <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:10px;">
-      ${runs.length} runs stored · ${kb} KB · ${_histSelectedRunIds.length}/3 selected for comparison
-      ${v2.length===0?' · <span style="color:var(--amber);">⚠ Pre-v3.10.3 history — drill-in unavailable, re-run to capture details</span>':''}
-    </div>`;
+      ${_serverScans.length} scans · ${_histSelectedRunIds.length}/3 selected for comparison
+    </div>
+    <div style="background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:6px;margin-bottom:14px;overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;">
+      <thead>
+        <tr>
+          <th style="width:30px;padding:6px 6px;"></th>
+          <th style="text-align:left;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">DATE RANGE</th>
+          <th style="text-align:left;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">RAN AT</th>
+          <th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">DRIVERS</th>
+          <th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">FLAGGED</th>
+          <th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">CRIT</th>
+          <th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">HIGH</th>
+          <th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">STOLEN h</th>
+          <th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);">$ LOST</th>
+          <th style="padding:6px 8px;border-bottom:1px solid var(--b1);"></th>
+        </tr>
+      </thead>
+      <tbody>`;
 
-  // ── RUN LIST (clickable, multi-select up to 3) ──
-  html += `<div style="margin-bottom:14px;">`;
-  html += runs.map(h=>{
-    const sel = _histSelectedRunIds.includes(h.id);
-    const dateLabel=_histDateLabel(h);
-    const summary = h.summary || h; // v2 has .summary, legacy has flat fields
-    const dataCount = summary.dataCount ?? h.dataCount ?? 0;
-    const flaggedCount = summary.flaggedCount ?? h.flaggedCount ?? 0;
-    const totalStolenHrs = summary.totalStolenHrs ?? h.totalStolenHrs ?? 0;
-    const totalStolenDollars = summary.totalStolenDollars ?? h.totalStolenDollars ?? 0;
-    const hasV2 = !!v2ById[h.id];
-    return `<div onclick="${hasV2?`histToggleRun(${h.id})`:''}" style="display:flex;align-items:center;gap:12px;padding:8px 10px;background:${sel?'rgba(0,180,255,.08)':'var(--s1)'};border:1px solid ${sel?'var(--blue3)':'var(--b1)'};border-radius:var(--radius);margin-bottom:4px;cursor:${hasV2?'pointer':'default'};opacity:${hasV2?'1':'.6'};">
-      <div style="width:18px;font-size:13px;color:var(--blue3);">${sel?'☑':(hasV2?'☐':'·')}</div>
-      <div style="flex:1;">
-        <div style="font-family:var(--ui);font-size:13px;font-weight:600;">${dateLabel}</div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Ran ${new Date(h.ranAt).toLocaleString()}</div>
-      </div>
-      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:var(--blue3);">${dataCount}</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">DRIVERS</div></div>
-      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:${flaggedCount>0?'var(--red)':'var(--green)'};">${flaggedCount}</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">FLAGGED</div></div>
-      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:var(--amber);">${totalStolenHrs.toFixed(1)}h</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">STOLEN</div></div>
-      <div style="text-align:center;padding:0 8px;"><div style="font-family:var(--head);font-size:16px;color:var(--amber2);">$${totalStolenDollars.toFixed(0)}</div><div style="font-family:var(--mono);font-size:8px;color:var(--text3);">LOST</div></div>
-    </div>`;
-  }).join('');
-  html += `</div>`;
+  scans.forEach(s=>{
+    const sel = _histSelectedRunIds.includes(s.scanId);
+    const loading = _histLoadingScanId===s.scanId;
+    const ranAt = s.createdAt ? new Date(s.createdAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
+    const dateRange = _histScanLabel(s);
+    html += `<tr style="border-bottom:1px solid rgba(0,0,0,.04);background:${sel?'rgba(0,180,255,.06)':''};">
+      <td style="text-align:center;padding:6px 6px;cursor:pointer;" onclick="histToggleRun('${s.scanId}')"><span style="color:var(--blue3);font-size:14px;">${sel?'☑':'☐'}</span></td>
+      <td style="padding:6px 8px;color:var(--text);font-weight:600;cursor:pointer;" onclick="loadSavedScan('${s.scanId}').then(()=>renderUnifiedHistory())">${dateRange}${loading?' <span style="color:var(--text3);font-size:9px;">(loading…)</span>':''}</td>
+      <td style="padding:6px 8px;color:var(--text2);">${ranAt} <span style="color:var(--text3);font-size:9px;">${s.source==='server'?'·srv':'·browser'}</span></td>
+      <td style="text-align:center;padding:6px 8px;color:var(--blue3);">${s.driverCount||0}</td>
+      <td style="text-align:center;padding:6px 8px;color:${(s.flaggedCount||0)>0?'var(--red)':'var(--green)'};font-weight:600;">${s.flaggedCount||0}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--red2);">${s.critical||0}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--amber);">${s.high||0}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--amber);">${(s.totalStolenHrs||0).toFixed(1)}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--amber2);">$${(s.totalCost||0).toFixed(0)}</td>
+      <td style="padding:6px 8px;text-align:right;"><span onclick="event.stopPropagation();histDeleteScan('${s.scanId}')" style="color:var(--text3);font-size:14px;cursor:pointer;padding:0 4px;" title="Delete scan">🗑</span></td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
 
-  // ── COMPARISON TABLE — only when 1+ runs selected ──
+  // ── COMPARISON VIEW (when at least 1 scan selected) ─────────────────
   if(_histSelectedRunIds.length===0){
-    html += `<div style="font-family:var(--mono);font-size:10px;color:var(--text3);padding:14px;background:var(--s1);border:1px dashed var(--b1);border-radius:var(--radius);text-align:center;">Click up to 3 runs above to compare drivers side-by-side. Click any driver row to drill into that day's detail.</div>`;
-    el.innerHTML=html;
+    html += `<div style="font-family:var(--mono);font-size:10px;color:var(--text3);padding:14px;background:var(--s1);border:1px dashed var(--b1);border-radius:var(--radius);text-align:center;">Check rows above to load scans into comparison. Up to 3 at once. Click any driver score to drill in.</div>`;
+    el.innerHTML = html;
     return;
   }
 
-  // Build union of driver names across selected runs
-  const selSnapshots = _histSelectedRunIds.map(id=>v2ById[id]).filter(Boolean);
-  // Order columns by run date (oldest left → newest right) for natural reading
-  selSnapshots.sort((a,b)=>new Date(a.ranAt)-new Date(b.ranAt));
+  // Wait for any selected scans still loading
+  const selScans = _histSelectedRunIds.map(id=>_loadedScans[id]).filter(Boolean);
+  if(selScans.length < _histSelectedRunIds.length){
+    html += `<div style="font-family:var(--mono);font-size:11px;color:var(--text3);padding:14px;text-align:center;">Loading scan detail…</div>`;
+    el.innerHTML = html;
+    return;
+  }
+  selScans.sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
 
-  const driverUnion = {};
-  selSnapshots.forEach(snap=>{
-    snap.drivers.forEach(d=>{
-      if(!driverUnion[d.name]) driverUnion[d.name]={name:d.name,truck:d.truck};
+  // Build driver union
+  const drvUnion = {};
+  selScans.forEach(scan=>{
+    (scan.drivers||[]).forEach(d=>{
+      const k = d.canonicalName || d.name;
+      if(!k) return;
+      if(!drvUnion[k]) drvUnion[k] = { name: k, displayName: d.name, truck: d.truck||'', driverRole: d.driverRole||'' };
+      if(d.truck && !drvUnion[k].truck) drvUnion[k].truck = d.truck;
     });
   });
-  // Build comparison rows: one per driver, with per-run score/risk + an aggregate for sorting
-  const compRows = Object.values(driverUnion).map(du=>{
-    const perRun = selSnapshots.map(snap=>{
-      const d = snap.drivers.find(x=>x.name===du.name);
-      return d ? {score:d.score, risk:d.risk, hasData:d.hasData, stolenHrs:d.stolenHrs, runId:snap.id, driver:d} : null;
+
+  const compRows = Object.values(drvUnion).map(du=>{
+    const perRun = selScans.map(scan=>{
+      const d = (scan.drivers||[]).find(x=>(x.canonicalName||x.name)===du.name);
+      return d ? { score:d.score||0, risk:d.risk||'nodata', hasData:d.hasData!==false, stolenHrs:d.stolenHrs||0, scanId:scan.scanId, driver:d } : null;
     });
     const scores = perRun.filter(p=>p && p.hasData).map(p=>p.score);
     const maxScore = scores.length ? Math.max(...scores) : 0;
     const avgScore = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
     const totalStolen = perRun.filter(p=>p).reduce((a,p)=>a+(p.stolenHrs||0),0);
-    return {name:du.name, truck:du.truck||'', perRun, score:maxScore, avgScore, stolenHrs:totalStolen};
+    return { name:du.name, displayName:du.displayName, truck:du.truck, perRun, score:maxScore, avgScore, stolenHrs:totalStolen };
   });
-  const sorted = _histSortDrivers(compRows, _histSort.col, _histSort.dir);
 
-  html += `<div style="font-family:var(--ui);font-size:13px;font-weight:700;margin-bottom:8px;">Side-by-side: ${selSnapshots.map(s=>_histDateLabel(s)).join(' · ')}</div>`;
+  // sort by current col if relevant; default to maxScore desc
+  let sortCol = _histSort.col;
+  if(!['name','truck','score','avgScore','stolenHrs'].includes(sortCol)) sortCol = 'score';
+  const sorted = _histSortDrivers(compRows, sortCol, _histSort.dir);
+
+  html += `<div style="font-family:var(--ui);font-size:13px;font-weight:700;margin-bottom:8px;">Side-by-side: ${selScans.map(s=>_histScanLabel(s)).join(' · ')}</div>`;
   html += `<div style="overflow-x:auto;background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);"><table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;"><thead><tr>`;
-  html += _histSortHeader('DRIVER','name');
-  html += _histSortHeader('TRUCK','truck');
-  selSnapshots.forEach(snap=>{
-    html += `<th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);white-space:nowrap;">${_histDateLabel(snap)}</th>`;
+  html += _histSortHeader('DRIVER','name','left');
+  html += _histSortHeader('TRUCK','truck','left');
+  selScans.forEach(scan=>{
+    html += `<th style="text-align:center;padding:6px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);border-bottom:1px solid var(--b1);white-space:nowrap;">${_histScanLabel(scan)}</th>`;
   });
   html += _histSortHeader('MAX','score');
   html += _histSortHeader('AVG','avgScore');
@@ -4376,48 +2937,53 @@ function renderHistory(){
 
   sorted.forEach(row=>{
     html += `<tr style="border-bottom:1px solid var(--b1);">`;
-    html += `<td style="padding:6px 8px;font-weight:600;color:var(--text);">${row.name}</td>`;
+    html += `<td style="padding:6px 8px;font-weight:600;color:var(--text);">${row.displayName||row.name}</td>`;
     html += `<td style="padding:6px 8px;color:var(--text2);">${row.truck||'—'}</td>`;
     row.perRun.forEach(p=>{
       if(!p){
         html += `<td style="padding:6px 8px;text-align:center;color:var(--text3);">—</td>`;
       } else if(!p.hasData){
-        html += `<td onclick="histToggleExpand(${p.runId},'${row.name.replace(/'/g,"\\'")}')" style="padding:6px 8px;text-align:center;color:var(--text3);cursor:pointer;background:rgba(255,255,255,.02);">no data</td>`;
+        html += `<td onclick="histToggleExpand('${p.scanId}','${row.name.replace(/'/g,"\\'")}')" style="padding:6px 8px;text-align:center;color:var(--text3);cursor:pointer;background:rgba(255,255,255,.02);">no gps</td>`;
       } else {
-        const c=_histRiskColor(p.risk);
-        const isExp = _histExpanded && _histExpanded.runId===p.runId && _histExpanded.driverName===row.name;
-        html += `<td onclick="histToggleExpand(${p.runId},'${row.name.replace(/'/g,"\\'")}')" style="padding:6px 8px;text-align:center;cursor:pointer;background:${isExp?'rgba(0,180,255,.12)':'transparent'};border-left:${isExp?'2px solid var(--blue3)':'none'};border-right:${isExp?'2px solid var(--blue3)':'none'};"><span style="color:${c};font-weight:700;">${p.score}</span><span style="color:var(--text3);font-size:9px;"> ${p.risk}</span></td>`;
+        const c = _histRiskColor(p.risk);
+        const isExp = _histExpanded && _histExpanded.scanId===p.scanId && _histExpanded.driverName===row.name;
+        html += `<td onclick="histToggleExpand('${p.scanId}','${row.name.replace(/'/g,"\\'")}')" style="padding:6px 8px;text-align:center;cursor:pointer;background:${isExp?'rgba(0,180,255,.12)':'transparent'};border-left:${isExp?'2px solid var(--blue3)':'none'};border-right:${isExp?'2px solid var(--blue3)':'none'};"><span style="color:${c};font-weight:700;">${p.score}</span><span style="color:var(--text3);font-size:9px;"> ${p.risk}</span></td>`;
       }
     });
     html += `<td style="padding:6px 8px;text-align:center;color:${row.score>=50?'var(--red2)':row.score>=30?'var(--amber)':'var(--text2)'};font-weight:700;">${row.score}</td>`;
     html += `<td style="padding:6px 8px;text-align:center;color:var(--text2);">${row.avgScore.toFixed(0)}</td>`;
     html += `<td style="padding:6px 8px;text-align:center;color:${row.stolenHrs>0?'var(--amber)':'var(--text3)'};">${row.stolenHrs.toFixed(1)}</td>`;
     html += `</tr>`;
-    // Inline expansion row when a cell in this driver is selected
+
+    // Inline drill-down
     if(_histExpanded && _histExpanded.driverName===row.name){
-      const snap = v2ById[_histExpanded.runId];
-      const d = snap && snap.drivers.find(x=>x.name===row.name);
+      const scan = _loadedScans[_histExpanded.scanId];
+      const d = scan && (scan.drivers||[]).find(x=>(x.canonicalName||x.name)===row.name);
       if(d){
-        const totalCols = 2 + selSnapshots.length + 3;
+        const totalCols = 2 + selScans.length + 3;
         html += `<tr><td colspan="${totalCols}" style="padding:0;background:rgba(0,180,255,.04);border-top:2px solid var(--blue3);border-bottom:2px solid var(--blue3);">`;
         html += `<div style="padding:12px 16px;">`;
-        html += `<div style="font-family:var(--ui);font-size:12px;font-weight:700;margin-bottom:8px;">${d.name} — ${_histDateLabel(snap)}${d.driverRole?` <span style="font-size:9px;color:var(--text2);font-weight:400;font-family:var(--mono);">${d.driverRole}${d.driverCo==='owner'?' (OO)':''}</span>`:''}${d.b600Matched?' <span style="color:var(--green);font-size:9px;font-family:var(--mono);">●B600</span>':''}${d._inHub===false?' <span style="font-size:9px;color:var(--amber);font-family:var(--mono);background:rgba(255,170,0,.12);border:1px solid rgba(255,170,0,.35);border-radius:3px;padding:1px 5px;margin-left:4px;">⚠ NOT IN HUB</span>':''}</div>`;
+        html += `<div style="font-family:var(--ui);font-size:12px;font-weight:700;margin-bottom:8px;">${d.name} — ${_histScanLabel(scan)}${d.driverRole?` <span style="font-size:9px;color:var(--text2);font-weight:400;font-family:var(--mono);">${d.driverRole}</span>`:''}${d.b600Matched?' <span style="color:var(--green);font-size:9px;font-family:var(--mono);">●B600</span>':''}</div>`;
         html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-family:var(--mono);font-size:10px;">`;
         const stat=(label,val,color)=>`<div><div style="font-size:8px;color:var(--text3);">${label}</div><div style="font-size:13px;color:${color||'var(--text)'};font-weight:700;">${val}</div></div>`;
-        html += stat('SCORE', `<span style="color:${_histRiskColor(d.risk)};">${d.score} ${d.risk}</span>`);
+        html += stat('SCORE', `<span style="color:${_histRiskColor(d.risk)};">${d.score||0} ${d.risk||'—'}</span>`);
         html += stat('TRUCK', `#${d.truck||'—'}`);
-        html += stat('IN', d.gpsClockIn||d.clockIn||'—');
-        html += stat('OUT', d.gpsClockOut||d.clockOut||'—');
-        html += stat('DRIVING', `${(d.drivingMin/60).toFixed(1)}h`);
-        html += stat('ENG GAP', `${d.engineGapMin.toFixed(0)}min`, d.engineGapMin>60?'var(--amber)':'var(--text)');
-        html += stat('MILES', d.actualMiles.toFixed(0));
-        html += stat('MPH', d.effectiveMph.toFixed(1));
-        html += stat('UNEXP STOPS', d.unexplainedStops, d.unexplainedStops>0?'var(--amber)':'var(--text)');
-        html += stat('STOLEN', `${d.stolenHrs.toFixed(1)}h / $${d.stolenDollars.toFixed(0)}`, d.stolenHrs>0?'var(--amber)':'var(--text)');
+        html += stat('IN', d.gps?.gpsClockIn||d.clockIn||'—');
+        html += stat('OUT', d.gps?.gpsClockOut||d.clockOut||'—');
+        html += stat('TOTAL HRS', `${(d.totalHrs||0).toFixed(1)}h`);
+        html += stat('ENG GAP', `${(d.gps?.engineGapMin||0).toFixed(0)}min`, (d.gps?.engineGapMin||0)>60?'var(--amber)':'var(--text)');
+        html += stat('MILES', (d.gps?.actualMiles||0).toFixed(0));
+        html += stat('MPH', (d.gps?.effectiveMph||0).toFixed(1));
+        html += stat('STOPS', d.gps?.deliveryStops||0);
+        html += stat('STOLEN', `${(d.stolenHrs||0).toFixed(1)}h / $${(d.stolenDollars||0).toFixed(0)}`, (d.stolenHrs||0)>0?'var(--amber)':'var(--text)');
         html += `</div>`;
-        if(d.flagTitles && d.flagTitles.length){
-          html += `<div style="margin-top:10px;"><div style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-bottom:4px;">FLAGS (${d.flagTitles.length})</div>`;
-          html += d.flagTitles.map(t=>`<span style="display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 8px;margin:2px;background:rgba(255,170,0,.1);border:1px solid rgba(255,170,0,.25);border-radius:3px;color:var(--amber);">${t}</span>`).join('');
+        if(d.flags && d.flags.length){
+          html += `<div style="margin-top:10px;"><div style="font-size:9px;color:var(--text3);font-family:var(--mono);margin-bottom:4px;">FLAGS (${d.flags.length})</div>`;
+          html += d.flags.map(f=>{
+            const t = typeof f==='string' ? f : (f.title||'');
+            const detail = (typeof f==='object' && f.detail) ? f.detail : '';
+            return `<div style="font-family:var(--mono);font-size:10px;padding:4px 8px;margin:3px 0;background:rgba(255,170,0,.1);border:1px solid rgba(255,170,0,.25);border-radius:3px;color:var(--amber);"><strong>${t}</strong>${detail?` — <span style="color:var(--text2);">${detail}</span>`:''}</div>`;
+          }).join('');
           html += `</div>`;
         }
         html += `</div></td></tr>`;
@@ -4425,19 +2991,24 @@ function renderHistory(){
     }
   });
   html += `</tbody></table></div>`;
-  el.innerHTML=html;
+  el.innerHTML = html;
 }
 
+// renderHistory kept as alias so any existing call sites don't break
+const renderHistory = renderUnifiedHistory;
+
+// Local localStorage history is now legacy and ignored. clearHistory clears the
+// browser cache (in case anything is left from older versions) and refreshes server view.
 function clearHistory(){
-  if(confirm('Clear all audit history?')){
-    localStorage.removeItem('sentinel_history');
-    localStorage.removeItem('sentinel_history_v2'); // v3.10.3
-    _histSelectedRunIds=[];
-    _histExpanded=null;
-    renderHistory();
-    log('History cleared','ok');
+  if(confirm('History is now stored on the server (Firestore). Clearing only removes legacy local cache. Continue?')){
+    try { localStorage.removeItem('sentinel_history'); localStorage.removeItem('sentinel_history_v2'); } catch(e){}
+    log('Local history cache cleared. Server-side scans are untouched. Use 🗑 next to a scan to delete from Firestore.','ok');
+    loadUnifiedHistory();
   }
 }
+function loadAuditHistory(){ /* kept for backward compat — no-op, server is source */ }
+function saveAuditRun(){ /* legacy localStorage saver — replaced by saveScanToFirestore */ }
+
 </script>
 <script src="/sentinel-nuvizz-patch.js"></script>
 </body>

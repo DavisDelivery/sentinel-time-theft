@@ -105,14 +105,39 @@ export function getDb() {
       if (!res.ok) throw new Error(`getDoc failed: ${res.status}`);
       return docToObj(await res.json());
     },
-    async listDocs(collection, { orderBy, limit } = {}) {
+    // Use runQuery for ordered list — Firestore REST GET on collection
+    // does NOT honor orderBy reliably. runQuery is the correct path.
+    async listDocs(collection, { orderBy, limit, fields } = {}) {
       const token = await getAccessToken();
-      let url = `${BASE(getProjectId())}/${collection}?pageSize=${limit || 50}`;
-      if (orderBy) url += `&orderBy=${orderBy.field}%20${orderBy.direction || 'desc'}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error(`listDocs failed: ${res.status}`);
-      const data = await res.json();
-      return (data.documents || []).map(d => ({ id: d.name.split('/').pop(), ...docToObj(d) }));
+      const url = `${BASE(getProjectId())}:runQuery`;
+      const sq = {
+        from: [{ collectionId: collection }],
+        limit: limit || 50
+      };
+      if (orderBy) {
+        sq.orderBy = [{
+          field: { fieldPath: orderBy.field },
+          direction: (orderBy.direction || 'desc').toUpperCase() === 'ASC' ? 'ASCENDING' : 'DESCENDING'
+        }];
+      }
+      // Field projection — only fetch the fields you actually need (faster + smaller)
+      if (Array.isArray(fields) && fields.length) {
+        sq.select = { fields: fields.map(f => ({ fieldPath: f })) };
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ structuredQuery: sq })
+      });
+      if (!res.ok) throw new Error(`listDocs failed: ${res.status} ${await res.text()}`);
+      const rows = await res.json();
+      const out = [];
+      for (const row of rows) {
+        if (!row.document) continue;
+        const id = row.document.name.split('/').pop();
+        out.push({ id, ...docToObj(row.document) });
+      }
+      return out;
     }
   };
 }
