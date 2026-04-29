@@ -407,9 +407,10 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 <div class="tab-bar">
   <button class="tab active" onclick="showTab('flags',this)">🚨 Threat Board</button>
   <button class="tab" onclick="showTab('driver',this)">👤 Driver Intel</button>
+  <button class="tab" onclick="showTab('perf',this);loadPerformance()">📊 Performance</button>
   <button class="tab" onclick="showTab('history',this);loadUnifiedHistory()">📈 History</button>
   <button class="tab" onclick="showTab('match',this);renderMatchAudit()">🔗 Name Match</button>
-  <button class="tab" onclick="showTab('report',this)">📊 Report</button>
+  <button class="tab" onclick="showTab('report',this)">📋 Report</button>
   <button class="tab" onclick="showTab('algo',this)">⚙️ Algorithm</button>
 </div>
 
@@ -496,6 +497,35 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
       <p style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;">Data from B600 timeclock + NuVizz stops (Jan–Apr 2026)</p>
     </div>
     <div id="diContent" style="display:none;"></div>
+  </div>
+
+  <!-- DRIVER PERFORMANCE -->
+  <div id="tab-perf" class="content">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+      <div style="font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--energon);">📊 DRIVER PERFORMANCE</div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="perfDays" onchange="loadPerformance()" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:5px 8px;font-family:var(--mono);font-size:11px;">
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+        </select>
+        <select id="perfClass" onchange="renderPerformance()" style="background:var(--s1);color:var(--text);border:1px solid var(--b2);border-radius:var(--radius);padding:5px 8px;font-family:var(--mono);font-size:11px;">
+          <option value="all">All classes</option>
+          <option value="tractor">🚛 Tractor</option>
+          <option value="straight">🚚 Box / Straight</option>
+        </select>
+        <button onclick="loadPerformance()" style="background:var(--energon);color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;cursor:pointer;font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:1px;">🔄 REFRESH</button>
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+      Per-driver-per-day metrics from Motive GPS + B600 punches. Shows clock-in→first-movement, on-route time, last-movement→clock-out, and benchmarks against fleet class. Click a driver to see daily detail.
+    </div>
+    <div id="perfBenchmarks" style="margin-bottom:14px;"></div>
+    <div id="perfContent">
+      <div style="text-align:center;padding:30px 0;color:var(--text3);font-family:var(--mono);font-size:11px;">Click 🔄 REFRESH to load.</div>
+    </div>
   </div>
 
   <!-- NAME MATCH AUDIT -->
@@ -666,7 +696,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.11';
+const APP_VERSION = '3.10.12';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -3008,6 +3038,268 @@ function clearHistory(){
 }
 function loadAuditHistory(){ /* kept for backward compat — no-op, server is source */ }
 function saveAuditRun(){ /* legacy localStorage saver — replaced by saveScanToFirestore */ }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DRIVER PERFORMANCE TAB (v3.10.12) — server-driven, Firestore-backed
+// Reads /api/sentinel-performance which aggregates driverPerformanceDaily.
+// ═══════════════════════════════════════════════════════════════════════════
+let _perfData = null;
+let _perfSort = { col: 'efficiencyMedian', dir: 'asc' };
+let _perfExpandedDriver = null;
+let _perfDriverDetail = {}; // canonical → daily records
+
+async function loadPerformance(){
+  const days = parseInt(document.getElementById('perfDays')?.value || '30');
+  const el = document.getElementById('perfContent');
+  if(!el) return;
+  el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3);font-family:var(--mono);font-size:11px;">Loading performance data…</div>';
+  try {
+    const res = await fetch(`/api/sentinel-performance?days=${days}`);
+    const data = await res.json();
+    if(!data.success){
+      el.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px;padding:14px;background:var(--s1);border:1px solid var(--red);border-radius:var(--radius);">Error: ${data.error||'unknown'}</div>`;
+      return;
+    }
+    _perfData = data;
+    renderPerformanceBenchmarks();
+    renderPerformance();
+  } catch(e){
+    el.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:11px;padding:14px;">Network error: ${e.message}</div>`;
+  }
+}
+
+function _perfFmtMin(min){
+  if(!min || min<0) return '—';
+  if(min < 60) return `${Math.round(min)}m`;
+  return `${Math.floor(min/60)}h ${Math.round(min%60)}m`;
+}
+function _perfEffColor(v){
+  if(v==null) return 'var(--text3)';
+  if(v < 0.85) return 'var(--green)';     // crushing it (faster than expected)
+  if(v < 1.05) return 'var(--text)';      // on pace
+  if(v < 1.20) return 'var(--amber)';     // 5-20% slow
+  return 'var(--red2)';                   // >20% slow
+}
+function _perfEffLabel(v){
+  if(v==null) return '—';
+  return v.toFixed(2);
+}
+
+function renderPerformanceBenchmarks(){
+  if(!_perfData) return;
+  const el = document.getElementById('perfBenchmarks');
+  if(!el) return;
+  const b = _perfData.benchmarks;
+
+  function bcard(label, bench, icon, color){
+    if(!bench){
+      return `<div style="flex:1;min-width:280px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+        <div style="font-family:var(--head);font-size:11px;color:${color};margin-bottom:6px;letter-spacing:1px;">${icon} ${label}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">No data in range</div>
+      </div>`;
+    }
+    const m = bench.regressionModel;
+    const modelTxt = m
+      ? `<div style="font-family:var(--mono);font-size:9px;color:var(--text2);margin-top:6px;line-height:1.5;">
+           <div>📐 <b>Regression model</b> (n=${m.n}, R²=${m.r2.toFixed(2)})</div>
+           <div style="color:var(--text3);">on-route min ≈ ${m.b0.toFixed(0)} + ${m.b1.toFixed(1)}·stops + ${m.b2.toFixed(1)}·miles</div>
+         </div>`
+      : `<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:6px;">📐 Regression: not enough data (need ≥8 days)</div>`;
+    return `<div style="flex:1;min-width:280px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:12px;">
+      <div style="font-family:var(--head);font-size:11px;color:${color};margin-bottom:8px;letter-spacing:1px;">${icon} ${label} <span style="color:var(--text3);font-weight:400;">· n=${bench.sampleSize} driver-days</span></div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-family:var(--mono);font-size:10px;">
+        <div><span style="color:var(--text3);">Pre-route:</span> <b>${_perfFmtMin(bench.preRouteMin.median)}</b> <span style="color:var(--text3);">(p90 ${_perfFmtMin(bench.preRouteMin.p90)})</span></div>
+        <div><span style="color:var(--text3);">On-route:</span> <b>${_perfFmtMin(bench.onRouteMin.median)}</b> <span style="color:var(--text3);">(p10 ${_perfFmtMin(bench.onRouteMin.p10)} · p90 ${_perfFmtMin(bench.onRouteMin.p90)})</span></div>
+        <div><span style="color:var(--text3);">Post-route:</span> <b>${_perfFmtMin(bench.postRouteMin.median)}</b> <span style="color:var(--text3);">(p90 ${_perfFmtMin(bench.postRouteMin.p90)})</span></div>
+        <div><span style="color:var(--text3);">Stops/day:</span> <b>${bench.stops.median}</b> <span style="color:var(--text3);">(avg ${bench.stops.mean})</span></div>
+        <div><span style="color:var(--text3);">Miles/day:</span> <b>${bench.totalMiles.median}</b> <span style="color:var(--text3);">(avg ${bench.totalMiles.mean})</span></div>
+        <div><span style="color:var(--text3);">Stops/hr:</span> <b>${bench.stopsPerHr.median}</b></div>
+        <div><span style="color:var(--text3);">Eff. MPH:</span> <b>${bench.effectiveMph.median}</b></div>
+        <div><span style="color:var(--text3);">Drive %:</span> <b>${(bench.drivePctOnRoute.median*100).toFixed(0)}%</b></div>
+      </div>
+      ${modelTxt}
+    </div>`;
+  }
+
+  el.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap;">
+    ${bcard('TRACTOR FLEET', b.tractor, '🚛', 'var(--blue3)')}
+    ${bcard('BOX / STRAIGHT FLEET', b.straight, '🚚', 'var(--energon)')}
+  </div>`;
+}
+
+function _perfSortHeader(label, col, align='center'){
+  const isActive = _perfSort.col===col;
+  const arrow = isActive ? (_perfSort.dir==='asc'?' ▲':' ▼') : '';
+  return `<th onclick="perfSetSort('${col}')" style="cursor:pointer;text-align:${align};padding:6px 8px;font-family:var(--mono);font-size:9px;color:${isActive?'var(--energon)':'var(--text2)'};border-bottom:1px solid var(--b1);white-space:nowrap;user-select:none;">${label}${arrow}</th>`;
+}
+function perfSetSort(col){
+  if(_perfSort.col===col) _perfSort.dir = _perfSort.dir==='asc'?'desc':'asc';
+  else { _perfSort.col=col; _perfSort.dir = (col==='displayName'||col==='truck')?'asc':'desc'; }
+  renderPerformance();
+}
+
+async function perfToggleDriver(canonical){
+  if(_perfExpandedDriver === canonical){
+    _perfExpandedDriver = null;
+    renderPerformance();
+    return;
+  }
+  _perfExpandedDriver = canonical;
+  // Fetch daily records for this driver if not cached
+  if(!_perfDriverDetail[canonical]){
+    const days = parseInt(document.getElementById('perfDays')?.value || '30');
+    try {
+      const res = await fetch(`/api/sentinel-performance?days=${days}&driver=${encodeURIComponent(canonical)}`);
+      const data = await res.json();
+      if(data.success && data.drivers && data.drivers.length){
+        _perfDriverDetail[canonical] = data.drivers[0].dailyRecords || [];
+      } else {
+        _perfDriverDetail[canonical] = [];
+      }
+    } catch(e){
+      _perfDriverDetail[canonical] = [];
+    }
+  }
+  renderPerformance();
+}
+
+function renderPerformance(){
+  if(!_perfData) return;
+  const el = document.getElementById('perfContent');
+  if(!el) return;
+  const classFilter = document.getElementById('perfClass')?.value || 'all';
+  let drivers = (_perfData.drivers || []).slice();
+  if(classFilter==='tractor') drivers = drivers.filter(d=>d.driverType==='tractor');
+  else if(classFilter==='straight') drivers = drivers.filter(d=>d.driverType!=='tractor');
+
+  if(!drivers.length){
+    el.innerHTML = `<div style="text-align:center;padding:30px 0;color:var(--text3);font-family:var(--mono);font-size:11px;">No performance records in selected window. Run a server scan with this date range to populate.</div>`;
+    return;
+  }
+
+  // Sort
+  const m = _perfSort.dir==='asc'?1:-1;
+  drivers.sort((a,b)=>{
+    const get = (d, col) => {
+      switch(col){
+        case 'displayName': return d.displayName || '';
+        case 'truck':       return d.truck || '';
+        case 'preRouteMin': return d.avg.preRouteMin || 0;
+        case 'onRouteMin':  return d.avg.onRouteMin || 0;
+        case 'postRouteMin':return d.avg.postRouteMin || 0;
+        case 'stops':       return d.avg.stops || 0;
+        case 'totalMiles':  return d.avg.totalMiles || 0;
+        case 'stopsPerHr':  return d.avg.stopsPerHr || 0;
+        case 'effectiveMph':return d.avg.effectiveMph || 0;
+        case 'efficiencyMedian':     return d.efficiencyMedian!=null ? d.efficiencyMedian : 99;
+        case 'efficiencyRegression': return d.efficiencyRegression!=null ? d.efficiencyRegression : 99;
+        case 'days':        return d.days || 0;
+        default:            return 0;
+      }
+    };
+    const av = get(a, _perfSort.col), bv = get(b, _perfSort.col);
+    if(typeof av==='number') return (av-bv)*m;
+    return String(av).localeCompare(String(bv))*m;
+  });
+
+  let html = `<div style="overflow-x:auto;background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);">
+    <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;"><thead><tr>`;
+  html += _perfSortHeader('DRIVER','displayName','left');
+  html += _perfSortHeader('TRUCK','truck','left');
+  html += _perfSortHeader('CLASS','driverType','left');
+  html += _perfSortHeader('DAYS','days');
+  html += _perfSortHeader('AVG PRE','preRouteMin');
+  html += _perfSortHeader('AVG ON-ROUTE','onRouteMin');
+  html += _perfSortHeader('AVG POST','postRouteMin');
+  html += _perfSortHeader('STOPS','stops');
+  html += _perfSortHeader('MILES','totalMiles');
+  html += _perfSortHeader('STOPS/HR','stopsPerHr');
+  html += _perfSortHeader('MPH','effectiveMph');
+  html += _perfSortHeader('EFF (med)','efficiencyMedian');
+  html += _perfSortHeader('EFF (reg)','efficiencyRegression');
+  html += `</tr></thead><tbody>`;
+
+  drivers.forEach(d=>{
+    const exp = _perfExpandedDriver === d.canonicalName;
+    const classIcon = d.driverType==='tractor' ? '🚛' : '🚚';
+    html += `<tr onclick="perfToggleDriver('${d.canonicalName.replace(/'/g,"\\'")}')" style="border-bottom:1px solid var(--b1);cursor:pointer;background:${exp?'rgba(0,180,255,.06)':''};">
+      <td style="padding:6px 8px;font-weight:600;color:var(--text);">${exp?'▼ ':'▶ '}${d.displayName}</td>
+      <td style="padding:6px 8px;color:var(--text2);">${d.truck||'—'}</td>
+      <td style="padding:6px 8px;color:var(--text2);">${classIcon} ${d.driverType}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--text2);">${d.days}</td>
+      <td style="text-align:center;padding:6px 8px;color:${d.avg.preRouteMin>30?'var(--amber)':'var(--text)'};">${_perfFmtMin(d.avg.preRouteMin)}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--blue3);font-weight:600;">${_perfFmtMin(d.avg.onRouteMin)}</td>
+      <td style="text-align:center;padding:6px 8px;color:${d.avg.postRouteMin>30?'var(--amber)':'var(--text)'};">${_perfFmtMin(d.avg.postRouteMin)}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--text);">${d.avg.stops.toFixed(1)}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--text);">${d.avg.totalMiles}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--text);">${d.avg.stopsPerHr}</td>
+      <td style="text-align:center;padding:6px 8px;color:var(--text);">${d.avg.effectiveMph}</td>
+      <td style="text-align:center;padding:6px 8px;color:${_perfEffColor(d.efficiencyMedian)};font-weight:700;">${_perfEffLabel(d.efficiencyMedian)}</td>
+      <td style="text-align:center;padding:6px 8px;color:${_perfEffColor(d.efficiencyRegression)};font-weight:700;">${_perfEffLabel(d.efficiencyRegression)}</td>
+    </tr>`;
+
+    if(exp){
+      const records = _perfDriverDetail[d.canonicalName] || [];
+      html += `<tr><td colspan="13" style="padding:0;background:rgba(0,180,255,.04);border-top:2px solid var(--blue3);border-bottom:2px solid var(--blue3);">`;
+      html += `<div style="padding:12px 16px;">`;
+      html += `<div style="font-family:var(--ui);font-size:12px;font-weight:700;margin-bottom:8px;">${d.displayName} — daily detail (${records.length} days)</div>`;
+      // Consistency
+      html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-family:var(--mono);font-size:10px;margin-bottom:10px;">
+        <div><div style="font-size:8px;color:var(--text3);">ON-ROUTE STD DEV</div><div style="font-size:13px;color:var(--text);font-weight:700;">${_perfFmtMin(d.consistency.onRouteMinStdDev)}</div></div>
+        <div><div style="font-size:8px;color:var(--text3);">STOPS STD DEV</div><div style="font-size:13px;color:var(--text);font-weight:700;">±${d.consistency.stopsStdDev}</div></div>
+        <div><div style="font-size:8px;color:var(--text3);">MILES STD DEV</div><div style="font-size:13px;color:var(--text);font-weight:700;">±${d.consistency.milesStdDev}</div></div>
+        <div><div style="font-size:8px;color:var(--text3);">FIRST DAY</div><div style="font-size:13px;color:var(--text);font-weight:700;">${d.firstDate||'—'}</div></div>
+        <div><div style="font-size:8px;color:var(--text3);">LAST DAY</div><div style="font-size:13px;color:var(--text);font-weight:700;">${d.lastDate||'—'}</div></div>
+      </div>`;
+      // Daily records table
+      if(records.length){
+        html += `<div style="overflow-x:auto;background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);">
+          <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px;">
+            <thead><tr style="border-bottom:1px solid var(--b1);">
+              <th style="text-align:left;padding:5px 8px;color:var(--text3);font-size:9px;">DATE</th>
+              <th style="text-align:left;padding:5px 8px;color:var(--text3);font-size:9px;">CLOCK IN</th>
+              <th style="text-align:left;padding:5px 8px;color:var(--text3);font-size:9px;">1ST MOVE</th>
+              <th style="text-align:left;padding:5px 8px;color:var(--text3);font-size:9px;">LAST MOVE</th>
+              <th style="text-align:left;padding:5px 8px;color:var(--text3);font-size:9px;">CLOCK OUT</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">PRE</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">ON-ROUTE</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">POST</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">STOPS</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">MILES</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">SPH</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">MPH</th>
+              <th style="text-align:center;padding:5px 8px;color:var(--text3);font-size:9px;">SCORE</th>
+            </tr></thead><tbody>`;
+        records.forEach(r=>{
+          const sc = r.score>=80?'var(--red2)':r.score>=50?'var(--amber)':r.score>=25?'var(--amber2)':'var(--text2)';
+          html += `<tr style="border-bottom:1px solid rgba(0,0,0,.04);">
+            <td style="padding:5px 8px;color:var(--text);font-weight:600;">${r.date}</td>
+            <td style="padding:5px 8px;color:var(--text2);">${r.clockIn||'—'}</td>
+            <td style="padding:5px 8px;color:var(--text2);">${r.firstMovement||'—'}</td>
+            <td style="padding:5px 8px;color:var(--text2);">${r.lastMovement||'—'}</td>
+            <td style="padding:5px 8px;color:var(--text2);">${r.clockOut||'—'}</td>
+            <td style="text-align:center;padding:5px 8px;color:${r.preRouteMin>30?'var(--amber)':'var(--text2)'};">${_perfFmtMin(r.preRouteMin)}</td>
+            <td style="text-align:center;padding:5px 8px;color:var(--blue3);font-weight:600;">${_perfFmtMin(r.onRouteMin)}</td>
+            <td style="text-align:center;padding:5px 8px;color:${r.postRouteMin>30?'var(--amber)':'var(--text2)'};">${_perfFmtMin(r.postRouteMin)}</td>
+            <td style="text-align:center;padding:5px 8px;color:var(--text);">${r.stops}</td>
+            <td style="text-align:center;padding:5px 8px;color:var(--text);">${r.totalMiles}</td>
+            <td style="text-align:center;padding:5px 8px;color:var(--text);">${r.stopsPerHr}</td>
+            <td style="text-align:center;padding:5px 8px;color:var(--text);">${r.effectiveMph}</td>
+            <td style="text-align:center;padding:5px 8px;color:${sc};font-weight:700;">${r.score}</td>
+          </tr>`;
+        });
+        html += `</tbody></table></div>`;
+      } else {
+        html += `<div style="font-family:var(--mono);font-size:10px;color:var(--text3);padding:8px;">No daily records loaded yet.</div>`;
+      }
+      html += `</div></td></tr>`;
+    }
+  });
+  html += `</tbody></table></div>`;
+  el.innerHTML = html;
+}
+
+
 
 </script>
 <script src="/sentinel-nuvizz-patch.js"></script>

@@ -407,6 +407,23 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
   const stolenHrs = stolenMin / 60;
   const stolenDollars = stolenHrs * wage;
 
+  // ─── PERFORMANCE METRICS ───────────────────────────────────────────────────
+  // Pre-route dwell:  clockIn → first GPS movement (warehouse loiter)
+  // On-route minutes: first GPS movement → last GPS movement (productive route time)
+  // Post-route dwell: last GPS movement → clockOut (return + paperwork + lounging)
+  const ciAbs = ciMin;
+  const coAbs = coMin;
+  const fmAbs = gpsStart ? t2m(gpsClockIn) : 0;
+  const lmAbs = gpsEnd ? t2m(gpsClockOut) : 0;
+  const preRouteMin   = (ciAbs && fmAbs) ? Math.max(0, fmAbs - ciAbs) : 0;
+  const onRouteMin    = (fmAbs && lmAbs) ? Math.max(0, lmAbs - fmAbs) : 0;
+  const postRouteMin  = (lmAbs && coAbs) ? Math.max(0, coAbs - lmAbs) : 0;
+  const stops = myStops.length;
+  const stopsPerHrOnRoute = onRouteMin > 0 ? (stops / (onRouteMin / 60)) : 0;
+  const minPerStop        = stops > 0 ? (onRouteMin / stops) : 0;
+  const milesPerStop      = stops > 0 ? (totalMiles / stops) : 0;
+  const drivePctOnRoute   = onRouteMin > 0 ? (totalEngineMin / onRouteMin) : 0;
+
   return {
     name, canonicalName: canonical,
     driverType: profile.type, driverRole: profile.role,
@@ -425,6 +442,20 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
       earlyStop: +earlyStop.toFixed(0),
       engineGapMin: +engineGapMin.toFixed(0),
       gpsClockIn, gpsClockOut,
+    },
+    perf: {
+      preRouteMin:    +preRouteMin.toFixed(0),
+      onRouteMin:     +onRouteMin.toFixed(0),
+      postRouteMin:   +postRouteMin.toFixed(0),
+      stops,
+      totalMiles:     +totalMiles.toFixed(1),
+      stopsPerHr:     +stopsPerHrOnRoute.toFixed(2),
+      minPerStop:     +minPerStop.toFixed(1),
+      milesPerStop:   +milesPerStop.toFixed(1),
+      drivePctOnRoute:+drivePctOnRoute.toFixed(3),
+      effectiveMph:   +effectiveMph.toFixed(1),
+      firstMovement:  gpsClockIn,
+      lastMovement:   gpsClockOut,
     }
   };
 }
@@ -576,6 +607,54 @@ export default async (req) => {
         lastScanId: scanId,
       });
     }
+
+    // ─── Step 6: Per-driver-per-day performance records ──────────────────────
+    // One doc per (driver, date) — used by /api/sentinel-performance for trend
+    // analysis, regression fitting, and the Performance tab.
+    log('Saving driverPerformanceDaily records...');
+    let perfWrites = 0;
+    for (const r of results) {
+      if (!r.hasData || !r.perf) continue;
+      if (r.perf.onRouteMin <= 0 && r.perf.totalMiles <= 0) continue;
+      const canonical = r.canonicalName || r.name;
+      if (!canonical) continue;
+      const docId = `${r.scanDate}_${canonical.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+      try {
+        await db.setDoc('driverPerformanceDaily', docId, {
+          date: r.scanDate,
+          canonicalName: canonical,
+          displayName: r.name,
+          driverType: r.driverType || 'straight',
+          driverRole: r.driverRole || '',
+          truck: r.truck || '',
+          clockIn: r.clockIn || '',
+          clockOut: r.clockOut || '',
+          firstMovement: r.perf.firstMovement || '',
+          lastMovement: r.perf.lastMovement || '',
+          preRouteMin: r.perf.preRouteMin,
+          onRouteMin: r.perf.onRouteMin,
+          postRouteMin: r.perf.postRouteMin,
+          totalMiles: r.perf.totalMiles,
+          stops: r.perf.stops,
+          stopsPerHr: r.perf.stopsPerHr,
+          minPerStop: r.perf.minPerStop,
+          milesPerStop: r.perf.milesPerStop,
+          drivePctOnRoute: r.perf.drivePctOnRoute,
+          effectiveMph: r.perf.effectiveMph,
+          totalHrs: r.totalHrs,
+          score: r.score,
+          risk: r.risk,
+          stolenHrs: r.stolenHrs,
+          flagCount: (r.flags || []).length,
+          scanId,
+          updatedAt: new Date().toISOString(),
+        });
+        perfWrites++;
+      } catch (e) {
+        console.warn(`perf write failed for ${docId}:`, e.message);
+      }
+    }
+    log(`Wrote ${perfWrites} performance records`);
 
     log('Done.');
     return new Response(JSON.stringify({
