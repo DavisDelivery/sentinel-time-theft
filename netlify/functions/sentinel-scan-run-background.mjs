@@ -158,7 +158,7 @@ async function fetchDriverPeriods(driverId, startDate, endDate) {
 }
 
 // Fetch driving periods for ALL drivers in batches of 10 concurrent requests
-async function fetchDrivingPeriods(startDate, endDate, motiveUsers) {
+async function fetchDrivingPeriods(startDate, endDate, motiveUsers, onProgress) {
   const all = [];
   const BATCH = 10;
   for (let i = 0; i < motiveUsers.length; i += BATCH) {
@@ -169,6 +169,7 @@ async function fetchDrivingPeriods(startDate, endDate, motiveUsers) {
     results.forEach(r => {
       if (r.status === 'fulfilled') all.push(...r.value);
     });
+    if (onProgress) await onProgress(Math.min(i + BATCH, motiveUsers.length), motiveUsers.length);
   }
   return all;
 }
@@ -465,7 +466,12 @@ export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
 
   const logs = [];
-  const log = (msg) => { logs.push(`[${new Date().toISOString().slice(11, 19)}] ${msg}`); console.log('[SCAN-RUN]', msg); };
+  let _sid = 'current';
+  let startedAtTop = new Date().toISOString();
+  const log = (msg) => {
+    logs.push(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
+    console.log('[SCAN-BG]', msg);
+  };
 
   try {
     const url = new URL(req.url);
@@ -474,10 +480,12 @@ export default async (req) => {
     if (req.method === 'POST') {
       const body = await req.json();
       ({ startDate, endDate, secret } = body);
+      _sid = body.statusId || 'current';
     } else {
       startDate = url.searchParams.get('startDate');
       endDate = url.searchParams.get('endDate');
       secret = url.searchParams.get('secret');
+      _sid = url.searchParams.get('statusId') || 'current';
     }
 
     if (secret !== SCAN_SECRET()) {
@@ -488,26 +496,47 @@ export default async (req) => {
     }
 
     const siteUrl = Netlify.env.get('URL') || 'https://sentinel-time-theft.netlify.app';
+    const startedAt = startedAtTop;
+    const dbForStatus = getDb();
+    let lastStatusUpdate = 0;
+    const writeStatus = async (msg, force=false) => {
+      const now = Date.now();
+      if (!force && now - lastStatusUpdate < 1000) return;
+      lastStatusUpdate = now;
+      try {
+        await dbForStatus.setDoc('sentinelScanStatus', _sid, {
+          statusId: _sid, startedAt, status: 'running',
+          startDate, endDate,
+          logs: logs.slice(-200), progress: msg,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch(e) {}
+    };
+
     log(`Scan: ${startDate} → ${endDate}`);
+    await writeStatus(`Scan ${startDate} → ${endDate} starting`, true);
 
     // Step 1: Fetch Motive drivers WITH IDs
     log('Fetching Motive driver roster (with IDs)...');
     const motiveUsers = await fetchMotiveUsersWithIds();
-    log(`Got ${motiveUsers.length} Motive drivers`);
+    log(`Got ${motiveUsers.length} Motive drivers`); await writeStatus(`Got ${motiveUsers.length} Motive drivers`, true);
 
     // Step 2: Fetch driving periods PER DRIVER — fixes the 12-driver bug
     log('Fetching driving_periods per driver (batches of 10)...');
-    const periods = await fetchDrivingPeriods(startDate, endDate, motiveUsers);
-    log(`Got ${periods.length} driving periods across all drivers`);
+    const periods = await fetchDrivingPeriods(startDate, endDate, motiveUsers, async (done, total) => {
+      log(`  driving_periods: ${done}/${total} drivers fetched`);
+      await writeStatus(`Fetching driving_periods: ${done}/${total} drivers`);
+    });
+    log(`Got ${periods.length} driving periods across all drivers`); await writeStatus(`Got ${periods.length} driving periods`, true);
 
     // Step 3: Load B600 + NuVizz
     log('Loading B600 history...');
     const b600History = await loadB600History(siteUrl);
-    log(`B600: ${b600History.length} punches`);
+    log(`B600: ${b600History.length} punches`); await writeStatus(`B600: ${b600History.length} punches`, true);
 
     log('Loading NuVizz history...');
     const nuvizzStops = await loadNuvizzHistory(siteUrl, startDate, endDate);
-    log(`NuVizz: ${nuvizzStops.length} stops for date range`);
+    log(`NuVizz: ${nuvizzStops.length} stops for date range`); await writeStatus(`NuVizz: ${nuvizzStops.length} stops`, true);
 
     // Step 4: Score each driver per day
     const results = [];
@@ -520,7 +549,7 @@ export default async (req) => {
     }
 
     for (const scanDate of dateList) {
-      log(`Scoring ${scanDate}...`);
+      log(`Scoring ${scanDate}...`); await writeStatus(`Scoring ${scanDate}`, true);
       const dayPeriods = periods.filter(p => {
         const dp = p.driving_period || p;
         const t = dp.start_time || '';
@@ -555,7 +584,7 @@ export default async (req) => {
       dayResults.forEach(r => results.push({ ...r, scanDate }));
     }
 
-    log(`Scored ${results.length} driver-day records`);
+    log(`Scored ${results.length} driver-day records`); await writeStatus(`Scored ${results.length} driver-day records`, true);
 
     // Step 5: Save to Firestore
     const scanId = `scan_${startDate}_${endDate}_${Date.now()}`;
@@ -578,7 +607,7 @@ export default async (req) => {
       source: 'server',
       drivers: results
     });
-    log(`Saved scan ${scanId}`);
+    log(`Saved scan ${scanId}`); await writeStatus(`Saved scan ${scanId}`, true);
 
     // Update driver history
     for (const r of results) {
@@ -654,11 +683,30 @@ export default async (req) => {
         console.warn(`perf write failed for ${docId}:`, e.message);
       }
     }
-    log(`Wrote ${perfWrites} performance records`);
+    log(`Wrote ${perfWrites} performance records`); await writeStatus(`Wrote ${perfWrites} performance records`, true);
 
     log('Done.');
+    // Final status doc with result payload
+    try {
+      await dbForStatus.setDoc('sentinelScanStatus', _sid, {
+        statusId: _sid, startedAt, finishedAt: new Date().toISOString(),
+        status: 'done',
+        startDate, endDate, scanId,
+        logs: logs.slice(-200), progress: 'Done',
+        result: {
+          scanId,
+          driverCount: results.length,
+          flaggedCount: flagged.length,
+          critical: results.filter(r => r.risk === 'critical').length,
+          high: results.filter(r => r.risk === 'high').length,
+          totalStolenHrs: +totalStolen.toFixed(2),
+          totalCost: +totalCost.toFixed(2),
+        },
+        updatedAt: new Date().toISOString(),
+      });
+    } catch(e) {}
     return new Response(JSON.stringify({
-      success: true, scanId, startDate, endDate,
+      success: true, scanId, statusId: _sid, startDate, endDate,
       driverCount: results.length,
       flaggedCount: flagged.length,
       critical: results.filter(r => r.risk === 'critical').length,
@@ -669,7 +717,18 @@ export default async (req) => {
     }), { status: 200, headers: CORS });
 
   } catch (err) {
-    console.error('[SCAN-RUN]', err);
+    console.error('[SCAN-BG]', err);
+    try {
+      await getDb().setDoc('sentinelScanStatus', _sid, {
+        statusId: _sid,
+        startedAt: startedAtTop,
+        finishedAt: new Date().toISOString(),
+        status: 'error',
+        error: err.message,
+        logs: logs.slice(-200),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch(e) {}
     return new Response(JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), logs }), { status: 500, headers: CORS });
   }
 };

@@ -696,7 +696,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.12';
+const APP_VERSION = '3.10.13';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1821,217 +1821,123 @@ function scoreDriver(driver, gps, allDriverGPS){
 // ═══════════════════════════════════════════
 async function runAudit(){
   const btn=document.getElementById('runBtn');
-  btn.disabled=true;btn.textContent='⏳ SCANNING...';
-  setStatus('running');results=[];
-
   const dates=getAuditDates();
   const startDate=dates[0], endDate=dates[dates.length-1];
-  log(`SENTINEL v${APP_VERSION} — ${dates.length} day(s): ${startDate} → ${endDate}`,'hi');
-  log(`Warehouse geofence: ${WAREHOUSE.radiusFt}ft @ ${WAREHOUSE.lat},${WAREHOUSE.lng}`,'info');
-  log(`Shift window filter: -${SHIFT_BUFFER_BEFORE}min / +${SHIFT_BUFFER_AFTER}min`,'info');
 
-  try{
-    // Step 0a: Auto-load B600 data for selected dates from the Data Hub.
-    // loadB600ForDates is now async (v3.10.7) — lazy-fetches any dates outside
-    // the boot preload window before filtering. Skip only if a manual CSV
-    // upload already populated b600Data.
-    if(!b600Data.length){
-      await loadB600ForDates(dates);
-    }
+  // Get or prompt for scan secret (stored in localStorage so user only enters once)
+  let secret = localStorage.getItem('sentinel_scan_secret');
+  if(!secret){
+    secret = prompt('Enter scan secret (one-time setup, stored locally):');
+    if(!secret){ log('Scan cancelled — no secret','warn'); return; }
+    localStorage.setItem('sentinel_scan_secret', secret);
+  }
 
-    // Step 0b: Auto-load NuVizz stop data — try stored history first, then API
-    nuvizzData=[]; // clear previous
-    const hadStoredNuvizz = await loadNuVizzForDates(dates);
-    if(!hadStoredNuvizz){
-      log(`NuVizz: no stored data for selected dates — trying live API...`,'info');
-      await fetchNuVizzAPI(dates);
-    }
-    if(!nuvizzData.length){
-      log(`NuVizz: no data available — upload CSV manually or skip`,'warn');
-    }
+  btn.disabled=true; btn.textContent='⏳ SCANNING...';
+  setStatus('running'); results=[];
 
-    // Step 1: Fetch all vehicles (builds cache for ID lookups)
-    await fetchAllVehicles();
+  // Open DataStream so user sees progress
+  const logFooter=document.getElementById('logFooter');
+  if(logFooter && logFooter.classList.contains('collapsed')) logFooter.classList.remove('collapsed');
 
-    // Step 1b: Fetch full Motive driver roster (so we don't miss anyone)
-    const motiveDrivers=await fetchAllMotiveDrivers();
+  log(`SENTINEL v${APP_VERSION} — server scan: ${dates.length} day(s) ${startDate} → ${endDate}`,'hi');
+  log('⚡ Scan running server-side. You can close this tab — results save to History automatically.','info');
 
-    // Step 2: Fetch driving_periods — primary source of GPS data
-    const periods=await fetchDrivingPeriods(startDate, endDate);
-    if(periods.length===0){
-      log('⚠️ No driving_periods returned — checking full driver roster anyway','warn');
-    }
+  // Generate unique status ID so concurrent scans don't collide
+  const statusId = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,7)}`;
 
-    // Step 3: Build driver data from periods
-    const drivers=buildDriverData(periods);
-    // Tag everyone who came from driving_periods — they actually drove, so they're real
-    drivers.forEach(d=>{
-      d._source = 'driving';
-      d._inHub = isInHubRoster(d.name);
+  try {
+    const res = await fetch('/api/sentinel-scan-run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({startDate, endDate, secret, statusId})
     });
-    log(`Built ${drivers.length} driver profiles from driving_periods`,'ok');
-
-    // Step 3b: Merge in any Motive drivers that didn't show in driving_periods
-    // (i.e. didn't drive that day, or yard-only, or co-driver setup)
-    // v3.10.1: Tag each merged driver with hub-roster cross-check so unknowns can be curated.
-    const driversInPeriods=new Set(drivers.map(d=>d.name.toLowerCase()));
-    let added=0, addedInHub=0, addedUnknown=0;
-    motiveDrivers.forEach(md=>{
-      if(!md.name||driversInPeriods.has(md.name.toLowerCase()))return;
-      const inHub = isInHubRoster(md.name);
-      drivers.push({
-        name: md.name,
-        driverId: md.id,
-        vehicles:{},
-        periods:[],
-        departures:[],
-        arrivals:[],
-        clockIn:null,
-        clockOut:null,
-        truck:'',
-        // Mark as no-GPS so scoring engine knows
-        _noMotiveActivity: true,
-        _source: 'motive_only',
-        _inHub: inHub
-      });
-      added++;
-      if(inHub) addedInHub++; else addedUnknown++;
-    });
-    if(added>0){
-      log(`Added ${added} drivers from Motive roster (no driving_periods that date): ${addedInHub} known, ${addedUnknown} ⚠️ NOT in hub roster — review`,'info');
+    // Background functions return 202 immediately; sync ones return 200.
+    // Either way we kick off polling and let the status doc tell us when done.
+    if(res.status === 401){
+      // Secret was wrong — clear it so user gets re-prompted next time
+      localStorage.removeItem('sentinel_scan_secret');
+      log('❌ Wrong scan secret — cleared. Click ENGAGE SENTINEL to retry.','err');
+      btn.disabled=false; btn.textContent='⚡ ENGAGE SENTINEL'; setStatus('error');
+      return;
     }
-    // Total summary including hub-coverage breakdown
-    const totalUnknown = drivers.filter(d=>d._inHub===false).length;
-    log(`Total drivers to audit: ${drivers.length} (${drivers.length-totalUnknown} in canonical hub, ${totalUnknown} ⚠️ unknown — flagged for review)`,'ok');
-
-    if(drivers.length===0){
-      log('No driver data to analyze','warn');
-      btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('ready');return;
+    if(res.status === 202 || res.status === 200){
+      log(`Scan dispatched (statusId: ${statusId}) — polling for progress...`,'info');
+      _pollScanStatus(statusId);
+    } else {
+      let errBody='';
+      try { errBody=(await res.json()).error||''; } catch(e){}
+      log(`❌ Scan dispatch failed (HTTP ${res.status}): ${errBody}`,'err');
+      btn.disabled=false; btn.textContent='⚡ ENGAGE SENTINEL'; setStatus('error');
     }
-
-    // Step 4: For each driver's truck, fetch GPS breadcrumbs
-    log(`Fetching GPS breadcrumbs for ${drivers.length} drivers...`,'hi');
-    const driverGPSData=[];
-    let gpsOk=0, gpsFail=0, totalDropped=0;
-    for(let i=0;i<drivers.length;i++){
-      const d=drivers[i];
-      await delay(150); // rate limit — Motive throttles fast requests
-      let gps=null;
-
-      try{
-        // v3.10.10: support same-day multi-truck drivers. d.allVehicles holds
-        // every {truck, vehicleId} pair the driver touched on this date. We
-        // fetch GPS for each truck independently and merge into a single
-        // sorted timeline before processGPSData. This produces correct
-        // total miles, correct stop detection, and correct idle math even
-        // when the driver swapped trucks mid-day (morning truck broke
-        // down, afternoon truck took over, etc.).
-        //
-        // Single-truck case (the vast majority): allVehicles has 1 entry,
-        // behaves identically to the prior single-fetch path.
-        const vehiclesToFetch = (d.allVehicles && d.allVehicles.length)
-          ? d.allVehicles.filter(v => v.vehicleId)  // primary: use Motive IDs from periods
-          : [];
-        // Fallback: vehicleCache lookup if vehicleId is missing but we know the truck#
-        if (vehiclesToFetch.length === 0 && d.truck && vehicleCache[d.truck]) {
-          vehiclesToFetch.push({ truck: d.truck, vehicleId: vehicleCache[d.truck].id });
-        }
-
-        if (vehiclesToFetch.length > 1) {
-          // Multi-truck day — log explicitly so it's visible in the audit log
-          const truckList = vehiclesToFetch.map(v => `#${v.truck}`).join(', ');
-          log(`[${i+1}/${drivers.length}] ${d.name} → ${vehiclesToFetch.length} trucks (${truckList}) — fetching all and merging`, 'info');
-          let allLocs = [];
-          for (const v of vehiclesToFetch) {
-            const partial = await fetchVehicleLocations(v.vehicleId, startDate, endDate);
-            if (partial.length > 0) {
-              log(`   truck #${v.truck}: ${partial.length} GPS points`, 'info');
-              allLocs = allLocs.concat(partial);
-            }
-            await delay(150); // rate limit between fetches
-          }
-          // Sort merged points by timestamp so processGPSData sees a
-          // continuous chronological stream regardless of which truck
-          // produced each point. The driver's actual workday IS continuous
-          // across trucks, so this is the semantically correct merge.
-          allLocs.sort((a, b) => {
-            const ta = new Date(a.located_at || a.timestamp || a.recorded_at).getTime();
-            const tb = new Date(b.located_at || b.timestamp || b.recorded_at).getTime();
-            return ta - tb;
-          });
-          if (allLocs.length > 0) {
-            gps = processGPSData(allLocs, t2m(d.clockIn), t2m(d.clockOut), d.name);
-            if (gps) {
-              gps._multiTruck = true;
-              gps._trucks = vehiclesToFetch.map(v => v.truck);
-              log(`✅ ${d.name}: merged ${gps._filteredGpsPoints} pts across ${vehiclesToFetch.length} trucks (${gps._droppedGpsPoints} dropped), ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`, 'ok');
-              gpsOk++;
-              totalDropped += gps._droppedGpsPoints;
-            }
-          }
-        } else if (vehiclesToFetch.length === 1) {
-          const v = vehiclesToFetch[0];
-          log(`[${i+1}/${drivers.length}] ${d.name} → truck #${v.truck} (vID: ${v.vehicleId})...`, 'info');
-          const locs = await fetchVehicleLocations(v.vehicleId, startDate, endDate);
-          if (locs.length > 0) {
-            gps = processGPSData(locs, t2m(d.clockIn), t2m(d.clockOut), d.name);
-            if (gps) {
-              log(`✅ ${d.name}: ${gps._filteredGpsPoints} pts (${gps._droppedGpsPoints} dropped), ${gps.actualMiles.toFixed(0)}mi, ${gps.unexplained.length} stops`, 'ok');
-              gpsOk++;
-              totalDropped += gps._droppedGpsPoints;
-            }
-          }
-        }
-      }catch(err){
-        log(`⚠️ GPS fetch failed for ${d.name}: ${err.message} — marking NO DATA`,'warn');
-        gpsFail++;
-      }
-
-      if(!gps){
-        if(gpsFail===0)log(`${d.name}: no GPS data for this date`,'warn');
-      }
-
-      driverGPSData.push({...d, gps});
-    }
-    log(`GPS complete: ${gpsOk} with data, ${drivers.length-gpsOk} without, ${totalDropped} total points dropped by shift filter`,'ok');
-
-    // Step 5: Score only drivers WITH sufficient GPS data
-    const noDataGPS={engineOnMin:0,actualMiles:0,effectiveMph:0,engineFactor:0,lateStart:0,earlyStop:0,
-      gpsAfterClockout:false,gpsAfterMin:0,unexplained:[],warehouseStops:[],deliveryStops:0,microStopCount:0,
-      warehouseDwellExtra:0,shiftMin:0,rawLocations:0,_totalGpsPoints:0,_filteredGpsPoints:0,_droppedGpsPoints:0,_shiftWindow:''};
-    for(let i=0;i<driverGPSData.length;i++){
-      const d=driverGPSData[i];
-      try{
-        if(d.insufficientData){
-          log(`${d.name}: shift under ${MIN_SHIFT_MIN}min — insufficient data, not scored`,'warn');
-          results.push({...d,score:0,risk:'nodata',flags:[],layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0},
-            gps:noDataGPS,stolenHrs:0,stolenDollars:0,timeline:[],engineGapMin:0,manifestStops:[],hasData:false});
-        } else if(d.gps){
-          const scored=scoreDriver(d, d.gps, driverGPSData);
-          results.push(scored);
-        } else {
-          results.push({...d,score:0,risk:'nodata',flags:[],layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0},
-            gps:noDataGPS,stolenHrs:0,stolenDollars:0,timeline:[],engineGapMin:0,manifestStops:[],hasData:false});
-        }
-      }catch(err){
-        log(`Score error for ${d.name}: ${err.message}`,'err');
-        results.push({...d,score:0,risk:'nodata',flags:[],layers:{timeMotion:0,stopPattern:0,baseline:0,peer:0},
-          gps:noDataGPS,stolenHrs:0,stolenDollars:0,timeline:[],engineGapMin:0,manifestStops:[],hasData:false});
-      }
-    }
-
-    results.sort((a,b)=>b.score-a.score);
-    updateHeader();updateStats();renderFlags();renderReport();
-    saveAuditRun();
-    saveScanToFirestore();
-    btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('done');
-    log(`✅ Audit complete — ${results.filter(r=>r.risk!=='low'&&r.risk!=='nodata').length} drivers flagged, ${results.filter(r=>r.risk==='nodata').length} no data`,'ok');
-
-  }catch(err){
-    log(`Audit error: ${err.message}`,'err');
-    btn.disabled=false;btn.textContent='⚡ ENGAGE SENTINEL';setStatus('error');
+  } catch(err){
+    log(`❌ Network error: ${err.message}`,'err');
+    btn.disabled=false; btn.textContent='⚡ ENGAGE SENTINEL'; setStatus('error');
   }
 }
+
+// Poll the status doc every 2s, append new log lines to DataStream, finalize when done
+let _scanPollLastLogIdx = 0;
+let _scanPollTimer = null;
+async function _pollScanStatus(statusId){
+  // Reset bookkeeping for this run
+  _scanPollLastLogIdx = 0;
+  if(_scanPollTimer) clearTimeout(_scanPollTimer);
+
+  const tick = async () => {
+    try {
+      const res = await fetch(`/api/sentinel-scan-status?statusId=${encodeURIComponent(statusId)}`);
+      const data = await res.json();
+      if(!data.success){
+        log(`Status poll error: ${data.error||'unknown'}`,'warn');
+        _scanPollTimer = setTimeout(tick, 3000);
+        return;
+      }
+      // Append new log lines (server-side log, dedup against what we've already shown)
+      const serverLogs = data.logs || [];
+      if(serverLogs.length > _scanPollLastLogIdx){
+        for(let i=_scanPollLastLogIdx; i<serverLogs.length; i++){
+          // Server log lines look like "[HH:MM:SS] message" — strip prefix to keep DataStream tidy
+          const line = serverLogs[i].replace(/^\[[\d:]+\]\s*/, '');
+          log(`[srv] ${line}`,'info');
+        }
+        _scanPollLastLogIdx = serverLogs.length;
+      }
+
+      if(data.status === 'done'){
+        const r = data.result || {};
+        log(`✅ Scan complete — ${r.driverCount||0} drivers, ${r.flaggedCount||0} flagged, ${r.critical||0} critical, ${r.high||0} high`,'ok');
+        log(`💰 Est stolen: ${(r.totalStolenHrs||0).toFixed(1)}h / $${(r.totalCost||0).toFixed(0)}`,'ok');
+        log(`🆔 Scan saved: ${r.scanId||''}`,'ok');
+        // Update top KPI tiles with the result
+        document.getElementById('hmDrivers').textContent = r.driverCount||0;
+        document.getElementById('hmFlagged').textContent = r.flaggedCount||0;
+        document.getElementById('hmHours').textContent = (r.totalStolenHrs||0).toFixed(1)+'h';
+        document.getElementById('hmDollars').textContent = '$'+(r.totalCost||0).toFixed(0);
+        // Refresh History so the new scan shows up
+        if(typeof loadUnifiedHistory==='function') loadUnifiedHistory();
+        // Refresh Performance if it's been loaded before
+        if(typeof loadPerformance==='function' && _perfData) loadPerformance();
+        const btn=document.getElementById('runBtn');
+        btn.disabled=false; btn.textContent='⚡ ENGAGE SENTINEL'; setStatus('done');
+        return;
+      }
+      if(data.status === 'error'){
+        log(`❌ Scan failed: ${data.error||'unknown'}`,'err');
+        const btn=document.getElementById('runBtn');
+        btn.disabled=false; btn.textContent='⚡ ENGAGE SENTINEL'; setStatus('error');
+        return;
+      }
+      // Still running — schedule next poll
+      _scanPollTimer = setTimeout(tick, 2000);
+    } catch(e){
+      log(`Status poll network error: ${e.message}`,'warn');
+      _scanPollTimer = setTimeout(tick, 4000);
+    }
+  };
+  // First poll right away to pick up "scan started" log
+  setTimeout(tick, 500);
+}
+
 
 // ═══════════════════════════════════════════
 // RENDER
