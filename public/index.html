@@ -696,7 +696,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.13';
+const APP_VERSION = '3.10.14';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -1824,14 +1824,6 @@ async function runAudit(){
   const dates=getAuditDates();
   const startDate=dates[0], endDate=dates[dates.length-1];
 
-  // Get or prompt for scan secret (stored in localStorage so user only enters once)
-  let secret = localStorage.getItem('sentinel_scan_secret');
-  if(!secret){
-    secret = prompt('Enter scan secret (one-time setup, stored locally):');
-    if(!secret){ log('Scan cancelled — no secret','warn'); return; }
-    localStorage.setItem('sentinel_scan_secret', secret);
-  }
-
   btn.disabled=true; btn.textContent='⏳ SCANNING...';
   setStatus('running'); results=[];
 
@@ -1849,17 +1841,10 @@ async function runAudit(){
     const res = await fetch('/api/sentinel-scan-run', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({startDate, endDate, secret, statusId})
+      body: JSON.stringify({startDate, endDate, statusId})
     });
     // Background functions return 202 immediately; sync ones return 200.
     // Either way we kick off polling and let the status doc tell us when done.
-    if(res.status === 401){
-      // Secret was wrong — clear it so user gets re-prompted next time
-      localStorage.removeItem('sentinel_scan_secret');
-      log('❌ Wrong scan secret — cleared. Click ENGAGE SENTINEL to retry.','err');
-      btn.disabled=false; btn.textContent='⚡ ENGAGE SENTINEL'; setStatus('error');
-      return;
-    }
     if(res.status === 202 || res.status === 200){
       log(`Scan dispatched (statusId: ${statusId}) — polling for progress...`,'info');
       _pollScanStatus(statusId);
@@ -2921,6 +2906,39 @@ function renderUnifiedHistory(){
             return `<div style="font-family:var(--mono);font-size:10px;padding:4px 8px;margin:3px 0;background:rgba(255,170,0,.1);border:1px solid rgba(255,170,0,.25);border-radius:3px;color:var(--amber);"><strong>${t}</strong>${detail?` — <span style="color:var(--text2);">${detail}</span>`:''}</div>`;
           }).join('');
           html += `</div>`;
+        }
+        // Raw Motive periods toggle — lets you verify the source data
+        if(d.rawPeriods && d.rawPeriods.length){
+          const rawId = `raw_${(d.canonicalName||d.name).replace(/[^a-z0-9]/gi,'_')}_${scan.scanId}`;
+          html += `<div style="margin-top:10px;">
+            <button onclick="(function(){const e=document.getElementById('${rawId}');e.style.display=e.style.display==='none'?'block':'none';})()" style="background:var(--s2);color:var(--blue3);border:1px solid var(--blue3);border-radius:var(--radius);padding:4px 10px;cursor:pointer;font-family:var(--head);font-size:9px;font-weight:700;letter-spacing:1px;">📊 RAW MOTIVE (${d.rawPeriods.length} PERIODS)</button>
+            <div id="${rawId}" style="display:none;margin-top:8px;background:rgba(0,0,0,.04);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;max-height:300px;overflow-y:auto;">
+              <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:6px;">Raw driving_periods returned by Motive API for this driver on ${scan.startDate}${scan.startDate!==scan.endDate?' → '+scan.endDate:''}. These are the source records used to compute everything above.</div>
+              <table style="width:100%;font-family:var(--mono);font-size:10px;border-collapse:collapse;">
+                <thead><tr style="border-bottom:1px solid var(--b1);">
+                  <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">START (UTC)</th>
+                  <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">END (UTC)</th>
+                  <th style="text-align:right;padding:3px 6px;color:var(--text3);font-size:9px;">DUR (MIN)</th>
+                  <th style="text-align:right;padding:3px 6px;color:var(--text3);font-size:9px;">MILES</th>
+                  <th style="text-align:left;padding:3px 6px;color:var(--text3);font-size:9px;">TYPE</th>
+                </tr></thead>
+                <tbody>
+                  ${d.rawPeriods.map(p=>`<tr style="border-bottom:1px solid rgba(0,0,0,.04);">
+                    <td style="padding:3px 6px;color:var(--text);">${(p.start||'').replace('T',' ').slice(0,19)}</td>
+                    <td style="padding:3px 6px;color:var(--text);">${(p.end||'').replace('T',' ').slice(0,19)}</td>
+                    <td style="text-align:right;padding:3px 6px;color:var(--blue3);font-weight:600;">${(p.durMin||0).toFixed(1)}</td>
+                    <td style="text-align:right;padding:3px 6px;color:var(--text);">${(p.miles||0).toFixed(2)}</td>
+                    <td style="padding:3px 6px;color:var(--text2);">${p.type||'—'}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:6px;text-align:right;">
+                Sum: ${d.rawPeriods.reduce((a,p)=>a+(p.durMin||0),0).toFixed(1)} min · ${d.rawPeriods.reduce((a,p)=>a+(p.miles||0),0).toFixed(2)} mi
+              </div>
+            </div>
+          </div>`;
+        } else if(d.hasData) {
+          html += `<div style="margin-top:10px;font-family:var(--mono);font-size:9px;color:var(--text3);">Raw Motive periods not saved for this scan (run a new scan to capture them).</div>`;
         }
         html += `</div></td></tr>`;
       }

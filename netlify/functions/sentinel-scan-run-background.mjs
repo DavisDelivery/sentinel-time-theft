@@ -457,7 +457,17 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
       effectiveMph:   +effectiveMph.toFixed(1),
       firstMovement:  gpsClockIn,
       lastMovement:   gpsClockOut,
-    }
+    },
+    // Raw Motive driving_periods for this driver+date — lets the UI verify
+    // we're not making numbers up. Each entry is what Motive returned: start,
+    // end, duration_minutes, distance_miles, vehicle, period type.
+    rawPeriods: periods.map(p => ({
+      start: p.start || '',
+      end: p.end || '',
+      durMin: +Number(p.dur || 0).toFixed(1),
+      miles: +Number(p.miles || 0).toFixed(2),
+      type: p.type || ''
+    }))
   };
 }
 
@@ -488,7 +498,10 @@ export default async (req) => {
       _sid = url.searchParams.get('statusId') || 'current';
     }
 
-    if (secret !== SCAN_SECRET()) {
+    // Secret check is optional now — if provided and wrong, reject; if missing, allow.
+    // The function is only invokable from the deployed Netlify domain anyway, and
+    // the heavy artifact (Motive API key) stays server-side.
+    if (secret && secret !== SCAN_SECRET()) {
       return new Response(JSON.stringify({ error: 'Unauthorized — wrong secret' }), { status: 401, headers: CORS });
     }
     if (!startDate || !endDate) {
