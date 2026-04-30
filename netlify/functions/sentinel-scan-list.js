@@ -30,18 +30,9 @@ export default async (req) => {
       if (!scanId) return new Response(JSON.stringify({ error: 'scanId required' }), { status: 400, headers: CORS });
       const secret = url.searchParams.get('secret');
       if (secret !== SCAN_SECRET()) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-      // Use a direct REST DELETE — _firebase-admin doesn't expose deleteDoc, so inline it here.
-      const projectId = Netlify.env.get('FIREBASE_PROJECT_ID');
-      // Reuse db machinery indirectly: getDoc to confirm exists
       const existing = await db.getDoc('sentinelScans', scanId);
       if (!existing) return new Response(JSON.stringify({ error: 'Scan not found' }), { status: 404, headers: CORS });
-      // Issue REST delete (need access token — call getDoc again would be wasteful, so do via firestore endpoint)
-      // Quick path: we just call setDoc with a delete marker won't work. Use fetch with bearer via a temp token grab.
-      // Simplest approach: a scan deletion is rare, do inline.
-      const tokenRes = await getAccessTokenInline();
-      const delUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/sentinelScans/${encodeURIComponent(scanId)}`;
-      const delRes = await fetch(delUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${tokenRes}` } });
-      if (!delRes.ok) return new Response(JSON.stringify({ error: `delete failed: ${delRes.status}` }), { status: 500, headers: CORS });
+      await db.deleteDoc('sentinelScans', scanId);
       return new Response(JSON.stringify({ success: true, scanId }), { headers: CORS });
     }
 
@@ -78,7 +69,6 @@ export default async (req) => {
       totalStolenHrs: d.totalStolenHrs || 0,
       totalCost: d.totalCost || 0,
       source: d.source || 'client',
-      // Roster metadata (v3.10.16+) — empty for older scans
       rosterSource: d.rosterSource || null,
       rosterDocCount: d.rosterDocCount || 0,
       rosterAliasCount: d.rosterAliasCount || 0
@@ -90,27 +80,5 @@ export default async (req) => {
     return new Response(JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 300) }), { status: 500, headers: CORS });
   }
 };
-
-// Inline helper for delete — duplicates the JWT flow to avoid widening _firebase-admin surface
-async function getAccessTokenInline() {
-  const crypto = await import('crypto');
-  const clientEmail = Netlify.env.get('FIREBASE_CLIENT_EMAIL');
-  let privateKey = Netlify.env.get('FIREBASE_PRIVATE_KEY');
-  privateKey = privateKey.replace(/\\n/g, '\n');
-  const now = Math.floor(Date.now() / 1000);
-  const header = { alg: 'RS256', typ: 'JWT' };
-  const claim = { iss: clientEmail, scope: 'https://www.googleapis.com/auth/datastore', aud: 'https://oauth2.googleapis.com/token', exp: now + 3600, iat: now };
-  const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
-  const unsigned = `${b64url(header)}.${b64url(claim)}`;
-  const signature = crypto.default.sign('RSA-SHA256', Buffer.from(unsigned), privateKey).toString('base64url');
-  const jwt = `${unsigned}.${signature}`;
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
-  });
-  const data = await res.json();
-  return data.access_token;
-}
 
 export const config = { path: '/api/sentinel-scan-list' };

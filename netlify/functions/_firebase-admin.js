@@ -105,6 +105,78 @@ export function getDb() {
       if (!res.ok) throw new Error(`getDoc failed: ${res.status}`);
       return docToObj(await res.json());
     },
+    async deleteDoc(collection, docId) {
+      const token = await getAccessToken();
+      const url = `${BASE(getProjectId())}/${collection}/${encodeURIComponent(docId)}`;
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // 404 is fine — already gone
+      if (!res.ok && res.status !== 404) {
+        throw new Error(`deleteDoc failed: ${res.status} ${await res.text()}`);
+      }
+      return { deleted: true, status: res.status };
+    },
+    // List ALL doc IDs in a collection (paginated). Used for purge.
+    // Returns an array of just doc IDs to keep memory low.
+    async listAllDocIds(collection, pageSize = 300) {
+      const token = await getAccessToken();
+      const out = [];
+      let pageToken = null;
+      let safety = 0;
+      do {
+        const params = new URLSearchParams({ pageSize: String(pageSize) });
+        // mask=__name__ returns just doc names with no fields. Canonical
+        // "list IDs only" trick for Firestore REST.
+        params.append('mask.fieldPaths', '__name__');
+        if (pageToken) params.set('pageToken', pageToken);
+        const url = `${BASE(getProjectId())}/${collection}?${params.toString()}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 404) break;
+        if (!res.ok) throw new Error(`listAllDocIds failed: ${res.status} ${await res.text()}`);
+        const data = await res.json();
+        const docs = data.documents || [];
+        for (const d of docs) out.push(d.name.split('/').pop());
+        pageToken = data.nextPageToken;
+        safety++;
+        if (safety > 1000) {
+          console.warn(`listAllDocIds ${collection}: hit safety ceiling 1000 pages`);
+          break;
+        }
+      } while (pageToken);
+      return out;
+    },
+    // Batch delete via Firestore :commit endpoint. Limit 500 per call.
+    // Recurses for larger sets. Returns { ok, failed }.
+    async batchDelete(collection, docIds) {
+      if (!docIds.length) return { ok: 0, failed: 0 };
+      if (docIds.length > 500) {
+        let ok = 0, failed = 0;
+        for (let i = 0; i < docIds.length; i += 500) {
+          const r = await this.batchDelete(collection, docIds.slice(i, i + 500));
+          ok += r.ok; failed += r.failed;
+        }
+        return { ok, failed };
+      }
+      const token = await getAccessToken();
+      const url = `${BASE(getProjectId())}:commit`;
+      const writes = docIds.map(id => ({
+        delete: `projects/${getProjectId()}/databases/(default)/documents/${collection}/${id}`
+      }));
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writes })
+      });
+      if (!res.ok) {
+        console.error(`batchDelete ${collection} failed: ${res.status} ${await res.text()}`);
+        return { ok: 0, failed: docIds.length };
+      }
+      const data = await res.json();
+      const writeResults = data.writeResults || [];
+      return { ok: writeResults.length, failed: docIds.length - writeResults.length };
+    },
     // Use runQuery for ordered list — Firestore REST GET on collection
     // does NOT honor orderBy reliably. runQuery is the correct path.
     async listDocs(collection, { orderBy, limit, fields } = {}) {
