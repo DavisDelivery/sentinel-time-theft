@@ -63,7 +63,7 @@ export default async (req) => {
     const docs = await db.listDocs('sentinelScans', {
       orderBy: { field: 'createdAt', direction: 'desc' },
       limit,
-      fields: ['scanId','startDate','endDate','createdAt','driverCount','flaggedCount','critical','high','medium','totalStolenHrs','totalCost','source']
+      fields: ['scanId','startDate','endDate','createdAt','driverCount','flaggedCount','critical','high','medium','totalStolenHrs','totalCost','source','rosterSource','rosterDocCount','rosterAliasCount']
     });
     const scans = docs.map(d => ({
       scanId: d.scanId || d.id,
@@ -77,7 +77,11 @@ export default async (req) => {
       medium: d.medium || 0,
       totalStolenHrs: d.totalStolenHrs || 0,
       totalCost: d.totalCost || 0,
-      source: d.source || 'client'
+      source: d.source || 'client',
+      // Roster metadata (v3.10.16+) — empty for older scans
+      rosterSource: d.rosterSource || null,
+      rosterDocCount: d.rosterDocCount || 0,
+      rosterAliasCount: d.rosterAliasCount || 0
     }));
     return new Response(JSON.stringify({ success: true, scans, count: scans.length }), { headers: CORS });
 

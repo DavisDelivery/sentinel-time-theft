@@ -69,12 +69,12 @@ const CANONICAL = {
   'joe gibbs':'Jovenski Gibbs',
 };
 
+// Legacy helpers — kept as fallback shims. New code uses resolveDriver().
 function toCanonical(name) {
   if (!name) return '';
   const k = name.toLowerCase().trim();
   return CANONICAL[k] || name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
-
 function getProfile(name) {
   const k = name.toLowerCase().trim();
   const role = DRIVER_ROSTER[k] || 'straight';
@@ -93,6 +93,185 @@ function t2m(t) {
 function m2t(m) {
   const h = Math.floor(m / 60) % 24, mn = m % 60;
   return `${h}:${String(mn).padStart(2, '0')}`;
+}
+
+// driverKey — MUST match MarginIQ's slug function exactly so doc IDs line up
+// across nuvizz_stops, timeclock_daily, and driver_classifications.
+function driverKey(name) {
+  if (!name) return null;
+  return (String(name).trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 140)) || null;
+}
+
+// ─── DRIVER ROSTER FROM MARGINIQ (authoritative source) ──────────────────────
+// Loads every doc from `driver_classifications` in davismarginiq Firestore
+// and builds an alias→profile map. Falls back to the hardcoded DRIVER_ROSTER
+// below if MarginIQ is unreachable.
+//
+// Each driver_classifications doc has:
+//   driver_key, full_name, role (driver/owner_op/shuttle_driver/yard_jockey),
+//   classification (W2/1099), default_vehicle_id, aliases[], status (active/...)
+async function loadDriverRoster() {
+  const out = {
+    aliasMap: {},          // lookup key → { canonicalName, role, type, classification, employeeId, source }
+    employeesById: {},     // employeeId/driver_key → full classification doc
+    source: 'fallback',    // 'marginiq' | 'fallback'
+    loadedAt: new Date().toISOString(),
+    docCount: 0,
+    aliasCount: 0,
+    error: null
+  };
+
+  try {
+    const url = `${HUB_FIRESTORE_BASE}:runQuery?key=${HUB_FIRESTORE_KEY}`;
+    const query = {
+      structuredQuery: {
+        from: [{ collectionId: 'driver_classifications' }],
+        limit: 500
+      }
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    let aliasCount = 0;
+    for (const row of rows) {
+      if (!row.document) continue;
+      const f = _fsFields(row.document.fields);
+      const docId = row.document.name.split('/').pop();
+      const key = f.driver_key || docId;
+      if (!key) continue;
+      // Exclude inactive employees so they don't get matched
+      if (f.status && f.status !== 'active') continue;
+
+      const role = f.role || '';
+      // Map MarginIQ canonical role → SENTINEL profile
+      let sentinelRole = 'straight';
+      let sentinelType = 'straight';
+      if (role === 'shuttle_driver') { sentinelRole = 'shuttle'; sentinelType = 'tractor'; }
+      else if (role === 'yard_jockey') { sentinelRole = 'loadshift'; sentinelType = 'tractor'; }
+      else if (role === 'driver' || role === 'owner_op') {
+        // Determine tractor vs straight from default vehicle if available
+        // (we don't have vehicles map here; assume straight unless aliases or
+        // explicit truck_type field tells us otherwise)
+        if (f.truck_type === 'tractor' || f.unit_type === 'tractor') {
+          sentinelRole = 'tractor'; sentinelType = 'tractor';
+        }
+      } else if (role) {
+        // Non-driver role — skip
+        continue;
+      } else {
+        // No role — skip (probably warehouse/office)
+        continue;
+      }
+
+      const canonicalName = f.full_name || f.fullName || `${f.first_name||f.firstName||''} ${f.last_name||f.lastName||''}`.trim() || key;
+      const employeeId = f.employee_id || f.employeeId || docId;
+      const profile = {
+        canonicalName,
+        role: sentinelRole,
+        type: sentinelType,
+        classification: f.classification || '',
+        employeeId,
+        defaultVehicleId: f.default_vehicle_id || f.defaultVehicleId || null,
+        marginIqRole: role,
+        source: 'marginiq'
+      };
+      out.employeesById[employeeId] = profile;
+      out.docCount++;
+
+      // Build aliases — driver_key, full_name, first/last splits, custom aliases
+      const aliases = new Set();
+      aliases.add(key);
+      const fn = canonicalName.toLowerCase().trim();
+      if (fn) aliases.add(fn);
+      const parts = fn.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        // first-name only (e.g. "leslie")
+        if (parts[0].length >= 3) aliases.add(parts[0]);
+        // first-initial + last (e.g. "c head")
+        aliases.add(`${parts[0][0]} ${parts[parts.length-1]}`);
+        // "first last"
+        aliases.add(`${parts[0]} ${parts[parts.length-1]}`);
+      }
+      const customAliases = Array.isArray(f.aliases) ? f.aliases : [];
+      for (const a of customAliases) {
+        const lower = String(a).toLowerCase().trim();
+        if (lower) aliases.add(lower);
+      }
+
+      for (const a of aliases) {
+        if (!out.aliasMap[a]) {
+          out.aliasMap[a] = profile;
+          aliasCount++;
+        }
+      }
+    }
+    out.aliasCount = aliasCount;
+    out.source = 'marginiq';
+    return out;
+  } catch (e) {
+    out.error = e.message;
+    out.source = 'fallback';
+    return out;
+  }
+}
+
+// Resolve a Motive driver name → profile, using MarginIQ first then fallback.
+// Returns { canonicalName, role, type, classification, employeeId, source, lookupKey, lookupMethod }
+function resolveDriver(name, roster) {
+  if (!name) return null;
+  const trimmed = String(name).trim();
+  const lower = trimmed.toLowerCase();
+  const slug = driverKey(trimmed);
+
+  // 1) Exact slug match against MarginIQ
+  if (slug && roster.aliasMap[slug]) {
+    return { ...roster.aliasMap[slug], lookupKey: slug, lookupMethod: 'marginiq-slug' };
+  }
+  // 2) Lower-cased name match against MarginIQ aliases
+  if (roster.aliasMap[lower]) {
+    return { ...roster.aliasMap[lower], lookupKey: lower, lookupMethod: 'marginiq-alias' };
+  }
+  // 3) First-initial + last-name fallback
+  const parts = lower.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const fil = `${parts[0][0]} ${parts[parts.length-1]}`;
+    if (roster.aliasMap[fil]) {
+      return { ...roster.aliasMap[fil], lookupKey: fil, lookupMethod: 'marginiq-firstinitial' };
+    }
+  }
+  // 4) Hardcoded fallback (only used if MarginIQ failed or driver missing there)
+  if (DRIVER_ROSTER[lower]) {
+    const fallbackRole = DRIVER_ROSTER[lower];
+    const isShuttle = fallbackRole === 'shuttle' || fallbackRole === 'loadshift';
+    return {
+      canonicalName: CANONICAL[lower] || trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      role: fallbackRole,
+      type: fallbackRole === 'tractor' || isShuttle ? 'tractor' : 'straight',
+      classification: '',
+      employeeId: null,
+      source: 'fallback-hardcoded',
+      lookupKey: lower,
+      lookupMethod: 'sentinel-hardcoded'
+    };
+  }
+  // 5) No match anywhere — emit a "best effort" record marked unmatched
+  return {
+    canonicalName: trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+    role: 'straight',
+    type: 'straight',
+    classification: '',
+    employeeId: null,
+    source: 'unmatched',
+    lookupKey: lower,
+    lookupMethod: 'no-match'
+  };
 }
 
 // ─── MOTIVE API ───────────────────────────────────────────────────────────────
@@ -309,7 +488,13 @@ async function loadB600History(_siteUrl) {
       if (!row.document) continue;
       const f = _fsFields(row.document.fields);
       if (!f.date || !f.display_name) continue;
-      records.push({ name: f.display_name, clockIn: f.clock_in || '', clockOut: f.clock_out || '', date: f.date });
+      records.push({
+        name: f.display_name,
+        driver_key: f.driver_key || null,   // MarginIQ canonical slug, links to driver_classifications
+        clockIn: f.clock_in || '',
+        clockOut: f.clock_out || '',
+        date: f.date
+      });
     }
     _b600Cache = records;
     return records;
@@ -357,7 +542,16 @@ async function loadNuvizzHistory(_siteUrl, startDate, endDate) {
         if (!row.document) continue;
         const f = _fsFields(row.document.fields);
         if (!f.delivery_date || !f.driver_name) continue;
-        all.push([f.delivery_date, '', f.driver_name || '', f.ship_to || '', f.city || '', f.zip || '', f.stop_number || f.pro || '']);
+        all.push([
+          f.delivery_date,
+          '',
+          f.driver_name || '',
+          f.ship_to || '',
+          f.city || '',
+          f.zip || '',
+          f.stop_number || f.pro || '',
+          f.driver_key || null   // [7] MarginIQ canonical slug
+        ]);
       }
     } catch (e) {
       console.warn(`NuVizz hub chunk error ${fromIso}..${toIso}:`, e.message);
@@ -369,27 +563,41 @@ async function loadNuvizzHistory(_siteUrl, startDate, endDate) {
 
 // ─── SCORING ──────────────────────────────────────────────────────────────────
 function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
-  const { name, totalEngineMin, totalMiles, periods, vehicle, motiveDriver, vehiclesUsed } = driverData;
-  const profile = getProfile(name);
+  const { name, totalEngineMin, totalMiles, periods, vehicle, motiveDriver, vehiclesUsed, resolved } = driverData;
+  // `resolved` is the MarginIQ-or-fallback profile. Falls back to local hardcoded
+  // lookup if not provided (defensive — this should always be set by the caller).
+  const profile = resolved || (() => {
+    const p = getProfile(name);
+    return { ...p, canonicalName: toCanonical(name), source: 'fallback-hardcoded', lookupMethod: 'sentinel-hardcoded', lookupKey: name.toLowerCase().trim() };
+  })();
   const wage = WAGES[profile.type] || WAGES.default;
-  const canonical = toCanonical(name);
-  const rosterKey = name.toLowerCase().trim();
-  const inRoster = rosterKey in DRIVER_ROSTER;
+  const canonical = profile.canonicalName || toCanonical(name);
+  const rosterKey = profile.lookupKey || name.toLowerCase().trim();
+  const inRoster = profile.source !== 'unmatched';
 
+  // B600 matching: try driver_key slug first (MarginIQ canonical), then exact
+  // name, then last-name fuzzy fallback.
+  const driverSlug = profile.lookupKey && profile.source === 'marginiq' ? profile.lookupKey : driverKey(canonical);
   const b600 = b600History.find(r => {
     if (r.date !== scanDate) return false;
+    if (r.driver_key && driverSlug && r.driver_key === driverSlug) return true;
     const rn = r.name.toLowerCase();
     const dn = name.toLowerCase();
-    if (rn === dn) return true;
+    const cn = canonical.toLowerCase();
+    if (rn === dn || rn === cn) return true;
     const rl = rn.split(/\s+/).pop(), dl = dn.split(/\s+/).pop();
     return rl.length > 2 && rl === dl;
   });
 
+  // NuVizz matching: try driver_key slug first, then exact name, then last-name fuzzy.
   const myStops = nuvizzStops.filter(r => {
     if (r[0] !== scanDate) return false;
-    const rn = r[2].toLowerCase().trim();
+    // r[7] is driver_key (added v3.10.16); fall back to name fields if missing.
+    if (r[7] && driverSlug && r[7] === driverSlug) return true;
+    const rn = (r[2] || '').toLowerCase().trim();
     const dn = name.toLowerCase().trim();
-    if (rn === dn) return true;
+    const cn = canonical.toLowerCase().trim();
+    if (rn === dn || rn === cn) return true;
     const rl = rn.split(/\s+/).pop(), dl = dn.split(/\s+/).pop();
     return rl.length > 2 && rl === dl;
   });
@@ -537,14 +745,18 @@ function scoreDriver(driverData, b600History, nuvizzStops, scanDate) {
         vehicles: Object.values(vehiclesUsed || {}),
         primaryTruck: vehicle || ''
       },
-      // ── Roster lookup ──
+      // ── Roster lookup (MarginIQ driver_classifications) ──
       roster: {
         rawNameFromMotive: name,
-        rosterKey: rosterKey,
-        matchedInRoster: inRoster,
-        rosterEntry: inRoster ? DRIVER_ROSTER[rosterKey] : null,
+        lookupKey: profile.lookupKey || rosterKey,
+        lookupMethod: profile.lookupMethod || 'unknown',
+        matched: profile.source !== 'unmatched',
+        source: profile.source || 'unknown',  // 'marginiq' | 'fallback-hardcoded' | 'unmatched'
         canonicalName: canonical,
-        canonicalSource: CANONICAL[rosterKey] ? 'canonical-map' : 'auto-titlecase',
+        employeeId: profile.employeeId || null,
+        defaultVehicleId: profile.defaultVehicleId || null,
+        marginIqRole: profile.marginIqRole || null,
+        classification: profile.classification || null,  // W2 / 1099 / ''
         derivedRole: profile.role,
         derivedType: profile.type,
         wageRate: wage
@@ -671,6 +883,17 @@ export default async (req) => {
     log(`Scan: ${startDate} → ${endDate}`);
     await writeStatus(`Scan ${startDate} → ${endDate} starting`, true);
 
+    // Step 0: Load authoritative driver roster from MarginIQ driver_classifications
+    log('Loading driver roster from MarginIQ (driver_classifications)...');
+    await writeStatus('Loading MarginIQ driver roster...', true);
+    const roster = await loadDriverRoster();
+    if (roster.source === 'marginiq') {
+      log(`MarginIQ roster: ${roster.docCount} drivers, ${roster.aliasCount} aliases (active only)`);
+    } else {
+      log(`⚠️  MarginIQ roster unavailable (${roster.error || 'unknown'}). Falling back to hardcoded list.`);
+    }
+    await writeStatus(`Roster: ${roster.docCount} drivers from ${roster.source}`, true);
+
     // Step 1: Fetch Motive drivers WITH IDs
     log('Fetching Motive driver roster (with IDs)...');
     const motiveUsers = await fetchMotiveUsersWithIds();
@@ -714,23 +937,61 @@ export default async (req) => {
       const drivers = processDriverPeriods(dayPeriods);
       log(`  ${drivers.length} drivers with GPS on ${scanDate}`);
 
-      // Add roster drivers with no GPS this day
+      // Resolve every Motive driver against MarginIQ roster
+      drivers.forEach(driver => {
+        driver.resolved = resolveDriver(driver.name, roster);
+      });
+
+      // Add roster drivers with no GPS this day — pull from MarginIQ first,
+      // then fallback hardcoded
       const driverNames = new Set(drivers.map(dr => dr.name.toLowerCase()));
       motiveUsers.forEach(u => {
         if (!u.name || driverNames.has(u.name.toLowerCase())) return;
-        if (!DRIVER_ROSTER[u.name.toLowerCase()]) return;
-        drivers.push({ name: u.name, periods: [], totalEngineMin: 0, totalMiles: 0, vehicle: '' });
+        const r = resolveDriver(u.name, roster);
+        // Only auto-add if MarginIQ knows this driver (don't add unmatched)
+        if (r && r.source !== 'unmatched') {
+          drivers.push({
+            name: u.name,
+            resolved: r,
+            periods: [],
+            totalEngineMin: 0,
+            totalMiles: 0,
+            vehicle: '',
+            motiveDriver: { id: u.id, first_name:'', last_name:'', username:u.name, email:'', role:'', status:'' },
+            vehiclesUsed: {}
+          });
+        }
       });
 
       const dayResults = drivers.map(driver => {
+        const r = driver.resolved || resolveDriver(driver.name, roster);
         if (!driver.periods.length) {
           return {
-            name: driver.name, canonicalName: toCanonical(driver.name),
-            driverType: getProfile(driver.name).type, driverRole: getProfile(driver.name).role,
+            name: driver.name,
+            canonicalName: r.canonicalName,
+            driverType: r.type,
+            driverRole: r.role,
             truck: '', clockIn: '', clockOut: '', totalHrs: 0,
             score: 0, risk: 'nodata', flags: [], stolenHrs: 0, stolenDollars: 0,
             hasData: false, b600Matched: false,
-            gps: { deliveryStops: 0, actualMiles: 0, engineOnMin: 0, effectiveMph: 0 }
+            gps: { deliveryStops: 0, actualMiles: 0, engineOnMin: 0, effectiveMph: 0 },
+            inputs: {
+              motive: { driverId: driver.motiveDriver?.id || null },
+              roster: {
+                rawNameFromMotive: driver.name,
+                lookupKey: r.lookupKey,
+                lookupMethod: r.lookupMethod,
+                matched: r.source !== 'unmatched',
+                source: r.source,
+                canonicalName: r.canonicalName,
+                employeeId: r.employeeId,
+                marginIqRole: r.marginIqRole,
+                classification: r.classification,
+                derivedRole: r.role,
+                derivedType: r.type,
+                wageRate: WAGES[r.type] || WAGES.default
+              }
+            }
           };
         }
         return scoreDriver(driver, b600History, nuvizzStops, scanDate);
@@ -752,6 +1013,12 @@ export default async (req) => {
     await db.setDoc('sentinelScans', scanId, {
       scanId, startDate, endDate,
       createdAt: new Date().toISOString(),
+      // Roster metadata — lets us tell which scans used the live MarginIQ
+      // roster vs the hardcoded fallback (and how many drivers/aliases).
+      rosterSource: roster.source,
+      rosterDocCount: roster.docCount,
+      rosterAliasCount: roster.aliasCount,
+      rosterError: roster.error || null,
       driverCount: results.length,
       flaggedCount: flagged.length,
       critical: results.filter(r => r.risk === 'critical').length,

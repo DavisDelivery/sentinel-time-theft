@@ -696,7 +696,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.15';
+const APP_VERSION = '3.10.16';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2788,7 +2788,7 @@ function renderUnifiedHistory(){
     html += `<tr style="border-bottom:1px solid rgba(0,0,0,.04);background:${sel?'rgba(0,180,255,.06)':''};">
       <td style="text-align:center;padding:6px 6px;cursor:pointer;" onclick="histToggleRun('${s.scanId}')"><span style="color:var(--blue3);font-size:14px;">${sel?'☑':'☐'}</span></td>
       <td style="padding:6px 8px;color:var(--text);font-weight:600;cursor:pointer;" onclick="loadSavedScan('${s.scanId}').then(()=>renderUnifiedHistory())">${dateRange}${loading?' <span style="color:var(--text3);font-size:9px;">(loading…)</span>':''}</td>
-      <td style="padding:6px 8px;color:var(--text2);">${ranAt} <span style="color:var(--text3);font-size:9px;">${s.source==='server'?'·srv':'·browser'}</span></td>
+      <td style="padding:6px 8px;color:var(--text2);">${ranAt} <span style="color:var(--text3);font-size:9px;">${s.source==='server'?'·srv':'·browser'}</span>${s.rosterSource ? `<span style="font-size:9px;font-family:var(--mono);margin-left:4px;color:${s.rosterSource==='marginiq'?'var(--green)':'var(--amber)'};" title="Roster: ${s.rosterSource} (${s.rosterDocCount||0} drivers, ${s.rosterAliasCount||0} aliases)">·${s.rosterSource==='marginiq'?'M':'fb'}</span>` : ''}</td>
       <td style="text-align:center;padding:6px 8px;color:var(--blue3);">${s.driverCount||0}</td>
       <td style="text-align:center;padding:6px 8px;color:${(s.flaggedCount||0)>0?'var(--red)':'var(--green)'};font-weight:600;">${s.flaggedCount||0}</td>
       <td style="text-align:center;padding:6px 8px;color:var(--red2);">${s.critical||0}</td>
@@ -2984,19 +2984,32 @@ function renderAllInputsPanel(d, scan){
     </div>`;
   }
 
-  // ── 3. ROSTER LOOKUP ──
+  // ── 3. ROSTER LOOKUP (MarginIQ driver_classifications) ──
   const r = inputs?.roster || {};
+  // Color the source line so you can spot at a glance which scans came from
+  // the live MarginIQ canonical and which fell back to the local hardcoded list.
+  const sourceColor = r.source==='marginiq' ? 'var(--green)'
+    : r.source==='fallback-hardcoded' ? 'var(--amber)'
+    : r.source==='unmatched' ? 'var(--red2)'
+    : 'var(--text)';
+  const sourceLabel = r.source==='marginiq' ? '✅ MarginIQ canonical'
+    : r.source==='fallback-hardcoded' ? '⚠️  Hardcoded fallback'
+    : r.source==='unmatched' ? '❌ No match — defaulted'
+    : (r.source||'unknown');
   html += `<div style="margin-bottom:14px;">
-    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ ROSTER LOOKUP</div>
+    <div style="font-family:var(--head);font-size:10px;color:var(--energon);letter-spacing:1px;margin-bottom:5px;">▸ ROSTER LOOKUP <span style="color:var(--text3);font-weight:400;font-size:9px;">(MarginIQ driver_classifications)</span></div>
     <table style="border-collapse:collapse;font-family:var(--mono);font-size:10px;">
       ${_kv('Raw name from Motive', r.rawNameFromMotive)}
-      ${_kv('Roster lookup key', `"${r.rosterKey||''}"`)}
-      ${_kv('Matched in roster?', r.matchedInRoster ? '✅ YES' : '❌ NO — defaulted to "straight"', r.matchedInRoster?'var(--green)':'var(--amber)')}
-      ${_kv('Roster entry value', r.rosterEntry)}
-      ${_kv('Canonical name used', r.canonicalName, 'var(--blue3)')}
-      ${_kv('Canonical source', r.canonicalSource)}
-      ${_kv('Derived role', r.derivedRole)}
-      ${_kv('Derived type', r.derivedType)}
+      ${_kv('Roster source', sourceLabel, sourceColor)}
+      ${_kv('Lookup method', r.lookupMethod)}
+      ${_kv('Lookup key', `"${r.lookupKey||''}"`)}
+      ${_kv('Canonical name', r.canonicalName, 'var(--blue3)')}
+      ${_kv('MarginIQ employee_id', r.employeeId)}
+      ${_kv('MarginIQ role', r.marginIqRole)}
+      ${_kv('Classification', r.classification, r.classification==='W2'?'var(--green)':r.classification==='1099'?'var(--amber)':'var(--text2)')}
+      ${_kv('Default vehicle_id', r.defaultVehicleId)}
+      ${_kv('Sentinel role applied', r.derivedRole)}
+      ${_kv('Sentinel type applied', r.derivedType)}
       ${_kv('Wage rate ($/hr)', '$'+(r.wageRate||0).toFixed(2))}
     </table>
   </div>`;
