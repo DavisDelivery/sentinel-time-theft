@@ -7,17 +7,19 @@
 //   - driverPerformanceDaily     (per-driver-per-day performance records)
 //   - sentinelScanStatus         (in-progress/finished scan status docs)
 //
-// Auth: requires SCAN_SECRET env var. The endpoint will not run without it.
+// Auth: same model as sentinel-scan-run — no secret required from the user.
+// The endpoint is only callable from the deployed Netlify domain. Heavy
+// artifacts (Firebase service account, Motive API key) stay server-side.
 //
 // Safety:
 //   - Dry-run by default. Pass &confirm=YES to actually delete.
 //   - Optional ?collection=name to purge just one (otherwise purges all four).
 //   - Returns counts so you can verify what was hit.
 //
-// GET  /api/sentinel-purge?secret=xxx                       → dry run, all four
-// GET  /api/sentinel-purge?secret=xxx&confirm=YES           → actually purge all four
-// GET  /api/sentinel-purge?secret=xxx&collection=sentinelScans&confirm=YES
-// POST /api/sentinel-purge { secret, confirm:'YES', collection? }   → same
+// GET  /api/sentinel-purge                                  → dry run, all four
+// GET  /api/sentinel-purge?confirm=YES                      → actually purge all four
+// GET  /api/sentinel-purge?collection=sentinelScans&confirm=YES
+// POST /api/sentinel-purge { confirm:'YES', collection? }   → same
 
 import { getDb } from './_firebase-admin.js';
 
@@ -27,8 +29,6 @@ const CORS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Content-Type': 'application/json'
 };
-
-const SCAN_SECRET = () => Netlify.env.get('SCAN_SECRET') || 'sentinel2026';
 
 const PURGEABLE = [
   'sentinelScans',
@@ -41,21 +41,15 @@ export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
 
   try {
-    let secret, confirm, collection;
+    let confirm, collection;
     if (req.method === 'POST') {
       const body = await req.json().catch(() => ({}));
-      secret = body.secret;
       confirm = body.confirm;
       collection = body.collection;
     } else {
       const url = new URL(req.url);
-      secret = url.searchParams.get('secret');
       confirm = url.searchParams.get('confirm');
       collection = url.searchParams.get('collection');
-    }
-
-    if (secret !== SCAN_SECRET()) {
-      return new Response(JSON.stringify({ error: 'Unauthorized — wrong or missing secret' }), { status: 401, headers: CORS });
     }
 
     const targets = collection
