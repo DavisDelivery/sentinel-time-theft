@@ -106,17 +106,21 @@ function driverKey(name) {
 }
 
 // ─── DRIVER ROSTER FROM MARGINIQ (authoritative source) ──────────────────────
-// Loads every doc from `driver_classifications` in davismarginiq Firestore
-// and builds an alias→profile map. Falls back to the hardcoded DRIVER_ROSTER
-// below if MarginIQ is unreachable.
+// Calls the MarginIQ-published roster endpoint at /api/driver-roster — that
+// endpoint owns the schema knowledge (which collection, which fields, alias
+// generation rules). Sentinel just consumes the result so a schema change in
+// MarginIQ doesn't silently break Sentinel.
 //
-// Each driver_classifications doc has:
-//   driver_key, full_name, role (driver/owner_op/shuttle_driver/yard_jockey),
-//   classification (W2/1099), default_vehicle_id, aliases[], status (active/...)
+// Endpoint returns:
+//   { ok, driverCount, aliasCount, roster: { "<lowercase alias>": { role, type, co } } }
+//
+// We enrich each roster entry with canonicalName by reverse-mapping back to
+// the longest alias (which is almost always the full name).
+const MARGINIQ_ROSTER_URL = 'https://davis-marginiq.netlify.app/api/driver-roster';
+
 async function loadDriverRoster() {
   const out = {
-    aliasMap: {},          // lookup key → { canonicalName, role, type, classification, employeeId, source }
-    employeesById: {},     // employeeId/driver_key → full classification doc
+    aliasMap: {},          // lookup key → { canonicalName, role, type, co, source }
     source: 'fallback',    // 'marginiq' | 'fallback'
     loadedAt: new Date().toISOString(),
     docCount: 0,
@@ -125,91 +129,54 @@ async function loadDriverRoster() {
   };
 
   try {
-    const url = `${HUB_FIRESTORE_BASE}:runQuery?key=${HUB_FIRESTORE_KEY}`;
-    const query = {
-      structuredQuery: {
-        from: [{ collectionId: 'driver_classifications' }],
-        limit: 500
-      }
-    };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(query)
+    const res = await fetch(MARGINIQ_ROSTER_URL, {
+      headers: { 'Accept': 'application/json' }
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const rows = await res.json();
+    const data = await res.json();
+    if (!data || !data.ok || !data.roster) throw new Error('roster payload invalid');
+
+    // The roster object has a flat alias map. Build a reverse lookup of profile→aliases
+    // so we can pick the longest alias as canonicalName.
+    const profilesToAliases = new Map();
+    for (const [alias, profile] of Object.entries(data.roster)) {
+      const profileKey = JSON.stringify(profile);
+      if (!profilesToAliases.has(profileKey)) profilesToAliases.set(profileKey, []);
+      profilesToAliases.get(profileKey).push(alias);
+    }
+
     let aliasCount = 0;
-    for (const row of rows) {
-      if (!row.document) continue;
-      const f = _fsFields(row.document.fields);
-      const docId = row.document.name.split('/').pop();
-      const key = f.driver_key || docId;
-      if (!key) continue;
-      // Exclude inactive employees so they don't get matched
-      if (f.status && f.status !== 'active') continue;
+    const seenProfiles = new Set();
+    for (const [alias, mIqProfile] of Object.entries(data.roster)) {
+      // Pick the longest alias as canonicalName (best heuristic without a full-name field)
+      const profileKey = JSON.stringify(mIqProfile);
+      const allAliases = profilesToAliases.get(profileKey) || [alias];
+      const canonical = allAliases.reduce((longest, a) =>
+        a.length > longest.length ? a : longest, ''
+      );
+      // Title-case the canonical name
+      const canonicalName = canonical
+        .split(/\s+/)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
 
-      const role = f.role || '';
-      // Map MarginIQ canonical role → SENTINEL profile
-      let sentinelRole = 'straight';
-      let sentinelType = 'straight';
-      if (role === 'shuttle_driver') { sentinelRole = 'shuttle'; sentinelType = 'tractor'; }
-      else if (role === 'yard_jockey') { sentinelRole = 'loadshift'; sentinelType = 'tractor'; }
-      else if (role === 'driver' || role === 'owner_op') {
-        // Determine tractor vs straight from default vehicle if available
-        // (we don't have vehicles map here; assume straight unless aliases or
-        // explicit truck_type field tells us otherwise)
-        if (f.truck_type === 'tractor' || f.unit_type === 'tractor') {
-          sentinelRole = 'tractor'; sentinelType = 'tractor';
-        }
-      } else if (role) {
-        // Non-driver role — skip
-        continue;
-      } else {
-        // No role — skip (probably warehouse/office)
-        continue;
-      }
-
-      const canonicalName = f.full_name || f.fullName || `${f.first_name||f.firstName||''} ${f.last_name||f.lastName||''}`.trim() || key;
-      const employeeId = f.employee_id || f.employeeId || docId;
       const profile = {
         canonicalName,
-        role: sentinelRole,
-        type: sentinelType,
-        classification: f.classification || '',
-        employeeId,
-        defaultVehicleId: f.default_vehicle_id || f.defaultVehicleId || null,
-        marginIqRole: role,
+        role: mIqProfile.role || 'straight',  // 'shuttle' | 'loadshift' | 'tractor' | 'straight'
+        type: mIqProfile.type || 'straight',  // 'tractor' | 'straight'
+        co: mIqProfile.co || 'davis',         // 'davis' | 'owner'
+        marginIqRole: mIqProfile.role || null,
+        classification: mIqProfile.co === 'owner' ? '1099' : 'W2',  // best guess
+        employeeId: null,
+        defaultVehicleId: null,
         source: 'marginiq'
       };
-      out.employeesById[employeeId] = profile;
-      out.docCount++;
 
-      // Build aliases — driver_key, full_name, first/last splits, custom aliases
-      const aliases = new Set();
-      aliases.add(key);
-      const fn = canonicalName.toLowerCase().trim();
-      if (fn) aliases.add(fn);
-      const parts = fn.split(/\s+/).filter(Boolean);
-      if (parts.length >= 2) {
-        // first-name only (e.g. "leslie")
-        if (parts[0].length >= 3) aliases.add(parts[0]);
-        // first-initial + last (e.g. "c head")
-        aliases.add(`${parts[0][0]} ${parts[parts.length-1]}`);
-        // "first last"
-        aliases.add(`${parts[0]} ${parts[parts.length-1]}`);
-      }
-      const customAliases = Array.isArray(f.aliases) ? f.aliases : [];
-      for (const a of customAliases) {
-        const lower = String(a).toLowerCase().trim();
-        if (lower) aliases.add(lower);
-      }
-
-      for (const a of aliases) {
-        if (!out.aliasMap[a]) {
-          out.aliasMap[a] = profile;
-          aliasCount++;
-        }
+      out.aliasMap[alias] = profile;
+      aliasCount++;
+      if (!seenProfiles.has(profileKey)) {
+        seenProfiles.add(profileKey);
+        out.docCount++;
       }
     }
     out.aliasCount = aliasCount;
