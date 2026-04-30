@@ -179,11 +179,26 @@ export function getDb() {
     },
     // Use runQuery for ordered list — Firestore REST GET on collection
     // does NOT honor orderBy reliably. runQuery is the correct path.
+    // Supports subcollection paths like "sentinelScans/abc/driverDays" by
+    // splitting the leaf collection id from the parent document path.
     async listDocs(collection, { orderBy, limit, fields } = {}) {
       const token = await getAccessToken();
-      const url = `${BASE(getProjectId())}:runQuery`;
+      // Parse subcollection path. Top-level: "fooCol" → parent=root, collectionId="fooCol".
+      // Nested: "fooCol/abc/barCol" → parent="fooCol/abc", collectionId="barCol".
+      let parentPath = '';
+      let collectionId = collection;
+      if (collection.includes('/')) {
+        const parts = collection.split('/');
+        if (parts.length % 2 === 1) {
+          collectionId = parts[parts.length - 1];
+          parentPath = parts.slice(0, parts.length - 1).join('/');
+        }
+      }
+      const url = parentPath
+        ? `${BASE(getProjectId())}/${parentPath}:runQuery`
+        : `${BASE(getProjectId())}:runQuery`;
       const sq = {
-        from: [{ collectionId: collection }],
+        from: [{ collectionId }],
         limit: limit || 50
       };
       if (orderBy) {

@@ -975,13 +975,13 @@ export default async (req) => {
     const totalStolen = results.reduce((a, r) => a + r.stolenHrs, 0);
     const totalCost = results.reduce((a, r) => a + r.stolenDollars, 0);
 
-    log('Saving to Firestore...');
+    log('Saving scan summary to Firestore...');
     const db = getDb();
+    // Parent doc — summary only. NO drivers array (keeps doc < 1MB even on
+    // 30+ day scans). Per-driver-day detail goes into the subcollection below.
     await db.setDoc('sentinelScans', scanId, {
       scanId, startDate, endDate,
       createdAt: new Date().toISOString(),
-      // Roster metadata — lets us tell which scans used the live MarginIQ
-      // roster vs the hardcoded fallback (and how many drivers/aliases).
       rosterSource: roster.source,
       rosterDocCount: roster.docCount,
       rosterAliasCount: roster.aliasCount,
@@ -994,9 +994,47 @@ export default async (req) => {
       totalStolenHrs: +totalStolen.toFixed(2),
       totalCost: +totalCost.toFixed(2),
       source: 'server',
-      drivers: results
+      // Lightweight driver summary (no rawPeriods, no per-stop detail) for
+      // the History side-by-side comparison. Full detail lives in the
+      // sentinelScans/{scanId}/driverDays subcollection.
+      driverSummary: results.map(r => ({
+        name: r.name,
+        canonicalName: r.canonicalName,
+        scanDate: r.scanDate,
+        driverType: r.driverType,
+        driverRole: r.driverRole,
+        truck: r.truck || '',
+        clockIn: r.clockIn || '',
+        clockOut: r.clockOut || '',
+        totalHrs: r.totalHrs || 0,
+        score: r.score || 0,
+        risk: r.risk || 'nodata',
+        stolenHrs: r.stolenHrs || 0,
+        stolenDollars: r.stolenDollars || 0,
+        hasData: r.hasData !== false,
+        b600Matched: !!r.b600Matched,
+        flagCount: (r.flags || []).length
+      }))
     });
-    log(`Saved scan ${scanId}`); await writeStatus(`Saved scan ${scanId}`, true);
+    log(`Saved scan ${scanId} summary`); await writeStatus(`Saved scan ${scanId} summary`, true);
+
+    // Save per-driver-day detail to subcollection — one doc per record so each
+    // stays well under the 1MB Firestore cap. Subcollection name: driverDays
+    log(`Writing ${results.length} driver-day docs to subcollection...`);
+    let dayWrites = 0;
+    for (const r of results) {
+      const canonical = r.canonicalName || r.name || 'unknown';
+      const dayDocId = `${r.scanDate}_${canonical.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+      try {
+        await db.setDoc(`sentinelScans/${scanId}/driverDays`, dayDocId, r);
+        dayWrites++;
+      } catch (e) {
+        console.warn(`driverDay write failed for ${dayDocId}:`, e.message);
+      }
+      // Status update every 25 writes
+      if (dayWrites % 25 === 0) await writeStatus(`Driver-day docs: ${dayWrites}/${results.length}`);
+    }
+    log(`Wrote ${dayWrites}/${results.length} driver-day docs`); await writeStatus(`Wrote ${dayWrites} driver-day docs`, true);
 
     // Update driver history
     for (const r of results) {

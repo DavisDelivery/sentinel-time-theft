@@ -71,9 +71,28 @@ export default async (req) => {
       if (dryRun) {
         result.collections[col] = { found: ids.length, deleted: 0, sample: ids.slice(0, 5) };
       } else {
+        // For sentinelScans, also wipe each scan's driverDays subcollection
+        // before deleting the parent — Firestore doesn't cascade.
+        let subcolDeleted = 0;
+        if (col === 'sentinelScans') {
+          for (const scanId of ids) {
+            try {
+              const dayIds = await db.listAllDocIds(`sentinelScans/${scanId}/driverDays`);
+              if (dayIds.length) {
+                const r = await db.batchDelete(`sentinelScans/${scanId}/driverDays`, dayIds);
+                subcolDeleted += r.ok;
+              }
+            } catch (e) { /* skip */ }
+          }
+        }
         const r = await db.batchDelete(col, ids);
-        result.collections[col] = { found: ids.length, deleted: r.ok, failed: r.failed };
-        result.totalDeleted += r.ok;
+        result.collections[col] = {
+          found: ids.length,
+          deleted: r.ok,
+          failed: r.failed,
+          ...(subcolDeleted > 0 ? { driverDaysDeleted: subcolDeleted } : {})
+        };
+        result.totalDeleted += r.ok + subcolDeleted;
       }
     }
 
