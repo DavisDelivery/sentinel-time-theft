@@ -987,22 +987,26 @@ export default async (req) => {
       const drivers = processDriverPeriods(dayPeriods);
       log(`  ${drivers.length} drivers with GPS on ${scanDate}`);
 
-      // Resolve every Motive driver against MarginIQ roster — pass the
-      // Motive driver_id for direct, exact lookup (no name fuzzy needed).
+      // Resolve every Motive driver against MarginIQ roster
       drivers.forEach(driver => {
         const mId = driver.motiveDriver?.id;
         driver.resolved = resolveDriver(driver.name, roster, mId);
       });
 
+      // DROP drivers not in roster (unmatched = not your drivers)
+      const knownDrivers = drivers.filter(d => d.resolved && d.resolved.source !== 'unmatched');
+      const unknownCount = drivers.length - knownDrivers.length;
+      if (unknownCount > 0) log(`  Dropped ${unknownCount} Motive drivers not in roster (terminated/external/test accounts)`);
+
       // Add roster drivers with no GPS this day — pull from MarginIQ first,
       // then fallback hardcoded
-      const driverNames = new Set(drivers.map(dr => dr.name.toLowerCase()));
+      const driverNames = new Set(knownDrivers.map(dr => dr.name.toLowerCase()));
       motiveUsers.forEach(u => {
         if (!u.name || driverNames.has(u.name.toLowerCase())) return;
         const r = resolveDriver(u.name, roster, u.id);  // pass motive driver_id
         // Only auto-add if MarginIQ knows this driver (don't add unmatched)
         if (r && r.source !== 'unmatched') {
-          drivers.push({
+          knownDrivers.push({
             name: u.name,
             resolved: r,
             periods: [],
@@ -1015,7 +1019,7 @@ export default async (req) => {
         }
       });
 
-      const dayResults = drivers.map(driver => {
+      const dayResults = knownDrivers.map(driver => {
         const r = driver.resolved || resolveDriver(driver.name, roster, driver.motiveDriver?.id);
         if (!driver.periods.length) {
           return {
