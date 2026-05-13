@@ -695,7 +695,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 // REAL DATA ONLY. ZERO SIMULATION.
 // v1.5.0: 2000ft warehouse geofence + GPS shift window filter
 // ═══════════════════════════════════════════
-const APP_VERSION = '3.10.24';
+const APP_VERSION = '3.10.25';
 
 // ── UI HELPERS ──
 function openSettings(){document.getElementById('settingsModal').classList.add('open');}
@@ -2635,6 +2635,7 @@ async function saveScanToFirestore(){
 let _serverScans = [];        // summary list from /api/sentinel-scan-list
 let _loadedScans = {};        // scanId → full scan doc (lazy-loaded on click)
 let _histSelectedRunIds = []; // up to 3 scanIds selected for side-by-side
+let _histDetailScanId = null; // scanId currently shown in detail panel
 let _histSort = { col: 'createdAt', dir: 'desc' };
 let _histExpanded = null;     // {scanId, driverName} for inline drill-down
 let _histLoadingScanId = null;
@@ -2681,6 +2682,128 @@ async function loadSavedScan(scanId){
     renderUnifiedHistory();
     return null;
   }
+}
+
+// Open the inline detail panel for a scan
+async function openScanDetail(scanId){
+  _histDetailScanId = scanId;
+  // Load it if not cached, then re-render
+  if(!_loadedScans[scanId]){
+    await loadSavedScan(scanId);
+  } else {
+    renderUnifiedHistory();
+  }
+  // Scroll panel into view
+  setTimeout(()=>{
+    const el = document.getElementById('scanDetailPanel');
+    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 100);
+}
+
+function closeScanDetail(){
+  _histDetailScanId = null;
+  renderUnifiedHistory();
+}
+
+function _renderScanDetailPanel(scanId){
+  const scan = _loadedScans[scanId];
+  if(!scan){
+    return `<div id="scanDetailPanel" style="background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:16px;margin-bottom:14px;">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--energon);">Loading scan ${scanId}...</div>
+    </div>`;
+  }
+  const drivers = scan.drivers || [];
+  const flagged = drivers.filter(d=>d.risk!=='low' && d.risk!=='nodata').sort((a,b)=>(b.score||0)-(a.score||0));
+  const clean = drivers.filter(d=>d.risk==='low');
+  const nodata = drivers.filter(d=>d.risk==='nodata');
+  const riskCol = r=>r==='critical'?'var(--red2)':r==='high'?'var(--amber)':r==='medium'?'var(--amber2)':'var(--green)';
+  const riskBg = r=>r==='critical'?'rgba(204,17,17,.06)':r==='high'?'rgba(204,136,0,.05)':r==='medium'?'rgba(204,136,0,.03)':'';
+  const range = scan.startDate===scan.endDate ? scan.startDate : `${scan.startDate} → ${scan.endDate}`;
+  const savedAt = scan.createdAt ? new Date(scan.createdAt).toLocaleString() : '—';
+
+  return `
+  <div id="scanDetailPanel" style="background:var(--s2);border:2px solid var(--energon);border-radius:var(--radius);padding:14px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+      <div>
+        <div style="font-family:var(--head);font-size:13px;color:var(--text);font-weight:700;">${range}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Saved ${savedAt} · ${scan.source==='server'?'Server scan':'Browser scan'} · ${scanId}</div>
+      </div>
+      <button onclick="closeScanDetail()" style="background:var(--s1);color:var(--text2);border:1px solid var(--b1);border-radius:var(--radius);padding:4px 12px;cursor:pointer;font-family:var(--mono);font-size:10px;">✕ Close</button>
+    </div>
+
+    <!-- KPIs -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:14px;">
+      <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">DRIVERS</div>
+        <div style="font-family:var(--head);font-size:18px;color:var(--blue3);">${drivers.length}</div>
+      </div>
+      <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">FLAGGED</div>
+        <div style="font-family:var(--head);font-size:18px;color:var(--red);">${scan.flaggedCount||flagged.length}</div>
+      </div>
+      <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">CRITICAL</div>
+        <div style="font-family:var(--head);font-size:18px;color:var(--red2);">${scan.critical||0}</div>
+      </div>
+      <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">HIGH</div>
+        <div style="font-family:var(--head);font-size:18px;color:var(--amber);">${scan.high||0}</div>
+      </div>
+      <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">STOLEN</div>
+        <div style="font-family:var(--head);font-size:16px;color:var(--red2);">${(scan.totalStolenHrs||0).toFixed(1)}h</div>
+      </div>
+      <div style="background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:8px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">$ LOST</div>
+        <div style="font-family:var(--head);font-size:16px;color:var(--red2);">$${(scan.totalCost||0).toFixed(0)}</div>
+      </div>
+    </div>
+
+    ${flagged.length?`
+    <div style="font-family:var(--head);font-size:10px;color:var(--red);letter-spacing:1px;margin-bottom:8px;">⚠️ FLAGGED DRIVERS (${flagged.length})</div>
+    <div style="border:1px solid var(--b1);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;">
+      ${flagged.map(d=>`
+        <div style="background:${riskBg(d.risk)};border-bottom:1px solid rgba(0,0,0,.05);padding:10px 12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+            <div>
+              <span style="font-family:var(--head);font-size:12px;color:var(--text);font-weight:700;">${d.name}</span>
+              <span style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-left:8px;">${d.driverType==='tractor'?'🚛':'🚚'} ${d.truck||'—'}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="background:${riskCol(d.risk)};color:#fff;padding:2px 8px;border-radius:3px;font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;">${d.risk}</span>
+              <span style="font-family:var(--mono);font-size:10px;color:var(--text2);">Score: ${d.score||0}</span>
+              ${(d.stolenHrs||0)>0?`<span style="font-family:var(--mono);font-size:10px;color:var(--red2);">${(d.stolenHrs||0).toFixed(1)}h / $${(d.stolenDollars||0).toFixed(0)}</span>`:''}
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;margin-top:4px;font-family:var(--mono);font-size:9px;color:var(--text3);flex-wrap:wrap;">
+            ${d.clockIn?`<span>Clock: ${d.clockIn}–${d.clockOut||'?'}</span>`:''}
+            ${d.gps?.actualMiles?`<span>Miles: ${d.gps.actualMiles}</span>`:''}
+            ${d.gps?.deliveryStops?`<span>Stops: ${d.gps.deliveryStops}</span>`:''}
+            ${d.gps?.engineOnMin?`<span>Engine: ${(d.gps.engineOnMin/60).toFixed(1)}h</span>`:''}
+          </div>
+          ${(d.flags||[]).length?`
+          <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
+            ${d.flags.map(f=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:2px 8px;font-family:var(--mono);font-size:9px;color:var(--text2);">${f.ico||'⚑'} ${f.title||f}</span>`).join('')}
+          </div>`:''}
+        </div>`).join('')}
+    </div>`:''}
+
+    ${clean.length?`
+    <details style="margin-bottom:8px;">
+      <summary style="font-family:var(--head);font-size:10px;color:var(--green);letter-spacing:1px;cursor:pointer;padding:6px 0;">✓ CLEAN DRIVERS (${clean.length})</summary>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;">
+        ${clean.map(d=>`<span style="background:rgba(0,153,77,.06);border:1px solid rgba(0,153,77,.2);border-radius:3px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--green);">${d.name}</span>`).join('')}
+      </div>
+    </details>`:''}
+
+    ${nodata.length?`
+    <details>
+      <summary style="font-family:var(--head);font-size:10px;color:var(--text3);letter-spacing:1px;cursor:pointer;padding:6px 0;">— NO DATA (${nodata.length})</summary>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;">
+        ${nodata.map(d=>`<span style="background:var(--s1);border:1px solid var(--b1);border-radius:3px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--text3);">${d.name}</span>`).join('')}
+      </div>
+    </details>`:''}
+  </div>`;
 }
 
 function _histRiskColor(risk){
@@ -2786,7 +2909,7 @@ function renderUnifiedHistory(){
     const dateRange = _histScanLabel(s);
     html += `<tr style="border-bottom:1px solid rgba(0,0,0,.04);background:${sel?'rgba(0,180,255,.06)':''};">
       <td style="text-align:center;padding:6px 6px;cursor:pointer;" onclick="histToggleRun('${s.scanId}')"><span style="color:var(--blue3);font-size:14px;">${sel?'☑':'☐'}</span></td>
-      <td style="padding:6px 8px;color:var(--text);font-weight:600;cursor:pointer;" onclick="loadSavedScan('${s.scanId}').then(()=>renderUnifiedHistory())">${dateRange}${loading?' <span style="color:var(--text3);font-size:9px;">(loading…)</span>':''}</td>
+      <td style="padding:6px 8px;color:var(--text);font-weight:600;cursor:pointer;" onclick="openScanDetail('${s.scanId}')">${dateRange}${loading?' <span style="color:var(--text3);font-size:9px;">(loading…)</span>':''}</td>
       <td style="padding:6px 8px;color:var(--text2);">${ranAt} <span style="color:var(--text3);font-size:9px;">${s.source==='server'?'·srv':'·browser'}</span>${s.rosterSource ? `<span style="font-size:9px;font-family:var(--mono);margin-left:4px;color:${s.rosterSource==='marginiq'?'var(--green)':'var(--amber)'};" title="Roster: ${s.rosterSource} (${s.rosterDocCount||0} drivers, ${s.rosterAliasCount||0} aliases)">·${s.rosterSource==='marginiq'?'M':'fb'}</span>` : ''}</td>
       <td style="text-align:center;padding:6px 8px;color:var(--blue3);">${s.driverCount||0}</td>
       <td style="text-align:center;padding:6px 8px;color:${(s.flaggedCount||0)>0?'var(--red)':'var(--green)'};font-weight:600;">${s.flaggedCount||0}</td>
@@ -2798,6 +2921,11 @@ function renderUnifiedHistory(){
     </tr>`;
   });
   html += `</tbody></table></div>`;
+
+  // ── DETAIL PANEL (when a row is tapped) ─────────────────────────────
+  if(_histDetailScanId){
+    html += _renderScanDetailPanel(_histDetailScanId);
+  }
 
   // ── COMPARISON VIEW (when at least 1 scan selected) ─────────────────
   if(_histSelectedRunIds.length===0){
