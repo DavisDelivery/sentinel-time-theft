@@ -409,18 +409,38 @@ async function fetchDrivingPeriods(startDate, endDate, motiveUsers, onProgress) 
 // the UI can show every input we used for scoring.
 function processDriverPeriods(periods) {
   const driverMap = {};
+  // Periods that count toward "engine on / driving" time
+  // (driving_period_type values that mean the truck was actually moving)
+  const DRIVING_TYPES = new Set(['driving', 'yard_move', 'personal_conveyance']);
+  // Periods that do NOT count toward engine time (HOS events, parked)
+  const SKIP_TYPES = new Set(['off_duty', 'sleeper', 'sleeper_berth', 'on_duty']);
+
+  // Dedup: track which (driverId|start|end) we've already counted
+  const seenKeys = new Set();
+
   periods.forEach(p => {
     const dp = p.driving_period || p;
     const driver = dp.driver || {};
     const vehicle = dp.vehicle || {};
+    const driverId = driver.id;
     let name = ((driver.first_name || '') + ' ' + (driver.last_name || '')).trim();
     if (!name || name.length < 2) name = driver.username || '';
     if (!name || name.length < 2) return;
-    const key = name.toLowerCase();
+
+    // Filter to actual driving periods only — skip off_duty/sleeper/on_duty_stationary
+    const ptype = (dp.driving_period_type || dp.type || '').toLowerCase();
+    if (ptype && SKIP_TYPES.has(ptype)) return;
+
+    // Dedup duplicate periods (same driver+start+end can appear multiple times)
+    const dedupKey = `${driverId}|${dp.start_time || ''}|${dp.end_time || ''}`;
+    if (seenKeys.has(dedupKey)) return;
+    seenKeys.add(dedupKey);
+
+    // KEY BY DRIVER ID, not name — prevents two accounts with same name from merging
+    const key = driverId ? `id:${driverId}` : `name:${name.toLowerCase()}`;
     if (!driverMap[key]) {
       driverMap[key] = {
         name,
-        // Motive driver record
         motiveDriver: {
           id: driver.id || null,
           first_name: driver.first_name || '',
@@ -430,20 +450,22 @@ function processDriverPeriods(periods) {
           role: driver.role || '',
           status: driver.status || ''
         },
-        // Every vehicle this driver touched on this date
-        vehiclesUsed: {},   // keyed by vehicle.id → {id, number, make, model, year}
+        vehiclesUsed: {},
         periods: [],
         totalEngineMin: 0,
         totalMiles: 0,
-        vehicle: vehicle.number || '' // primary truck (first one seen) for display
+        vehicle: vehicle.number || ''
       };
     }
-    const dur = (dp.duration_seconds || 0) / 60;
+
+    let dur = (dp.duration_seconds || 0) / 60;
+    // Sanity cap — no single driving period should exceed 14h (HOS max). If it does,
+    // Motive is returning aggregated/bad data — cap it to prevent runaway sums.
+    if (dur > 14 * 60) dur = 14 * 60;
     const miles = dp.distance_miles || 0;
     driverMap[key].totalEngineMin += dur;
     driverMap[key].totalMiles += miles;
 
-    // Track this vehicle if we haven't seen it yet
     if (vehicle.id && !driverMap[key].vehiclesUsed[vehicle.id]) {
       driverMap[key].vehiclesUsed[vehicle.id] = {
         id: vehicle.id,
@@ -461,22 +483,29 @@ function processDriverPeriods(periods) {
       dur,
       miles,
       type: dp.driving_period_type || '',
-      // Per-period vehicle (in case the driver swapped trucks mid-day)
       vehicleId: vehicle.id || null,
       vehicleNumber: vehicle.number || '',
-      // Location data Motive returns when available
       startLat: dp.start_location?.lat || null,
       startLon: dp.start_location?.lon || null,
       startAddr: dp.start_location?.description || dp.start_location?.address || '',
       endLat: dp.end_location?.lat || null,
       endLon: dp.end_location?.lon || null,
       endAddr: dp.end_location?.description || dp.end_location?.address || '',
-      // Speed if present
       maxSpeedMph: dp.max_speed_mph || null,
       avgSpeedMph: dp.avg_speed_mph || null
     });
+
     if (!driverMap[key].vehicle && vehicle.number) driverMap[key].vehicle = vehicle.number;
   });
+
+  // Final daily cap — no driver should show more than 16h engine on per day
+  for (const d of Object.values(driverMap)) {
+    if (d.totalEngineMin > 16 * 60) {
+      d._cappedFrom = d.totalEngineMin;
+      d.totalEngineMin = 16 * 60;
+    }
+  }
+
   return Object.values(driverMap);
 }
 
