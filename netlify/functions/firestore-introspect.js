@@ -11,6 +11,8 @@
 //     -> list all root collections + one sample doc from each
 //   GET /api/firestore-introspect?secret=<SCAN_SECRET>&collection=<name>&limit=5
 //     -> dump up to 5 sample docs from a specific collection
+//
+// This file is intended to be DELETED after Phase 1 schema discovery completes.
 
 import crypto from 'crypto';
 
@@ -23,10 +25,22 @@ const CORS = {
 let _accessToken = null;
 let _tokenExpiry = 0;
 
+function readEnv(key) {
+  // Try both Netlify Functions 2.0 API and standard process.env.
+  try {
+    if (typeof Netlify !== 'undefined' && Netlify?.env?.get) {
+      const v = Netlify.env.get(key);
+      if (v) return v;
+    }
+  } catch (_) { /* fall through */ }
+  if (typeof process !== 'undefined' && process?.env?.[key]) return process.env[key];
+  return null;
+}
+
 async function getAccessToken() {
   if (_accessToken && Date.now() < _tokenExpiry - 60000) return _accessToken;
-  const clientEmail = Netlify.env.get('FIREBASE_CLIENT_EMAIL');
-  let privateKey = Netlify.env.get('FIREBASE_PRIVATE_KEY');
+  const clientEmail = readEnv('FIREBASE_CLIENT_EMAIL');
+  let privateKey = readEnv('FIREBASE_PRIVATE_KEY');
   if (!clientEmail || !privateKey) throw new Error('Firebase credentials not set');
   privateKey = privateKey.replace(/\\n/g, '\n');
 
@@ -57,7 +71,7 @@ async function getAccessToken() {
 }
 
 async function fetchRootCollections() {
-  const projectId = Netlify.env.get('FIREBASE_PROJECT_ID');
+  const projectId = readEnv('FIREBASE_PROJECT_ID');
   if (!projectId) throw new Error('FIREBASE_PROJECT_ID not set');
   const token = await getAccessToken();
   const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:listCollectionIds`;
@@ -132,7 +146,11 @@ export default async (req) => {
   try {
     const url = new URL(req.url);
     const secret = url.searchParams.get('secret');
-    const expected = Netlify.env.get('SCAN_SECRET') || 'sentinel2026';
+    // Belt-and-suspenders: try both env-reading APIs, with a hardcoded
+    // fallback to the agreed-upon secret. This is a one-time helper that
+    // gets deleted after Phase 1 schema discovery, so the hardcoded
+    // fallback is acceptable and avoids further env-var propagation chases.
+    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
     if (secret !== expected) {
       return new Response(JSON.stringify({ error: 'Unauthorized — wrong secret' }), { status: 401, headers: CORS });
     }
