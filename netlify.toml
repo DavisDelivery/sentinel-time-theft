@@ -47,6 +47,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/firestore-introspect"
+  to = "/.netlify/functions/firestore-introspect"
+  status = 200
+
+[[redirects]]
   from = "/api/sentinel-scan-run"
   to = "/.netlify/functions/sentinel-scan-run"
   status = 200
