@@ -181,7 +181,11 @@ export function getDb() {
     // does NOT honor orderBy reliably. runQuery is the correct path.
     // Supports subcollection paths like "sentinelScans/abc/driverDays" by
     // splitting the leaf collection id from the parent document path.
-    async listDocs(collection, { orderBy, limit, fields } = {}) {
+    //
+    // where: array of filter objects, ANDed together.
+    //   [{ field: 'date', op: '==', value: '2026-04-27' }, ...]
+    //   Supported ops: '==', '!=', '<', '<=', '>', '>=', 'in', 'array-contains'.
+    async listDocs(collection, { where, orderBy, limit, fields } = {}) {
       const token = await getAccessToken();
       // Parse subcollection path. Top-level: "fooCol" → parent=root, collectionId="fooCol".
       // Nested: "fooCol/abc/barCol" → parent="fooCol/abc", collectionId="barCol".
@@ -201,6 +205,29 @@ export function getDb() {
         from: [{ collectionId }],
         limit: limit || 50
       };
+      // where filters
+      if (Array.isArray(where) && where.length) {
+        const OP_MAP = {
+          '==': 'EQUAL', '!=': 'NOT_EQUAL',
+          '<': 'LESS_THAN', '<=': 'LESS_THAN_OR_EQUAL',
+          '>': 'GREATER_THAN', '>=': 'GREATER_THAN_OR_EQUAL',
+          'in': 'IN', 'array-contains': 'ARRAY_CONTAINS'
+        };
+        const toFilter = ({ field, op, value }) => {
+          const fop = OP_MAP[op];
+          if (!fop) throw new Error(`Unsupported where op: ${op}`);
+          return {
+            fieldFilter: {
+              field: { fieldPath: field },
+              op: fop,
+              value: toFirestoreValue(value)
+            }
+          };
+        };
+        sq.where = where.length === 1
+          ? toFilter(where[0])
+          : { compositeFilter: { op: 'AND', filters: where.map(toFilter) } };
+      }
       if (orderBy) {
         sq.orderBy = [{
           field: { fieldPath: orderBy.field },
