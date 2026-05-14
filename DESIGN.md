@@ -54,22 +54,51 @@ All of these collections already exist in MarginIQ. SENTINEL reads from them and
 
 ### Existing (read-only from SENTINEL's perspective)
 
+These names and shapes were confirmed via `firestore-introspect` on 2026-05-14. Full field-by-field contract lives in `SCHEMA.md`.
+
 ```
 /employees/{slug}
   fullName, firstName, lastName, status, role
-  externalIds: { motive, b600, nuvizz, payroll }
-  defaultTruck, truckType (tractor | straight)
+  externalIds: { motive, b600, nuvizz, payroll }   # cross-system ID map
+  defaultTruck                                      # truck number string, e.g. "2561"
+  aliases: [...]                                    # additional name variants (often empty)
 
-/timeclock_daily/{driverSlug}_{YYYY-MM-DD}
-  driverKey, date, clockIn, clockOut, totalHrs
-  source: 'b600' | 'manual'
+  NOTE: There is NO truckType field on employees. SENTINEL derives
+  truck-type (tractor | straight) from defaultTruck via a self-maintained
+  map at /sentinelConfig/truckTypeMap, seeded from historical
+  driverPerformanceDaily records on first scan.
 
-/nuvizz_stops/{stopId}
-  driverKey, date, time, customer, address, city, zip, stopNumber, status
+/timeclock_daily/{YYYY-MM-DD}_{display_id}
+  date, clock_in, clock_out, total_hours, reg_hours, ot_hours
+  punches: [{ in, out, hours }]                     # multi-punch days (lunch breaks)
+  display_id, display_name, payroll_id              # 3 name forms — match to employee.externalIds.b600
 
-/driver_classifications/{driverSlug}
-  aliases: [...], canonicalName, motiveId
-  (this is the name reconciliation source — already populated)
+  NOTE: Doc ID is NOT {driverSlug}_{date}. Day-scan queries by
+  `where date == X` and matches each result to an employee in-memory
+  using payroll_id / display_name.
+
+/nuvizz_rows_raw/{pro}                              # ← THE SOURCE OF TRUTH for stop time/address
+  pro, delivery_date, week_ending, month, source, ingested_at
+  raw: {
+    "driver name": "...",                           # NuVizz canonical name (match employee.externalIds.nuvizz)
+    "ship to":     "1350 Braselton Pkwy, Braselton, GA 30517",   # full street address
+    "delivery end":"4/20/26 11:37 AM",              # M/D/YY HH:MM AM/PM — parse to datetime
+    "ship to name", "ship to - city", "ship to - zip code",
+    "stop status", "stop number", "stop original price", "stop sealnbr"
+  }
+
+  NOTE: The curated /nuvizz_stops/ rollup STRIPS the address and the
+  time-of-day from the raw blob. SENTINEL must read /nuvizz_rows_raw/
+  to get the data needed for §4 scoring. /nuvizz_stops/ remains useful
+  only for the contractor-pay rollup, which SENTINEL does not care about.
+
+/driver_classifications/{slug}
+  classification: 'w2' | '1099', name, source, updated_at
+  NOTE: Misnamed for our purposes — this is W2-vs-1099 tax status,
+  NOT the alias map. SENTINEL does not use this collection.
+
+# Motive GPS is NOT in Firestore — fetched live via Motive API per scan
+# (existing /netlify/functions/motive-gps.mjs). Used in flag class 3 only.
 ```
 
 ### New (written by SENTINEL)
@@ -147,6 +176,22 @@ All of these collections already exist in MarginIQ. SENTINEL reads from them and
   startedAt, finishedAt, durationMs
   error?: string
   -- Used for audit log only; UI reads from sentinelDriverDays/sentinelDriverProfiles
+
+/sentinelConfig/{key}
+  -- Self-maintained SENTINEL configuration. Keys:
+  --   truckTypeMap   { trucks: { "2561": "tractor", "0294": "straight", ... },
+  --                     derivedFrom: 'driverPerformanceDaily', generatedAt, version }
+  --   defaults       { loadPrepMin: 15, wrapUpMin: 15,
+  --                     wageRates: { tractor: 27.50, straight: 23.00, unknown: 25.00 },
+  --                     morningGapStaticThresholds: { ok: 30, warn: 60, flag: 90 },
+  --                     afternoonGapStaticThresholds: { ok: 30, warn: 60, flag: 90 } }
+  -- The static thresholds are used when peer baselines don't yet exist
+  -- (i.e. before sentinelBaselines is populated post-backfill).
+
+/distanceMatrixCache/{cacheKey}
+  -- Cached Google Maps Distance Matrix results, keyed by
+  -- sha1(normalize(from)|normalize(to)). One write per unique pair, forever.
+  -- { fromAddr, toAddr, minutes, miles, source, fetchedAt }
 ```
 
 ---
@@ -158,43 +203,56 @@ The current scoring engine has too many flag types fighting each other. The rewr
 ### Flag class 1: Morning gap (clock-in → first delivery)
 
 **Inputs:**
-- `clockIn` (B600 timestamp)
-- `firstDeliveryTime` (NuVizz earliest completed stop)
-- `firstDeliveryAddr` (NuVizz address of that stop)
-- `yardAddress` (from MarginIQ company settings — e.g., Davis HQ in Buford, GA)
+- `clockIn` (B600 timestamp — combine `timeclock_daily.date` + `timeclock_daily.clock_in` "HH:MM")
+- `firstDeliveryTime` (NuVizz earliest completed stop — parse `nuvizz_rows_raw.raw["delivery end"]` with format `M/D/YY HH:MM AM/PM`, take the min across rows where `raw["driver name"]` matches the driver's `externalIds.nuvizz`)
+- `firstDeliveryAddr` (`nuvizz_rows_raw.raw["ship to"]` from that earliest row)
+- `yardAddress` (env var `SENTINEL_YARD_ADDRESS` = "943 Gainesville Hwy Bldg 200-4000, Buford, GA 30518")
 
 **Compute:**
-- `clockInToFirstMin` = `firstDeliveryTime` - `clockIn` (minutes)
-- `expectedTravelMin` = estimated drive time from yard to first delivery address (via cached drive-time table or Google Maps Distance Matrix on first encounter, then cached per address)
-- `loadPrepMin` = 15 (standard buffer for pre-trip + loading; configurable)
+- `clockInToFirstMin` = `firstDeliveryTime` - `clockIn` (minutes, all timestamps assumed America/New_York local — same TZ for both punches and stops, so naive subtraction is correct)
+- `expectedTravelMin` = estimated drive time from yard to first delivery address (via `/distanceMatrixCache/` or Google Maps Distance Matrix on first encounter, then cached forever per normalized address pair)
+- `loadPrepMin` = `sentinelConfig/defaults.loadPrepMin` (default 15)
 - `expectedTotalMin` = `expectedTravelMin` + `loadPrepMin`
 - `morningGapMin` = `clockInToFirstMin` - `expectedTotalMin`
 
-**Severity:**
+**Severity (transitional — pre-baseline):**
+Until `sentinelBaselines` is populated post-backfill, use static thresholds from `sentinelConfig/defaults.morningGapStaticThresholds`:
+- `morningGapMin` ≤ 30 → **ok**
+- `morningGapMin` > 30 and ≤ 60 → **warn**
+- `morningGapMin` > 60 and ≤ 90 → **flag**
+- `morningGapMin` > 90 → **critical**
+
+**Severity (steady-state — post-baseline):**
+Once `sentinelBaselines/{peer_key}` exists with `daysSampled >= 90`:
 - `morningGapMin` ≤ baseline.p75 → **ok**
 - `morningGapMin` > p75 and ≤ p90 → **warn**
 - `morningGapMin` > p90 and ≤ p95 → **flag**
 - `morningGapMin` > p95 → **critical**
 
-**Stolen-minute attribution:** `max(0, morningGapMin - baseline.median)` is the suspect time. This is the conservative number we report as "stolen" — only the portion above typical for their peer group.
+**Stolen-minute attribution:** `max(0, morningGapMin - baselineFloor)` where `baselineFloor` is the static-threshold `ok` ceiling (30 min) pre-baseline, or `baseline.median` post-baseline. Conservative — only the portion above typical for the peer group counts.
 
 ### Flag class 2: Afternoon gap (last delivery → clock-out)
 
-Same structure, reversed:
+Same structure as morning, reversed:
+- `lastDeliveryTime` = max parsed `raw["delivery end"]` for the driver/date in `nuvizz_rows_raw`
+- `lastDeliveryAddr` = `raw["ship to"]` for that latest row
 - `lastToClockOutMin` = `clockOut` - `lastDeliveryTime`
-- `expectedTravelMin` = drive time from last delivery to yard
-- `wrapUpMin` = 15 (post-trip buffer, configurable)
+- `expectedTravelMin` = drive time from last delivery address back to yard (via `/distanceMatrixCache/`)
+- `wrapUpMin` = `sentinelConfig/defaults.wrapUpMin` (default 15)
 - `afternoonGapMin` = `lastToClockOutMin` - (`expectedTravelMin` + `wrapUpMin`)
-- Severity thresholds same shape as morning, but against the afternoon baselines.
+- Severity thresholds same shape as morning, but against the afternoon baselines/static thresholds.
 
 ### Flag class 3: In-route anomaly (between first and last)
 
-Inputs: NuVizz stops list, Motive GPS movements.
-- Compute `stopsPerHr` = stops between first and last / hours between first and last
-- Compute `idleStretches` = continuous Motive intervals with no GPS movement >30min during what should be active route time
-- Compare both to truck-type baseline
+**Scope decision (2026-05-14):** Motive GPS is trusted ONLY for in-route signals. The owner does not trust Motive's first-movement / last-movement timestamps as the morning/afternoon time anchor (yard-shuffle activity contaminates the signal). Morning and afternoon gaps therefore use NuVizz timestamps exclusively; Motive is reserved for this class only.
 
-This class catches the "took a 90-minute lunch off-route" case. Not the primary focus of v4 but kept for completeness.
+Inputs: Motive GPS driving periods (live API call) + NuVizz stops list with coordinates from `raw["ship to"]` geocoded via Distance Matrix cache.
+
+Two sub-signals:
+1. **Long off-route pauses.** Any continuous Motive idle/parked stretch >30min during the active route window (firstDeliveryTime → lastDeliveryTime) where the GPS position is NOT within ~200m of any NuVizz `ship to` address from that day. Catches "took a 90-minute lunch off-route" and "sat at home for an hour mid-route."
+2. **Miles-driven sanity.** Total Motive driving miles for the day compared to driver's own 30-day rolling avg miles-per-stop multiplied by today's stop count. Big positive deltas (>40% over expected) suggest detours or personal-use trips.
+
+Phase 1 implementation note: Flag class 3 is **deferred until Phases 1a/1b complete and verified.** Initial day-scan computes classes 1, 2, 4 only and writes `inRouteFlag: 'deferred'`. Class 3 layered in once morning/afternoon math is signed off.
 
 ### Flag class 4: Data integrity
 
