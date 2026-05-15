@@ -307,6 +307,28 @@ export default async (req) => {
         { status: r.passed ? 200 : 500, headers: CORS });
     }
 
+    // Data coverage probe — what dates do we actually have in MarginIQ?
+    if (url.searchParams.get('coverage') === 'true') {
+      const db = getDb();
+      const [nvOldest, nvNewest, tcOldest, tcNewest] = await Promise.all([
+        db.listDocs('nuvizz_rows_raw', { orderBy: { field: 'delivery_date', direction: 'asc' }, limit: 1, fields: ['delivery_date', 'ingested_at'] }),
+        db.listDocs('nuvizz_rows_raw', { orderBy: { field: 'delivery_date', direction: 'desc' }, limit: 1, fields: ['delivery_date', 'ingested_at'] }),
+        db.listDocs('timeclock_daily', { orderBy: { field: 'date', direction: 'asc' }, limit: 1, fields: ['date'] }),
+        db.listDocs('timeclock_daily', { orderBy: { field: 'date', direction: 'desc' }, limit: 1, fields: ['date'] })
+      ]);
+      return new Response(JSON.stringify({
+        nuvizz_rows_raw: {
+          oldest: nvOldest[0]?.delivery_date || null,
+          newest: nvNewest[0]?.delivery_date || null,
+          newestIngestedAt: nvNewest[0]?.ingested_at || null
+        },
+        timeclock_daily: {
+          oldest: tcOldest[0]?.date || null,
+          newest: tcNewest[0]?.date || null
+        }
+      }, null, 2), { status: 200, headers: CORS });
+    }
+
     // List active drivers (for finding test targets)
     if (url.searchParams.get('listDrivers') === 'true') {
       const db = getDb();
