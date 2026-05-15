@@ -20,7 +20,7 @@ import { getDb } from './_firebase-admin.js';
 import { travelFromYard, travelToYard } from './_distance.js';
 import { scoreDriverDay, parseNuvizzDeliveryEnd, runSelfTest } from './_sentinel-engine.js';
 
-const VERSION = 'v4.0.2-phase1';
+const VERSION = 'v4.0.3-phase1';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -216,9 +216,40 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
   const punch = await getB600Punch(db, employee, date);
 
   // NuVizz stops
-  const { matches: stops, diag: nuvizzDiag } = await getNuvizzStops(db, employee, date);
-  const firstStop = stops[0] || null;
-  const lastStop = stops.length > 0 ? stops[stops.length - 1] : null;
+  const { matches: allStops, diag: nuvizzDiag } = await getNuvizzStops(db, employee, date);
+
+  // Partition stops by whether their deliveryEnd is within the B600 shift window.
+  // Out-of-window stops are tracked separately and surfaced in dataHealth — they
+  // happen when dispatch manually closes stops after the driver has clocked out
+  // (Aaron Mitchell 2026-04-29 case), or pre-clockin GPS firings.
+  const [yy, mo, dd] = date.split('-').map(Number);
+  const buildDt = (hhmm) => {
+    if (!hhmm) return null;
+    const m = String(hhmm).match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    return new Date(Date.UTC(yy, mo - 1, dd, +m[1], +m[2], 0));
+  };
+  const clockInDt = buildDt(punch?.clockIn);
+  const clockOutDt = buildDt(punch?.clockOut);
+
+  let onShiftStops = allStops;
+  let preClockinStops = [];
+  let postClockoutStops = [];
+  if (clockInDt) {
+    preClockinStops = allStops.filter(s => s.deliveryEnd < clockInDt);
+  }
+  if (clockOutDt) {
+    postClockoutStops = allStops.filter(s => s.deliveryEnd > clockOutDt);
+  }
+  if (clockInDt || clockOutDt) {
+    onShiftStops = allStops.filter(s =>
+      (!clockInDt || s.deliveryEnd >= clockInDt) &&
+      (!clockOutDt || s.deliveryEnd <= clockOutDt)
+    );
+  }
+
+  const firstStop = onShiftStops[0] || null;
+  const lastStop = onShiftStops.length > 0 ? onShiftStops[onShiftStops.length - 1] : null;
 
   // Travel times — only fetch if we have addresses
   let travelToFirst = { minutes: null, source: 'skipped' };
@@ -248,8 +279,8 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
     lastDeliveryTime: (lastStop && lastStop !== firstStop) ? lastStop.deliveryEnd : null,
     lastDeliveryAddr: (lastStop && lastStop !== firstStop) ? lastStop.shipTo : null,
     lastDeliveryCustomer: (lastStop && lastStop !== firstStop) ? lastStop.shipToName : null,
-    completedStops: stops.length,
-    nuvizzMatched: stops.length > 0,
+    completedStops: allStops.length,
+    nuvizzMatched: allStops.length > 0,
 
     expectedTravelMinToFirst: travelToFirst.minutes,
     expectedTravelMinToFirstSource: travelToFirst.source,
@@ -260,12 +291,18 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
   });
 
   // Write
-  // Post-engine: append manual-completions note to dataHealth (informational, not theft)
+  // Post-engine: append dataHealth notes for non-theft signals
   if (nuvizzDiag.manualCompletions > 0) {
     result.dataHealth.push(`manual_completions:${nuvizzDiag.manualCompletions}`);
   }
   if (nuvizzDiag.skippedNoTime > 0) {
     result.dataHealth.push(`stops_with_unparseable_time:${nuvizzDiag.skippedNoTime}`);
+  }
+  if (preClockinStops.length > 0) {
+    result.dataHealth.push(`pre_clockin_completions:${preClockinStops.length}`);
+  }
+  if (postClockoutStops.length > 0) {
+    result.dataHealth.push(`post_clockout_completions:${postClockoutStops.length}`);
   }
   await db.setDoc('sentinelDriverDays', result._id, result);
 
@@ -277,10 +314,21 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
       truckTypeMapSize: Object.keys(truckTypeMap.trucks).length,
       b600Match: punch ? { matchedOn: punch.matchedOn, clockIn: punch.clockIn, clockOut: punch.clockOut } : null,
       nuvizzDiag,
-      stopsSummary: stops.map(s => ({
+      stopsSummary: allStops.map(s => ({
         pro: s.pro, time: s.deliveryEnd.toISOString().slice(11, 16),
-        customer: s.shipToName, zip: s.zip, status: s.status
+        customer: s.shipToName, zip: s.zip, status: s.status,
+        onShift: (!clockInDt || s.deliveryEnd >= clockInDt) && (!clockOutDt || s.deliveryEnd <= clockOutDt)
       })),
+      partitionCounts: {
+        allStops: allStops.length,
+        onShiftStops: onShiftStops.length,
+        preClockinStops: preClockinStops.length,
+        postClockoutStops: postClockoutStops.length
+      },
+      anchors: {
+        firstUsedForAnchor: firstStop ? { pro: firstStop.pro, time: firstStop.deliveryEnd.toISOString().slice(11, 16), customer: firstStop.shipToName } : null,
+        lastUsedForAnchor: (lastStop && lastStop !== firstStop) ? { pro: lastStop.pro, time: lastStop.deliveryEnd.toISOString().slice(11, 16), customer: lastStop.shipToName } : null
+      },
       travelToFirst,
       travelFromLast
     }

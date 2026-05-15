@@ -13,7 +13,7 @@
 //   minutesBetween(a, b)          → number
 //   classifyGap(gapMin, t)        → 'ok' | 'warn' | 'flag' | 'critical'
 
-const VERSION = 'v4.0.1-phase1';
+const VERSION = 'v4.0.3-phase1';
 
 /**
  * Parse a B600 date + clock time into a Date object.
@@ -194,10 +194,15 @@ export function scoreDriverDay(input) {
   const clockInDt = clockIn ? parseB600DateTime(date, clockIn) : null;
   const clockOutDt = clockOut ? parseB600DateTime(date, clockOut) : null;
   if (clockInDt && clockOutDt) {
-    let shiftMin = minutesBetween(clockInDt, clockOutDt);
-    // Handle overnight shifts (clock_out next-day): add 24h if negative
-    if (shiftMin != null && shiftMin < 0) shiftMin += 24 * 60;
-    out.totalShiftMin = shiftMin;
+    const shiftMin = minutesBetween(clockInDt, clockOutDt);
+    if (shiftMin != null && shiftMin < 0) {
+      // Don't silently +24h. Davis Delivery doesn't run overnight routes;
+      // a negative shift on the same calendar date is a data integrity issue.
+      out.dataHealth.push('shift_negative_clockout_before_clockin');
+      out.totalShiftMin = null;
+    } else {
+      out.totalShiftMin = shiftMin;
+    }
   }
 
   // Data integrity flags
@@ -235,29 +240,35 @@ export function scoreDriverDay(input) {
 
   // ---------- Afternoon gap ----------
   if (clockOutDt && lastDeliveryTime) {
-    let lastToClockOutMin = minutesBetween(lastDeliveryTime, clockOutDt);
-    // Handle overnight (clock out next day)
-    if (lastToClockOutMin != null && lastToClockOutMin < 0) lastToClockOutMin += 24 * 60;
-    out.lastToClockOutMin = lastToClockOutMin;
-
+    const lastToClockOutMin = minutesBetween(lastDeliveryTime, clockOutDt);
     if (lastToClockOutMin == null) {
       // can't compute
-    } else if (expectedTravelMinFromLast != null) {
-      const expectedTotal = expectedTravelMinFromLast + defaults.wrapUpMin;
-      const gap = lastToClockOutMin - expectedTotal;
-      out.afternoonGapMin = gap;
-      out.afternoonFlag = classifyGap(gap, defaults.afternoonGapStaticThresholds);
-
-      if (out.afternoonFlag !== 'ok' && out.afternoonFlag !== 'no_data') {
-        out.flags.push({
-          kind: 'afternoon_gap',
-          severity: out.afternoonFlag,
-          evidence: `last delivery ${lastDeliveryCustomer || 'unknown'} at ${lastDeliveryTime.toISOString().slice(11, 16)} → clockOut ${clockOut} (${lastToClockOutMin} min). Expected return travel ${expectedTravelMinFromLast} min + ${defaults.wrapUpMin} min wrap-up = ${expectedTotal} min. Unexplained: ${gap} min.`,
-          deltaMin: gap
-        });
-      }
+    } else if (lastToClockOutMin < 0) {
+      // Last delivery timestamp is AFTER clock-out. Caller should have filtered
+      // these out (post-clockout manual completions), so this branch is defense-
+      // in-depth. Don't silently add 24h and produce a fake 23-hour afternoon —
+      // surface as data integrity.
+      out.dataHealth.push('last_delivery_after_clockout_unfiltered');
+      out.lastToClockOutMin = lastToClockOutMin;
     } else {
-      out.dataHealth.push('no_travel_time_from_last');
+      out.lastToClockOutMin = lastToClockOutMin;
+      if (expectedTravelMinFromLast != null) {
+        const expectedTotal = expectedTravelMinFromLast + defaults.wrapUpMin;
+        const gap = lastToClockOutMin - expectedTotal;
+        out.afternoonGapMin = gap;
+        out.afternoonFlag = classifyGap(gap, defaults.afternoonGapStaticThresholds);
+
+        if (out.afternoonFlag !== 'ok' && out.afternoonFlag !== 'no_data') {
+          out.flags.push({
+            kind: 'afternoon_gap',
+            severity: out.afternoonFlag,
+            evidence: `last delivery ${lastDeliveryCustomer || 'unknown'} at ${lastDeliveryTime.toISOString().slice(11, 16)} → clockOut ${clockOut} (${lastToClockOutMin} min). Expected return travel ${expectedTravelMinFromLast} min + ${defaults.wrapUpMin} min wrap-up = ${expectedTotal} min. Unexplained: ${gap} min.`,
+            deltaMin: gap
+          });
+        }
+      } else {
+        out.dataHealth.push('no_travel_time_from_last');
+      }
     }
   }
 
