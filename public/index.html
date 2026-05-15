@@ -3,279 +3,430 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-<meta name="theme-color" content="#0a0a0a">
+<meta name="theme-color" content="#08090b">
 <title>SENTINEL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0a0a0a;
-  --bg-card: #14161a;
-  --bg-elev: #1a1d23;
-  --border: #262a32;
-  --text: #f5f5f7;
-  --text-dim: #8a8f99;
-  --text-faint: #555a64;
-  --brand: #1e5b92;
-  --brand-bright: #4a90d9;
-  --risk-critical: #dc2626;
-  --risk-high: #ea580c;
-  --risk-medium: #ca8a04;
-  --risk-low: #65a30d;
-  --risk-clean: #16a34a;
-  --risk-nodata: #4a5260;
+  /* Color system */
+  --bg: #08090b;
+  --bg-1: #0e1014;
+  --bg-2: #15181d;
+  --bg-3: #1d2128;
+  --line: #20242c;
+  --line-strong: #2a2f38;
+  --text: #f0f2f5;
+  --text-2: #a8aeba;
+  --text-3: #6b727f;
+  --text-4: #444a55;
+  --brand: #4a90d9;
+  --brand-2: #1e5b92;
+  --crit: #ef4444;
+  --crit-bg: rgba(239,68,68,0.10);
+  --high: #f97316;
+  --high-bg: rgba(249,115,22,0.10);
+  --med: #eab308;
+  --med-bg: rgba(234,179,8,0.10);
+  --low: #84cc16;
+  --low-bg: rgba(132,204,22,0.10);
+  --clean: #22c55e;
+  --clean-bg: rgba(34,197,94,0.08);
+  --nodata: #3a3f48;
+
+  /* Spacing */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
+  --s-5: 20px; --s-6: 24px; --s-8: 32px; --s-10: 40px;
+
+  /* Type */
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-base: 14px;
+  --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 26px; --fs-3xl: 34px; --fs-4xl: 44px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-html, body { background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
-body { padding-top: env(safe-area-inset-top); padding-bottom: calc(60px + env(safe-area-inset-bottom)); min-height: 100vh; }
+html { background: var(--bg); }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: var(--fs-base); line-height: 1.45; letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  min-height: 100vh;
+}
+.mono { font-family: 'JetBrains Mono', SFMono-Regular, Menlo, monospace; font-feature-settings: 'tnum' 1; }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
 
-/* ---------- Top bar ---------- */
+/* ============ Topbar ============ */
 .topbar {
-  position: sticky; top: 0; z-index: 100;
-  background: var(--bg-card); border-bottom: 1px solid var(--border);
-  padding: 10px 14px; padding-top: calc(10px + env(safe-area-inset-top));
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(8,9,11,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--line);
+  padding: var(--s-3) var(--s-4); padding-top: calc(var(--s-3) + env(safe-area-inset-top));
   display: flex; align-items: center; justify-content: space-between;
 }
-.topbar .title { font-weight: 700; font-size: 18px; letter-spacing: -0.3px; }
-.topbar .title .v { color: var(--text-faint); font-weight: 400; font-size: 11px; margin-left: 6px; }
-.topbar button { background: transparent; border: 0; color: var(--text-dim); font-size: 20px; padding: 6px 10px; cursor: pointer; }
+.brand { display: flex; align-items: baseline; gap: var(--s-2); }
+.brand .name { font-weight: 800; font-size: var(--fs-md); letter-spacing: 0.12em; }
+.brand .ver { color: var(--text-4); font-size: 10px; font-weight: 500; letter-spacing: 0.06em; }
+.topbar .icon-btn {
+  background: transparent; border: 0; color: var(--text-3); cursor: pointer;
+  width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.topbar .icon-btn:hover, .topbar .icon-btn:active { color: var(--text); background: var(--bg-2); }
+.topbar .icon-btn svg { width: 18px; height: 18px; }
 
-/* ---------- Tabs ---------- */
+/* ============ Tab bar ============ */
 .tabs {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
-  background: var(--bg-card); border-top: 1px solid var(--border);
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+  background: rgba(8,9,11,0.92); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--line);
   display: flex; padding-bottom: env(safe-area-inset-bottom);
 }
 .tab {
-  flex: 1; text-align: center; padding: 12px 6px;
-  color: var(--text-faint); font-size: 12px; font-weight: 500;
-  cursor: pointer; border: 0; background: transparent;
+  flex: 1; background: transparent; border: 0; color: var(--text-3); cursor: pointer;
+  padding: var(--s-3) var(--s-2) var(--s-4); font-family: inherit; font-size: var(--fs-xs);
+  font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  border-top: 2px solid transparent; transition: all 0.15s;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
-.tab .icon { display: block; font-size: 22px; line-height: 1; margin-bottom: 3px; }
-.tab.active { color: var(--brand-bright); }
+.tab .ti svg { width: 18px; height: 18px; }
+.tab.active { color: var(--text); border-top-color: var(--brand); }
+.tab.active .ti svg { color: var(--brand); }
 
-/* ---------- Pages ---------- */
-.page { display: none; padding: 12px; }
+/* ============ Pages ============ */
+.page { display: none; padding: var(--s-4); }
 .page.active { display: block; }
+.section { margin-bottom: var(--s-6); }
+.section-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: var(--s-3);
+}
+.section-head h2 { font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.section-head .aux { color: var(--text-4); font-size: var(--fs-xs); }
 
-/* ---------- Cards ---------- */
+/* ============ Hero card ============ */
+.hero {
+  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg) 100%);
+  border: 1px solid var(--line); border-radius: 14px;
+  padding: var(--s-5); margin-bottom: var(--s-4);
+}
+.hero-label {
+  font-size: var(--fs-xs); color: var(--text-3); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s-2);
+}
+.hero-value {
+  font-size: var(--fs-4xl); font-weight: 800; letter-spacing: -0.03em;
+  line-height: 1; margin-bottom: 6px;
+}
+.hero-value .cents { font-size: 0.6em; color: var(--text-3); font-weight: 600; }
+.hero-sub { color: var(--text-2); font-size: var(--fs-md); }
+.hero-row { display: flex; gap: var(--s-4); margin-top: var(--s-4); padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.hero-row .item { flex: 1; }
+.hero-row .item .v { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
+.hero-row .item .l { font-size: var(--fs-xs); color: var(--text-3); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ============ Risk distribution bar ============ */
+.dist-bar {
+  display: flex; height: 10px; border-radius: 6px; overflow: hidden;
+  background: var(--bg-3); margin-bottom: var(--s-3);
+}
+.dist-seg { transition: opacity 0.15s; }
+.dist-seg.critical { background: var(--crit); }
+.dist-seg.high { background: var(--high); }
+.dist-seg.medium { background: var(--med); }
+.dist-seg.low { background: var(--low); }
+.dist-seg.clean { background: var(--clean); }
+.dist-legend { display: flex; flex-wrap: wrap; gap: var(--s-3) var(--s-4); font-size: var(--fs-xs); }
+.dist-legend .item { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.dist-legend .dot { width: 8px; height: 8px; border-radius: 2px; }
+.dist-legend .dot.critical { background: var(--crit); }
+.dist-legend .dot.high { background: var(--high); }
+.dist-legend .dot.medium { background: var(--med); }
+.dist-legend .dot.low { background: var(--low); }
+.dist-legend .dot.clean { background: var(--clean); }
+.dist-legend .n { color: var(--text); font-weight: 600; }
+.dist-legend .pct { color: var(--text-3); }
+
+/* ============ Card ============ */
 .card {
-  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
-  padding: 12px; margin-bottom: 10px;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 12px;
+  padding: var(--s-4); margin-bottom: var(--s-3);
 }
-.card.summary { padding: 14px; }
-.summary-headline { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
-.summary-sub { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
-.summary-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 12px; }
-.stat { text-align: center; padding: 8px 0; background: var(--bg-elev); border-radius: 8px; }
-.stat .n { font-weight: 700; font-size: 17px; line-height: 1; }
-.stat .l { color: var(--text-faint); font-size: 10px; text-transform: uppercase; margin-top: 4px; letter-spacing: 0.3px; }
-.stat.critical .n { color: var(--risk-critical); }
-.stat.high .n { color: var(--risk-high); }
-.stat.medium .n { color: var(--risk-medium); }
-.stat.low .n { color: var(--risk-low); }
-.stat.clean .n { color: var(--risk-clean); }
+.card-flush { padding: 0; overflow: hidden; }
 
-/* ---------- Picker ---------- */
-.picker {
-  display: flex; gap: 8px; align-items: center; margin-bottom: 12px;
+/* ============ Offender row ============ */
+.off-row {
+  display: grid; grid-template-columns: 24px 1fr auto; gap: var(--s-3);
+  padding: var(--s-3) var(--s-4); cursor: pointer;
+  border-bottom: 1px solid var(--line); transition: background 0.1s;
+  align-items: center;
 }
-.picker select, .picker input {
-  flex: 1; background: var(--bg-card); border: 1px solid var(--border); color: var(--text);
-  padding: 10px 12px; font-size: 15px; border-radius: 10px; min-height: 44px;
+.off-row:last-child { border-bottom: 0; }
+.off-row:active { background: var(--bg-2); }
+.off-rank { color: var(--text-3); font-size: var(--fs-sm); font-weight: 600; text-align: right; }
+.off-main { min-width: 0; }
+.off-name { font-weight: 600; font-size: var(--fs-base); margin-bottom: 4px; }
+.off-bars { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
+.off-bar { width: 6px; border-radius: 1px; background: var(--bg-3); flex-shrink: 0; }
+.off-bar.critical { background: var(--crit); }
+.off-bar.high { background: var(--high); }
+.off-bar.medium { background: var(--med); }
+.off-bar.low { background: var(--low); }
+.off-bar.clean { background: var(--clean); }
+.off-bar.no_data, .off-bar.unknown { background: var(--bg-3); height: 3px !important; }
+.off-meta { color: var(--text-3); font-size: var(--fs-xs); margin-top: 4px; }
+.off-amount { text-align: right; font-weight: 700; font-size: var(--fs-base); color: var(--text); }
+.off-amount .sub { display: block; font-size: 10px; font-weight: 500; color: var(--text-3); margin-top: 2px; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* ============ Driver-day row ============ */
+.dd-row {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: var(--s-2); overflow: hidden; transition: border-color 0.15s;
+}
+.dd-row.expanded { border-color: var(--line-strong); }
+.dd-head { display: grid; grid-template-columns: 4px 1fr auto; gap: var(--s-3); padding: var(--s-3) var(--s-4); cursor: pointer; align-items: center; }
+.dd-strip { width: 4px; height: 32px; border-radius: 2px; align-self: stretch; }
+.dd-strip.critical { background: var(--crit); }
+.dd-strip.high { background: var(--high); }
+.dd-strip.medium { background: var(--med); }
+.dd-strip.low { background: var(--low); }
+.dd-strip.clean { background: var(--clean); }
+.dd-strip.no_data, .dd-strip.unknown { background: var(--nodata); }
+.dd-main { min-width: 0; }
+.dd-name { font-weight: 600; font-size: var(--fs-base); }
+.dd-meta { color: var(--text-3); font-size: var(--fs-xs); margin-top: 2px; display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.dd-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.dd-meta .sep { color: var(--text-4); }
+.dd-right { text-align: right; flex-shrink: 0; }
+.dd-amount { font-weight: 700; font-size: var(--fs-base); color: var(--text); }
+.dd-amount.zero { color: var(--text-4); font-weight: 500; }
+.dd-chips { display: flex; gap: 3px; margin-top: 4px; justify-content: flex-end; }
+.chip {
+  display: inline-block; padding: 2px 5px; border-radius: 3px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.06em; font-family: 'JetBrains Mono', monospace;
+  background: var(--bg-3); color: var(--text-4);
+}
+.chip.warn { background: var(--med-bg); color: var(--med); }
+.chip.flag { background: var(--high-bg); color: var(--high); }
+.chip.critical { background: var(--crit-bg); color: var(--crit); }
+.chip.ok { background: var(--clean-bg); color: var(--clean); }
+
+/* ============ Detail (expanded) ============ */
+.dd-detail { display: none; padding: var(--s-4); border-top: 1px solid var(--line); background: var(--bg); }
+.dd-row.expanded .dd-detail { display: block; }
+.dh { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s-2); }
+.dd-sec { margin-bottom: var(--s-4); }
+.dd-sec:last-child { margin-bottom: 0; }
+.kv-grid { display: grid; grid-template-columns: 80px 1fr; gap: 6px var(--s-3); font-size: var(--fs-md); }
+.kv-grid .k { color: var(--text-3); }
+.kv-grid .v { color: var(--text); }
+.kv-grid .v.dim { color: var(--text-3); font-size: var(--fs-sm); }
+.flag-card {
+  background: var(--bg-2); border-radius: 8px; padding: var(--s-3);
+  margin-bottom: var(--s-2); position: relative;
+}
+.flag-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 8px 0 0 8px; }
+.flag-card.warn::before { background: var(--med); }
+.flag-card.flag::before { background: var(--high); }
+.flag-card.critical::before { background: var(--crit); }
+.flag-card .kind { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; padding-left: var(--s-2); }
+.flag-card .kind.warn { color: var(--med); }
+.flag-card .kind.flag { color: var(--high); }
+.flag-card .kind.critical { color: var(--crit); }
+.flag-card .ev { font-size: var(--fs-md); line-height: 1.5; margin-top: 4px; padding-left: var(--s-2); }
+.visit-row {
+  display: grid; grid-template-columns: 50px 1fr auto; gap: var(--s-3);
+  font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px solid var(--line);
+}
+.visit-row:last-child { border-bottom: 0; }
+.visit-row .t { color: var(--text-3); }
+.visit-row .a { color: var(--text); }
+.visit-row .a .w { display: inline-block; font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px; background: var(--bg-3); color: var(--text-3); letter-spacing: 0.06em; }
+.visit-row .a .w.in_route { background: var(--med-bg); color: var(--med); }
+.visit-row .a .w.post_route { background: var(--brand-2); color: var(--brand); }
+.visit-row .m { color: var(--text-3); text-align: right; font-size: var(--fs-xs); }
+.dh-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.dh-chip {
+  font-size: 10px; font-family: 'JetBrains Mono', monospace;
+  padding: 2px 6px; border-radius: 4px;
+  background: var(--bg-2); color: var(--text-3);
+}
+.dh-chip.post-route, .dh-chip.manual { background: var(--brand-2); color: var(--brand); }
+
+/* ============ Driver hero (Investigations) ============ */
+.driver-hero {
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--line); border-radius: 14px;
+  padding: var(--s-5); margin-bottom: var(--s-4);
+}
+.driver-hero-name { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 2px; }
+.driver-hero-meta { color: var(--text-3); font-size: var(--fs-md); margin-bottom: var(--s-4); }
+.driver-hero-stat { display: flex; gap: var(--s-4); }
+.driver-hero-stat .item { flex: 1; }
+.driver-hero-stat .v { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.02em; }
+.driver-hero-stat .l { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+.heatmap { display: flex; gap: 3px; margin-top: var(--s-3); }
+.heatmap-day {
+  flex: 1; aspect-ratio: 1; min-height: 28px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.7);
+  cursor: pointer; transition: transform 0.1s;
+}
+.heatmap-day:hover { transform: scale(1.05); }
+.heatmap-day.critical { background: var(--crit); color: white; }
+.heatmap-day.high { background: var(--high); color: white; }
+.heatmap-day.medium { background: var(--med); color: white; }
+.heatmap-day.low { background: var(--low); color: white; }
+.heatmap-day.clean { background: var(--clean); color: white; }
+.heatmap-day.no_data, .heatmap-day.unknown { background: var(--bg-3); color: var(--text-4); }
+.heatmap-day.empty { background: transparent; border: 1px dashed var(--line); color: var(--text-4); }
+.heatmap-axis { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-4); margin-top: 6px; }
+
+/* ============ Picker ============ */
+.picker {
+  display: flex; gap: var(--s-2); align-items: center; margin-bottom: var(--s-4);
+}
+.picker select {
+  flex: 1; background: var(--bg-1); border: 1px solid var(--line);
+  color: var(--text); font-family: inherit; font-size: var(--fs-base);
+  padding: 10px 12px; min-height: 44px; border-radius: 10px;
   -webkit-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M3 4.5L6 7.5L9 4.5' stroke='%23a8aeba' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px;
 }
 .picker .refresh {
-  background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim);
-  padding: 10px; min-width: 44px; min-height: 44px; border-radius: 10px;
-  font-size: 18px; cursor: pointer;
+  background: var(--bg-1); border: 1px solid var(--line); color: var(--text-2);
+  width: 44px; height: 44px; border-radius: 10px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
 }
 
-/* ---------- Driver-day row ---------- */
-.row {
-  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px; margin-bottom: 8px; cursor: pointer;
-  transition: border-color 0.1s;
+/* ============ States ============ */
+.empty {
+  text-align: center; padding: var(--s-10) var(--s-4);
+  color: var(--text-3);
 }
-.row.expanded { border-color: var(--brand-bright); }
-.row-head { display: flex; align-items: center; gap: 10px; }
-.risk-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.risk-dot.critical { background: var(--risk-critical); }
-.risk-dot.high { background: var(--risk-high); }
-.risk-dot.medium { background: var(--risk-medium); }
-.risk-dot.low { background: var(--risk-low); }
-.risk-dot.clean { background: var(--risk-clean); }
-.risk-dot.no_data, .risk-dot.unknown { background: var(--risk-nodata); }
-.row-main { flex: 1; min-width: 0; }
-.row-name { font-weight: 600; font-size: 15px; }
-.row-meta { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
-.row-right { text-align: right; flex-shrink: 0; }
-.row-stolen { font-weight: 700; font-size: 15px; }
-.row-stolen.zero { color: var(--text-faint); font-weight: 500; }
-.flags-mini { display: flex; gap: 3px; margin-top: 3px; justify-content: flex-end; }
-.flag-chip {
-  display: inline-block; padding: 1px 5px; border-radius: 4px;
-  font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
-  background: var(--bg-elev); color: var(--text-faint);
-}
-.flag-chip.warn { background: rgba(202,138,4,0.18); color: var(--risk-medium); }
-.flag-chip.flag { background: rgba(234,88,12,0.18); color: var(--risk-high); }
-.flag-chip.critical { background: rgba(220,38,38,0.2); color: var(--risk-critical); }
-
-/* ---------- Expanded detail ---------- */
-.detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: none; }
-.row.expanded .detail { display: block; }
-.detail-section { margin-bottom: 14px; }
-.detail-section:last-child { margin-bottom: 0; }
-.detail-section .h {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--text-faint); margin-bottom: 6px; font-weight: 600;
-}
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; font-size: 13px; }
-.kv .k { color: var(--text-dim); }
-.kv .v { color: var(--text); }
-.flag-card {
-  background: var(--bg-elev); border-radius: 8px; padding: 10px;
-  margin-bottom: 6px; font-size: 13px; border-left: 3px solid var(--risk-medium);
-}
-.flag-card.warn { border-color: var(--risk-medium); }
-.flag-card.flag { border-color: var(--risk-high); }
-.flag-card.critical { border-color: var(--risk-critical); }
-.flag-card .kind { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
-.flag-card .ev { margin-top: 4px; line-height: 1.45; color: var(--text); }
-.stop-row { font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--bg-elev); display: flex; gap: 8px; }
-.stop-row:last-child { border-bottom: 0; }
-.stop-row .t { color: var(--text-dim); width: 50px; flex-shrink: 0; }
-.stop-row .c { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stop-row .z { color: var(--text-faint); font-size: 11px; }
-.dh-chip {
-  display: inline-block; padding: 2px 6px; border-radius: 4px;
-  background: var(--bg-elev); color: var(--text-dim);
-  font-size: 11px; margin: 2px 4px 2px 0;
-}
-.dh-chip.post-route, .dh-chip.manual { background: rgba(30,91,146,0.2); color: var(--brand-bright); }
-
-/* ---------- Empty state ---------- */
-.empty { text-align: center; padding: 40px 20px; color: var(--text-faint); }
-.empty .icon { font-size: 36px; margin-bottom: 8px; opacity: 0.5; }
-
-/* ---------- Loading / errors ---------- */
-.loading { text-align: center; padding: 20px; color: var(--text-faint); font-size: 13px; }
+.empty .icn { width: 36px; height: 36px; color: var(--text-4); margin: 0 auto var(--s-3); }
+.empty h3 { color: var(--text-2); font-size: var(--fs-base); font-weight: 600; margin-bottom: 4px; }
+.empty p { font-size: var(--fs-md); line-height: 1.5; max-width: 300px; margin: 0 auto; color: var(--text-3); }
+.loading { text-align: center; padding: var(--s-8); color: var(--text-3); font-size: var(--fs-sm); }
+.loading::before { content: ''; display: inline-block; width: 10px; height: 10px; border: 2px solid var(--text-4); border-top-color: var(--brand); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: var(--s-2); }
+@keyframes spin { to { transform: rotate(360deg); } }
 .error-banner {
-  background: rgba(220,38,38,0.12); border: 1px solid var(--risk-critical);
-  color: var(--risk-critical); padding: 10px; border-radius: 8px; margin-bottom: 10px;
-  font-size: 13px;
+  background: var(--crit-bg); border: 1px solid rgba(239,68,68,0.3); color: var(--crit);
+  padding: var(--s-3); border-radius: 8px; margin-bottom: var(--s-3); font-size: var(--fs-md);
 }
 
-/* ---------- Settings modal ---------- */
+/* ============ Settings modal ============ */
 .modal {
-  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7);
-  display: none; align-items: flex-end;
+  position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.7);
+  display: none; align-items: flex-end; backdrop-filter: blur(8px);
 }
 .modal.open { display: flex; }
 .modal-sheet {
-  background: var(--bg-card); border-radius: 16px 16px 0 0; padding: 16px;
-  width: 100%; max-height: 80vh; overflow-y: auto;
-  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  background: var(--bg-1); border-radius: 18px 18px 0 0;
+  padding: var(--s-5);
+  width: 100%; max-height: 88vh; overflow-y: auto;
+  padding-bottom: calc(var(--s-6) + env(safe-area-inset-bottom));
+  border: 1px solid var(--line); border-bottom: 0;
 }
-.modal-sheet h2 { font-size: 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-.modal-sheet h2 button { background: transparent; border: 0; color: var(--text-dim); font-size: 22px; cursor: pointer; }
+.modal-handle { width: 36px; height: 4px; background: var(--bg-3); border-radius: 2px; margin: 0 auto var(--s-4); }
+.modal-title { font-size: var(--fs-lg); font-weight: 700; display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s-4); }
+.modal-title .close { background: transparent; border: 0; color: var(--text-3); cursor: pointer; padding: var(--s-2); }
 .modal-sheet input {
-  width: 100%; background: var(--bg-elev); border: 1px solid var(--border); color: var(--text);
-  padding: 10px 12px; font-size: 14px; border-radius: 8px; margin-bottom: 8px; min-height: 44px;
+  width: 100%; background: var(--bg-2); border: 1px solid var(--line);
+  color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: var(--fs-base);
+  padding: 10px 12px; border-radius: 8px; min-height: 44px;
 }
-.modal-sheet .row-setting { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
-.modal-sheet .row-setting:last-child { border-bottom: 0; }
-.modal-sheet .row-setting .label { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+.modal-sheet .field { padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
+.modal-sheet .field:last-child { border-bottom: 0; }
+.modal-sheet .field .l { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 6px; }
+.modal-sheet .field .v { font-size: var(--fs-md); color: var(--text); }
+.modal-sheet .field .v.mono { font-family: 'JetBrains Mono', monospace; color: var(--text-2); }
 .modal-sheet button.primary {
   background: var(--brand); color: white; border: 0;
-  padding: 12px 16px; border-radius: 8px; font-size: 15px; font-weight: 600;
-  width: 100%; min-height: 44px; cursor: pointer; margin-top: 8px;
+  padding: 12px; border-radius: 8px; font-size: var(--fs-base); font-weight: 600;
+  width: 100%; min-height: 44px; cursor: pointer; margin-top: 10px; font-family: inherit;
 }
-
-/* ---------- Top offenders (dashboard) ---------- */
-.offender-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 0; border-bottom: 1px solid var(--border);
-  cursor: pointer;
-}
-.offender-row:last-child { border-bottom: 0; }
-.offender-rank { color: var(--text-faint); font-size: 13px; min-width: 22px; }
-.offender-main { flex: 1; min-width: 0; }
-.offender-name { font-weight: 600; font-size: 14px; }
-.offender-stats { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
-.offender-stolen { font-weight: 700; font-size: 15px; color: var(--risk-high); }
+.modal-sheet button.primary:disabled { opacity: 0.5; }
 </style>
 </head>
 <body>
 
-<div class="topbar">
-  <div class="title">SENTINEL <span class="v" id="versionTag">v4.0.5</span></div>
-  <button id="openSettings" aria-label="Settings">⚙</button>
+<header class="topbar">
+  <div class="brand">
+    <span class="name">SENTINEL</span>
+    <span class="ver" id="versionTag">v4.0.5</span>
+  </div>
+  <button class="icon-btn" id="openSettings" aria-label="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+</header>
+
+<div class="page active" id="page-overview">
+  <div id="overviewContent"><div class="loading">Loading fleet snapshot</div></div>
 </div>
 
-<div class="page active" id="page-audit">
+<div class="page" id="page-audit">
   <div class="picker">
     <select id="dateSelect" aria-label="Date"></select>
-    <button class="refresh" id="refreshDate" aria-label="Refresh">↻</button>
+    <button class="refresh" id="refreshDate" aria-label="Refresh">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
   </div>
-  <div id="auditContent">
-    <div class="loading">Loading…</div>
-  </div>
+  <div id="auditContent"><div class="loading">Loading day</div></div>
 </div>
 
-<div class="page" id="page-investigations">
+<div class="page" id="page-investigate">
   <div class="picker">
     <select id="driverSelect" aria-label="Driver"></select>
-    <button class="refresh" id="refreshDriver" aria-label="Refresh">↻</button>
+    <button class="refresh" id="refreshDriver" aria-label="Refresh">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
   </div>
   <div id="investContent">
-    <div class="empty"><div class="icon">👤</div>Select a driver to see their 12-day history</div>
-  </div>
-</div>
-
-<div class="page" id="page-overview">
-  <div id="overviewContent">
-    <div class="loading">Loading dashboard…</div>
+    <div class="empty">
+      <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <h3>Pick a driver</h3>
+      <p>Select someone from the menu above to see their 12-day pattern</p>
+    </div>
   </div>
 </div>
 
 <nav class="tabs">
-  <button class="tab active" data-page="audit">
-    <span class="icon">📋</span>Daily Audit
+  <button class="tab active" data-page="overview">
+    <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
+    Overview
   </button>
-  <button class="tab" data-page="investigations">
-    <span class="icon">🔍</span>Investigate
+  <button class="tab" data-page="audit">
+    <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+    Daily Audit
   </button>
-  <button class="tab" data-page="overview">
-    <span class="icon">📊</span>Overview
+  <button class="tab" data-page="investigate">
+    <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+    Investigate
   </button>
 </nav>
 
 <div class="modal" id="settingsModal">
   <div class="modal-sheet">
-    <h2>Settings <button id="closeSettings">✕</button></h2>
-    <div class="row-setting">
-      <div class="label">Access Secret</div>
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      Settings
+      <button class="close" id="closeSettings" aria-label="Close">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="field">
+      <div class="l">Access Secret</div>
       <input type="text" id="secretInput" placeholder="paste secret here" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false">
-      <div id="secretError" style="color:var(--risk-critical);font-size:12px;margin:6px 0;display:none"></div>
-      <button class="primary" id="saveSecret">Save & reload</button>
+      <div id="secretError" style="color:var(--crit);font-size:12px;margin-top:6px;display:none"></div>
+      <button class="primary" id="saveSecret">Save &amp; Reload</button>
     </div>
-    <div class="row-setting">
-      <div class="label">App Version</div>
-      <div id="versionDisplay">v4.0.5-phase1c</div>
-    </div>
-    <div class="row-setting">
-      <div class="label">Yard ZIP variants</div>
-      <div id="yardZipsDisplay">30518, 30542</div>
-    </div>
-    <div class="row-setting">
-      <div class="label">Static thresholds (min)</div>
-      <div id="thresholdsDisplay">morn ok≤30 / warn≤60 / flag≤90 | aft ok≤30 / warn≤60 / flag≤90 | in-route ok≤15 / warn≤30 / flag≤60</div>
-    </div>
-    <div class="row-setting">
-      <div class="label">Data scope</div>
-      <div id="dataScopeDisplay">Loading…</div>
-    </div>
+    <div class="field"><div class="l">App Version</div><div class="v mono" id="versionDisplay">v4.0.5-phase1c</div></div>
+    <div class="field"><div class="l">Yard ZIP Variants</div><div class="v mono" id="yardZipsDisplay">30518, 30542</div></div>
+    <div class="field"><div class="l">Static Thresholds (min)</div><div class="v mono" style="line-height:1.6">morn ok≤30 / warn≤60 / flag≤90<br>aft ok≤30 / warn≤60 / flag≤90<br>in-route ok≤15 / warn≤30 / flag≤60</div></div>
+    <div class="field"><div class="l">Data Scope</div><div class="v mono" id="dataScopeDisplay">Loading…</div></div>
   </div>
 </div>
 
@@ -284,95 +435,196 @@ const APP_VERSION = 'v4.0.5-phase1c';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
-// ---------- Secret handling ----------
-function getSecret() { return localStorage.getItem('sentinel_secret') || ''; }
-function setSecret(s) { localStorage.setItem('sentinel_secret', s); }
+// ============ Secret + API ============
+const getSecret = () => localStorage.getItem('sentinel_secret') || '';
+const setSecret = (s) => localStorage.setItem('sentinel_secret', s);
 
-// ---------- API ----------
 async function api(action, params = {}) {
   const qs = new URLSearchParams({ secret: getSecret(), action, ...params });
   const res = await fetch('/api/sentinel-read?' + qs);
   if (res.status === 401) {
-    showError('Access denied — open Settings ⚙ and enter the SENTINEL secret');
     document.getElementById('settingsModal').classList.add('open');
     throw new Error('unauthorized');
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
 
-function showError(msg) {
-  const banner = document.createElement('div');
-  banner.className = 'error-banner';
-  banner.textContent = msg;
-  const container = document.querySelector('.page.active');
-  const existing = container.querySelector('.error-banner');
-  if (existing) existing.remove();
-  container.insertBefore(banner, container.firstChild);
-}
-
-// ---------- Tab navigation ----------
-let currentPage = 'audit';
-const pages = {
-  audit: { el: document.getElementById('page-audit'), loader: loadAudit },
-  investigations: { el: document.getElementById('page-investigations'), loader: loadInvestigationsInit },
-  overview: { el: document.getElementById('page-overview'), loader: loadOverview }
+// ============ Formatting ============
+const fmt$ = n => {
+  if (n == null || n === 0) return '$0';
+  const v = Number(n);
+  const fixed = v >= 1000 ? v.toFixed(0) : v.toFixed(2);
+  const [whole, cents] = fixed.split('.');
+  const withCommas = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return '$' + withCommas + (cents ? `<span class="cents">.${cents}</span>` : '');
 };
-document.querySelectorAll('.tab').forEach(t => {
-  t.addEventListener('click', () => {
-    const page = t.dataset.page;
-    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
-    document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
-    pages[page].el.classList.add('active');
-    currentPage = page;
-    pages[page].loader();
-  });
-});
+const fmt$Plain = n => {
+  if (n == null) return '$0';
+  return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: n < 1000 ? 2 : 0, maximumFractionDigits: n < 1000 ? 2 : 0 });
+};
+const fmtMin = m => m == null ? '—' : `${m}m`;
+const fmtHr = m => (m / 60).toFixed(1) + 'h';
+const fmtTime = iso => iso ? iso.slice(11, 16) : '—';
+const fmtDate = d => {
+  if (!d) return '';
+  const [y, mo, da] = d.split('-');
+  return `${parseInt(mo)}/${parseInt(da)}`;
+};
+const riskCls = lv => ['critical','high','medium','low','clean'].includes(lv) ? lv : 'no_data';
+const flagCls = f => ({critical:'critical',flag:'flag',warn:'warn',ok:'ok'}[f] || '');
+const flagLabel = f => ({critical:'CRIT',flag:'FLAG',warn:'WARN',ok:'OK',no_data:'—',deferred:'DEF'}[f] || '·');
 
-// ---------- Risk helpers ----------
-function riskClass(level) { return ['critical','high','medium','low','clean'].includes(level) ? level : 'no_data'; }
-function flagClass(f) {
-  if (f === 'critical') return 'critical';
-  if (f === 'flag') return 'flag';
-  if (f === 'warn') return 'warn';
-  return '';
+// ============ Risk distribution bar ============
+function renderDistBar(dist, total) {
+  if (!total) return '';
+  const order = ['critical','high','medium','low','clean'];
+  const segs = order.map(k => {
+    const n = dist[k] || 0;
+    if (n === 0) return '';
+    const pct = (n / total) * 100;
+    return `<div class="dist-seg ${k}" style="width:${pct}%"></div>`;
+  }).join('');
+  const legend = order.map(k => {
+    const n = dist[k] || 0;
+    if (n === 0) return '';
+    const pct = ((n / total) * 100).toFixed(0);
+    return `<div class="item"><span class="dot ${k}"></span><span class="n">${n}</span> ${k} <span class="pct">${pct}%</span></div>`;
+  }).join('');
+  return `<div class="dist-bar">${segs}</div><div class="dist-legend">${legend}</div>`;
 }
-function flagLabel(f) {
-  return { critical: 'CRIT', flag: 'FLAG', warn: 'WARN', ok: 'OK', no_data: '—', deferred: 'DEF' }[f] || '?';
-}
-function fmtMoney(n) { return n ? `$${Number(n).toFixed(2)}` : '$0'; }
-function fmtMin(m) { if (m == null) return '—'; return `${m}m`; }
-function fmtTime(iso) { if (!iso) return '—'; return iso.slice(11, 16); }
 
-// ---------- Render driver-day row ----------
+// ============ Sparkline (per-day stolen $ bars) ============
+function renderSparkBars(records, height = 22, getValue) {
+  if (!records || records.length === 0) return '';
+  const values = records.map(r => getValue(r));
+  const max = Math.max(...values, 1);
+  return records.map((r, i) => {
+    const v = values[i];
+    const h = Math.max(2, Math.round((v / max) * height));
+    const cls = riskCls(r.riskLevel);
+    return `<div class="off-bar ${cls}" style="height:${h}px" title="${r.date}: $${v.toFixed(2)}"></div>`;
+  }).join('');
+}
+
+// ============ Overview ============
+async function loadOverview() {
+  const container = document.getElementById('overviewContent');
+  container.innerHTML = '<div class="loading">Loading fleet snapshot</div>';
+  try {
+    const d = await api('dashboard');
+    const dist = d.dist;
+    const total = d.totalDriverDays;
+    const annualized = d.totalStolen.dollars * 365 / Math.max(1, d.datesPresent.length);
+
+    // Fetch all driver-day data for sparklines (one shot)
+    const allDays = await api('dashboard');
+    // Get per-driver records for top offenders sparklines
+    const topOffenderPromises = d.topOffenders.slice(0, 10).map(o =>
+      api('byDriver', { driverSlug: o.slug }).then(r => ({ slug: o.slug, records: r.records }))
+    );
+    const topOffenderRecords = await Promise.all(topOffenderPromises);
+    const recordsBySlug = Object.fromEntries(topOffenderRecords.map(x => [x.slug, x.records]));
+
+    const dateRange = d.datesPresent.length ? `${d.datesPresent[0]} → ${d.datesPresent[d.datesPresent.length-1]}` : '—';
+
+    container.innerHTML = `
+      <div class="hero">
+        <div class="hero-label">Unexplained Time · Last ${d.datesPresent.length} Days</div>
+        <div class="hero-value num">${fmt$(d.totalStolen.dollars)}</div>
+        <div class="hero-sub">${fmtHr(d.totalStolen.minutes)} across ${total} driver-days · ${dateRange}</div>
+        <div class="hero-row">
+          <div class="item">
+            <div class="v num">${fmt$Plain(annualized.toFixed(0))}</div>
+            <div class="l">Annualized</div>
+          </div>
+          <div class="item">
+            <div class="v num">${dist.critical + dist.high}</div>
+            <div class="l">High-risk days</div>
+          </div>
+          <div class="item">
+            <div class="v num">${Math.round(((dist.critical + dist.high) / total) * 100)}%</div>
+            <div class="l">of fleet-days</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h2>Risk Distribution</h2>
+          <div class="aux">${total} records</div>
+        </div>
+        <div class="card">${renderDistBar(dist, total)}</div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h2>Top Offenders · 12-day Total</h2>
+          <div class="aux">tap to investigate</div>
+        </div>
+        <div class="card card-flush" id="offenderList"></div>
+      </div>
+    `;
+
+    const list = document.getElementById('offenderList');
+    d.topOffenders.slice(0, 10).forEach((o, i) => {
+      const recs = (recordsBySlug[o.slug] || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      const bars = renderSparkBars(recs, 22, r => r.stolenDollars || 0);
+      const row = document.createElement('div');
+      row.className = 'off-row';
+      row.innerHTML = `
+        <div class="off-rank num">${i + 1}</div>
+        <div class="off-main">
+          <div class="off-name">${o.displayName || o.slug}</div>
+          <div class="off-bars">${bars}</div>
+          <div class="off-meta">${o.criticalDays} critical · ${o.highDays} high · ${o.daysWithData} of ${o.days} days w/ data</div>
+        </div>
+        <div class="off-amount num">${fmt$(o.stolenDollars)}<span class="sub">12d</span></div>
+      `;
+      row.addEventListener('click', () => {
+        document.querySelector('.tab[data-page="investigate"]').click();
+        setTimeout(() => {
+          const sel = document.getElementById('driverSelect');
+          sel.value = o.slug;
+          loadDriver(o.slug);
+        }, 50);
+      });
+      list.appendChild(row);
+    });
+  } catch (e) {
+    if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
+  }
+}
+
+// ============ Driver-day row (shared) ============
 function renderDriverDayRow(r, context) {
   const div = document.createElement('div');
-  div.className = 'row';
-  div.dataset.id = `${r.driverSlug}_${r.date}`;
-  const showWhat = context === 'audit' ? r.displayName : r.date;
-  const showSub = context === 'audit'
-    ? `${r.truckType || '?'} • ${r.completedStops || 0} stops${r.clockIn ? ' • ' + r.clockIn + '–' + (r.clockOut || '?') : ''}`
-    : `${r.truckType || '?'} • ${r.completedStops || 0} stops${r.clockIn ? ' • ' + r.clockIn + '–' + (r.clockOut || '?') : ''}`;
+  div.className = 'dd-row';
+  const dateOrName = context === 'audit' ? r.displayName : fmtDate(r.date);
+  const metaParts = [];
+  metaParts.push(r.truckType || '?');
+  if (r.completedStops != null) metaParts.push(`${r.completedStops} stops`);
+  if (r.clockIn) metaParts.push(`${r.clockIn}–${r.clockOut || '?'}`);
   const stolenCls = (r.stolenDollars > 0) ? '' : 'zero';
   div.innerHTML = `
-    <div class="row-head">
-      <span class="risk-dot ${riskClass(r.riskLevel)}"></span>
-      <div class="row-main">
-        <div class="row-name">${showWhat}</div>
-        <div class="row-meta">${showSub}</div>
+    <div class="dd-head">
+      <div class="dd-strip ${riskCls(r.riskLevel)}"></div>
+      <div class="dd-main">
+        <div class="dd-name">${dateOrName}</div>
+        <div class="dd-meta">${metaParts.map((p, i) => i === 0 ? `<span>${p}</span>` : `<span class="sep">·</span><span>${p}</span>`).join('')}</div>
       </div>
-      <div class="row-right">
-        <div class="row-stolen ${stolenCls}">${fmtMoney(r.stolenDollars)}</div>
-        <div class="flags-mini">
-          <span class="flag-chip ${flagClass(r.morningFlag)}">M:${flagLabel(r.morningFlag)}</span>
-          <span class="flag-chip ${flagClass(r.afternoonFlag)}">A:${flagLabel(r.afternoonFlag)}</span>
-          <span class="flag-chip ${flagClass(r.inRouteFlag)}">IR:${flagLabel(r.inRouteFlag)}</span>
+      <div class="dd-right">
+        <div class="dd-amount num ${stolenCls}">${fmt$(r.stolenDollars)}</div>
+        <div class="dd-chips">
+          <span class="chip ${flagCls(r.morningFlag)}">M ${flagLabel(r.morningFlag)}</span>
+          <span class="chip ${flagCls(r.afternoonFlag)}">A ${flagLabel(r.afternoonFlag)}</span>
+          <span class="chip ${flagCls(r.inRouteFlag)}">IR ${flagLabel(r.inRouteFlag)}</span>
         </div>
       </div>
     </div>
-    <div class="detail"></div>
+    <div class="dd-detail"></div>
   `;
-  div.addEventListener('click', () => toggleRow(div, r));
+  div.querySelector('.dd-head').addEventListener('click', () => toggleRow(div, r));
   return div;
 }
 
@@ -381,96 +633,70 @@ function toggleRow(rowEl, r) {
     rowEl.classList.remove('expanded');
     return;
   }
-  document.querySelectorAll('.row.expanded').forEach(e => e.classList.remove('expanded'));
+  document.querySelectorAll('.dd-row.expanded').forEach(e => e.classList.remove('expanded'));
   rowEl.classList.add('expanded');
-  const detail = rowEl.querySelector('.detail');
-  detail.innerHTML = renderDetail(r);
+  rowEl.querySelector('.dd-detail').innerHTML = renderDetail(r);
 }
 
 function renderDetail(r) {
-  const sections = [];
+  const parts = [];
 
-  // Summary section
-  sections.push(`
-    <div class="detail-section">
-      <div class="h">Shift</div>
-      <div class="kv">
-        <span class="k">Clock</span><span class="v">${r.clockIn || '—'} → ${r.clockOut || '—'} ${r.totalShiftMin ? `(${(r.totalShiftMin/60).toFixed(2)}hr)` : ''}</span>
+  // Shift + bookends combined
+  const shift = r.clockIn ? `${r.clockIn} → ${r.clockOut || '?'} (${r.totalShiftMin ? (r.totalShiftMin/60).toFixed(2) + 'hr' : '?'})` : 'No B600 punch';
+  const bookends = [];
+  if (r.firstDeliveryTime) bookends.push(`<span class="k">First</span><span class="v">${fmtTime(r.firstDeliveryTime)}${r.firstDeliveryCustomer ? ' · ' + r.firstDeliveryCustomer : ''}</span>${r.firstDeliveryAddr ? `<span class="k"></span><span class="v dim">${r.firstDeliveryAddr}</span>` : ''}`);
+  if (r.lastDeliveryTime) bookends.push(`<span class="k">Last</span><span class="v">${fmtTime(r.lastDeliveryTime)}${r.lastDeliveryCustomer ? ' · ' + r.lastDeliveryCustomer : ''}</span>${r.lastDeliveryAddr ? `<span class="k"></span><span class="v dim">${r.lastDeliveryAddr}</span>` : ''}`);
+
+  parts.push(`
+    <div class="dd-sec">
+      <div class="dh">Day</div>
+      <div class="kv-grid">
+        <span class="k">Shift</span><span class="v">${shift}</span>
         <span class="k">Truck</span><span class="v">${r.truckType || '?'}</span>
         <span class="k">Stops</span><span class="v">${r.completedStops || 0} delivered</span>
-        <span class="k">Risk</span><span class="v"><span class="risk-dot ${riskClass(r.riskLevel)}" style="display:inline-block;vertical-align:middle"></span> ${r.riskLevel} (score ${r.riskScore})</span>
-        <span class="k">Stolen</span><span class="v">${r.stolenMinutes || 0} min = ${fmtMoney(r.stolenDollars)}</span>
+        <span class="k">Score</span><span class="v">${r.riskScore} · ${r.riskLevel}</span>
+        <span class="k">Stolen</span><span class="v">${r.stolenMinutes || 0}m · ${fmt$Plain(r.stolenDollars || 0)}</span>
+        ${bookends.join('')}
       </div>
     </div>
   `);
 
-  // Morning + afternoon math
-  if (r.firstDeliveryTime || r.lastDeliveryTime) {
-    sections.push(`
-      <div class="detail-section">
-        <div class="h">Bookends</div>
-        <div class="kv">
-          ${r.firstDeliveryTime ? `<span class="k">First</span><span class="v">${fmtTime(r.firstDeliveryTime)} ${r.firstDeliveryCustomer ? '— ' + r.firstDeliveryCustomer : ''}</span>` : ''}
-          ${r.firstDeliveryAddr ? `<span class="k"></span><span class="v" style="color:var(--text-dim);font-size:12px">${r.firstDeliveryAddr}</span>` : ''}
-          ${r.lastDeliveryTime ? `<span class="k">Last</span><span class="v">${fmtTime(r.lastDeliveryTime)} ${r.lastDeliveryCustomer ? '— ' + r.lastDeliveryCustomer : ''}</span>` : ''}
-          ${r.lastDeliveryAddr ? `<span class="k"></span><span class="v" style="color:var(--text-dim);font-size:12px">${r.lastDeliveryAddr}</span>` : ''}
-        </div>
-      </div>
-    `);
-  }
-
-  // Flags with evidence
-  if (r.flags && r.flags.length > 0) {
+  // Flags
+  if (r.flags && r.flags.length) {
     const flagsHtml = r.flags.map(f => `
-      <div class="flag-card ${flagClass(f.severity)}">
-        <div class="kind">${f.kind} — ${f.severity}</div>
+      <div class="flag-card ${flagCls(f.severity)}">
+        <div class="kind ${flagCls(f.severity)}">${f.kind.replace(/_/g, ' ')} · ${f.severity}</div>
         <div class="ev">${f.evidence}</div>
       </div>
     `).join('');
-    sections.push(`
-      <div class="detail-section">
-        <div class="h">Why this flagged</div>
-        ${flagsHtml}
-      </div>
-    `);
+    parts.push(`<div class="dd-sec"><div class="dh">Why this flagged</div>${flagsHtml}</div>`);
   }
 
-  // Motive off-route visits
-  if (r.motive && r.motive.offRouteVisits && r.motive.offRouteVisits.length > 0) {
+  // Motive
+  if (r.motive && r.motive.offRouteVisits && r.motive.offRouteVisits.length) {
     const visits = r.motive.offRouteVisits.map(v => `
-      <div class="stop-row">
+      <div class="visit-row">
         <div class="t">${v.arrivedAt || '—'}</div>
-        <div class="c">${v.destAddr || 'ZIP ' + v.destZip} <span class="z">[${v.window}]</span></div>
-        <div class="z">${v.stationaryMin}m stop, ${v.driveMi}mi</div>
+        <div class="a">${v.destAddr || 'ZIP ' + v.destZip}<span class="w ${v.window}">${v.window.replace('_', ' ')}</span></div>
+        <div class="m">${v.stationaryMin}m · ${v.driveMi}mi</div>
       </div>
     `).join('');
-    sections.push(`
-      <div class="detail-section">
-        <div class="h">Motive off-route (${r.motive.offRouteVisits.length})</div>
-        ${visits}
-        <div style="font-size:11px;color:var(--text-faint);margin-top:6px">Total drive: ${r.motive.totalMi}mi / ${r.motive.totalDriveMin}min</div>
-      </div>
-    `);
+    parts.push(`<div class="dd-sec"><div class="dh">Motive — Off-route activity</div>${visits}<div style="color:var(--text-4);font-size:11px;margin-top:8px">Total drive: ${r.motive.totalMi}mi · ${r.motive.totalDriveMin}min</div></div>`);
   }
 
-  // Data health flags
-  if (r.dataHealth && r.dataHealth.length > 0) {
+  // Data health
+  if (r.dataHealth && r.dataHealth.length) {
     const chips = r.dataHealth.map(d => {
       const cls = d.includes('post_route') || d.includes('manual') ? 'post-route' : '';
       return `<span class="dh-chip ${cls}">${d}</span>`;
     }).join('');
-    sections.push(`
-      <div class="detail-section">
-        <div class="h">Data health</div>
-        ${chips}
-      </div>
-    `);
+    parts.push(`<div class="dd-sec"><div class="dh">Data Health Notes</div><div class="dh-chips">${chips}</div></div>`);
   }
 
-  return sections.join('');
+  return parts.join('');
 }
 
-// ---------- Daily Audit ----------
+// ============ Daily Audit ============
 let cachedDates = null;
 async function loadAudit() {
   if (!cachedDates) {
@@ -486,102 +712,151 @@ async function loadAudit() {
   document.getElementById('dateSelect').value = date;
   loadAuditForDate(date);
 }
+
 async function loadAuditForDate(date) {
   const container = document.getElementById('auditContent');
-  container.innerHTML = '<div class="loading">Loading…</div>';
+  container.innerHTML = '<div class="loading">Loading day</div>';
   try {
     const r = await api('byDate', { date });
     const records = r.records;
-    if (records.length === 0) {
-      container.innerHTML = '<div class="empty"><div class="icon">📭</div>No records for ' + date + '</div>';
+    if (!records.length) {
+      container.innerHTML = `<div class="empty"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg><h3>No records</h3><p>Nothing was scanned for ${date}</p></div>`;
       return;
     }
-    // Compute summary stats
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
-    let stolen$ = 0, withData = 0;
+    let stolen$ = 0, withData = 0, withMotive = 0;
     for (const rec of records) {
       dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
       stolen$ += rec.stolenDollars || 0;
       if (rec.b600Matched || rec.nuvizzMatched) withData++;
+      if (rec.motive?.periodsCount) withMotive++;
     }
-    const summary = `
-      <div class="card summary">
-        <div class="summary-headline">${fmtMoney(stolen$.toFixed(2))}</div>
-        <div class="summary-sub">${withData}/${records.length} drivers with data</div>
-        <div class="summary-stats">
-          <div class="stat critical"><div class="n">${dist.critical}</div><div class="l">crit</div></div>
-          <div class="stat high"><div class="n">${dist.high}</div><div class="l">high</div></div>
-          <div class="stat medium"><div class="n">${dist.medium}</div><div class="l">med</div></div>
-          <div class="stat low"><div class="n">${dist.low}</div><div class="l">low</div></div>
-          <div class="stat clean"><div class="n">${dist.clean}</div><div class="l">clean</div></div>
-        </div>
+
+    // Group by severity bucket for visual breakdown
+    const groupOrder = ['critical', 'high', 'medium', 'low', 'clean'];
+    const groups = Object.fromEntries(groupOrder.map(g => [g, []]));
+    for (const rec of records) {
+      const g = groupOrder.includes(rec.riskLevel) ? rec.riskLevel : 'clean';
+      groups[g].push(rec);
+    }
+
+    let html = `
+      <div class="hero">
+        <div class="hero-label">${date}</div>
+        <div class="hero-value num">${fmt$(stolen$.toFixed(2))}</div>
+        <div class="hero-sub">${withData} of ${records.length} drivers w/ data · ${withMotive} w/ Motive</div>
+        <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">${renderDistBar(dist, records.length)}</div>
       </div>
     `;
-    container.innerHTML = summary + '<div id="auditList"></div>';
-    const list = document.getElementById('auditList');
-    for (const rec of records) list.appendChild(renderDriverDayRow(rec, 'audit'));
+    for (const g of groupOrder) {
+      const groupRecs = groups[g];
+      if (!groupRecs.length) continue;
+      const groupTotal = groupRecs.reduce((s, r) => s + (r.stolenDollars || 0), 0);
+      html += `
+        <div class="section">
+          <div class="section-head">
+            <h2>${g} <span style="color:var(--text-4)"> · ${groupRecs.length}</span></h2>
+            <div class="aux num">${fmt$Plain(groupTotal.toFixed(2))}</div>
+          </div>
+          <div id="group-${g}"></div>
+        </div>
+      `;
+    }
+    container.innerHTML = html;
+    for (const g of groupOrder) {
+      const groupRecs = groups[g];
+      if (!groupRecs.length) continue;
+      const list = document.getElementById('group-' + g);
+      for (const rec of groupRecs) list.appendChild(renderDriverDayRow(rec, 'audit'));
+    }
   } catch (e) {
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
   }
 }
-document.getElementById('refreshDate').addEventListener('click', () => {
-  cachedDates = null;
-  loadAudit();
-});
+document.getElementById('refreshDate').addEventListener('click', () => { cachedDates = null; loadAudit(); });
 
-// ---------- Investigations ----------
+// ============ Investigate ============
 let cachedDrivers = null;
-async function loadInvestigationsInit() {
+async function loadInvestigateInit() {
   if (!cachedDrivers) {
     try {
       const r = await api('driverList');
       cachedDrivers = r.drivers;
       const sel = document.getElementById('driverSelect');
-      sel.innerHTML = '<option value="">— select a driver —</option>' +
-        cachedDrivers.map(d => `<option value="${d.slug}">${d.fullName}${d.defaultTruck ? ` (#${d.defaultTruck})` : ''}</option>`).join('');
+      sel.innerHTML = '<option value="">— select driver —</option>' +
+        cachedDrivers.map(d => `<option value="${d.slug}">${d.fullName}${d.defaultTruck ? ' · #' + d.defaultTruck : ''}</option>`).join('');
       sel.addEventListener('change', () => loadDriver(sel.value));
     } catch (e) { return; }
   }
 }
+
 async function loadDriver(slug) {
   const container = document.getElementById('investContent');
   if (!slug) {
-    container.innerHTML = '<div class="empty"><div class="icon">👤</div>Select a driver to see their 12-day history</div>';
+    container.innerHTML = `<div class="empty"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><h3>Pick a driver</h3><p>Select someone from the menu above to see their 12-day pattern</p></div>`;
     return;
   }
-  container.innerHTML = '<div class="loading">Loading…</div>';
+  container.innerHTML = '<div class="loading">Loading driver history</div>';
   try {
     const r = await api('byDriver', { driverSlug: slug });
-    const records = r.records;
-    if (records.length === 0) {
-      container.innerHTML = '<div class="empty"><div class="icon">📭</div>No records found</div>';
+    const records = r.records.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
+    if (!records.length) {
+      container.innerHTML = `<div class="empty"><h3>No data</h3><p>No records found for this driver</p></div>`;
       return;
     }
-    // Aggregate stats
-    let total$ = 0, totalMin = 0, daysWithData = 0;
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
+    let total$ = 0, totalMin = 0, daysWithData = 0, daysFlagged = 0;
+    const display = records[0].displayName;
+    const truck = records[0].truckType;
     for (const rec of records) {
+      dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
       total$ += rec.stolenDollars || 0;
       totalMin += rec.stolenMinutes || 0;
-      dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
       if (rec.b600Matched || rec.nuvizzMatched) daysWithData++;
+      if (['critical','high','medium'].includes(rec.riskLevel)) daysFlagged++;
     }
-    const summary = `
-      <div class="card summary">
-        <div class="summary-headline">${fmtMoney(total$.toFixed(2))}</div>
-        <div class="summary-sub">${(totalMin/60).toFixed(1)}hr unexplained over ${daysWithData}/${records.length} days with data</div>
-        <div class="summary-stats">
-          <div class="stat critical"><div class="n">${dist.critical}</div><div class="l">crit</div></div>
-          <div class="stat high"><div class="n">${dist.high}</div><div class="l">high</div></div>
-          <div class="stat medium"><div class="n">${dist.medium}</div><div class="l">med</div></div>
-          <div class="stat low"><div class="n">${dist.low}</div><div class="l">low</div></div>
-          <div class="stat clean"><div class="n">${dist.clean}</div><div class="l">clean</div></div>
+    const avgPerWorkDay = daysWithData ? total$ / daysWithData : 0;
+
+    // Heatmap: one square per day in chronological order
+    const heatmap = records.map(rec => {
+      const cls = riskCls(rec.riskLevel);
+      const day = parseInt(rec.date.split('-')[2]);
+      return `<div class="heatmap-day ${cls}" title="${rec.date}: ${rec.riskLevel} · $${rec.stolenDollars || 0}">${day}</div>`;
+    }).join('');
+
+    // Find first and last date labels for the axis
+    const firstDate = records[0].date;
+    const lastDate = records[records.length - 1].date;
+
+    container.innerHTML = `
+      <div class="driver-hero">
+        <div class="driver-hero-name">${display}</div>
+        <div class="driver-hero-meta">${truck || 'driver'} · ${records.length} days analyzed · ${daysWithData} w/ data</div>
+        <div class="driver-hero-stat">
+          <div class="item"><div class="v num">${fmt$Plain(total$.toFixed(2))}</div><div class="l">Total Stolen</div></div>
+          <div class="item"><div class="v num">${fmtHr(totalMin)}</div><div class="l">Unexplained</div></div>
+          <div class="item"><div class="v num">${fmt$Plain(avgPerWorkDay.toFixed(2))}</div><div class="l">Avg / day</div></div>
         </div>
+        <div style="margin-top:var(--s-4)">
+          <div class="dh" style="margin-bottom:8px">12-Day Risk Pattern</div>
+          <div class="heatmap">${heatmap}</div>
+          <div class="heatmap-axis"><span>${fmtDate(firstDate)}</span><span>${fmtDate(lastDate)}</span></div>
+        </div>
+        <div style="margin-top:var(--s-4)">${renderDistBar(dist, records.length)}</div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h2>Daily Breakdown</h2>
+          <div class="aux">tap any day to expand</div>
+        </div>
+        <div id="driverDayList"></div>
       </div>
     `;
-    container.innerHTML = summary + '<div id="driverList"></div>';
-    const list = document.getElementById('driverList');
-    for (const rec of records) list.appendChild(renderDriverDayRow(rec, 'investigations'));
+    const list = document.getElementById('driverDayList');
+    // Show descending order (most recent first) for the daily breakdown
+    const desc = records.slice().reverse();
+    for (const rec of desc) list.appendChild(renderDriverDayRow(rec, 'investigate'));
   } catch (e) {
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
   }
@@ -591,74 +866,36 @@ document.getElementById('refreshDriver').addEventListener('click', () => {
   if (sel.value) loadDriver(sel.value);
 });
 
-// ---------- Overview ----------
-async function loadOverview() {
-  const container = document.getElementById('overviewContent');
-  container.innerHTML = '<div class="loading">Loading dashboard…</div>';
-  try {
-    const d = await api('dashboard');
-    const dist = d.dist;
-    let html = `
-      <div class="card summary">
-        <div class="summary-headline">${fmtMoney(d.totalStolen.dollars)}</div>
-        <div class="summary-sub">${d.totalDriverDays} driver-days · ${d.datesPresent.length} days of data · ${(d.totalStolen.minutes/60).toFixed(0)} hr unexplained total</div>
-        <div class="summary-stats">
-          <div class="stat critical"><div class="n">${dist.critical||0}</div><div class="l">crit</div></div>
-          <div class="stat high"><div class="n">${dist.high||0}</div><div class="l">high</div></div>
-          <div class="stat medium"><div class="n">${dist.medium||0}</div><div class="l">med</div></div>
-          <div class="stat low"><div class="n">${dist.low||0}</div><div class="l">low</div></div>
-          <div class="stat clean"><div class="n">${dist.clean||0}</div><div class="l">clean</div></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="detail-section">
-          <div class="h">Annualized run rate</div>
-          <div style="font-size:22px;font-weight:700;letter-spacing:-0.4px">${fmtMoney((d.totalStolen.dollars * 365 / d.datesPresent.length).toFixed(2))}<span style="font-size:13px;color:var(--text-dim);font-weight:400"> / year (× ${d.datesPresent.length}d → 365d)</span></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="detail-section">
-          <div class="h">Top offenders (12-day total)</div>
-          <div id="offenderList"></div>
-        </div>
-      </div>
-    `;
-    container.innerHTML = html;
-    const list = document.getElementById('offenderList');
-    d.topOffenders.forEach((o, i) => {
-      const row = document.createElement('div');
-      row.className = 'offender-row';
-      row.innerHTML = `
-        <div class="offender-rank">${i+1}.</div>
-        <div class="offender-main">
-          <div class="offender-name">${o.displayName || o.slug}</div>
-          <div class="offender-stats">${(o.stolenMinutes/60).toFixed(1)}hr · ${o.criticalDays} crit / ${o.highDays} high · ${o.daysWithData}/${o.days} days with data</div>
-        </div>
-        <div class="offender-stolen">${fmtMoney(o.stolenDollars)}</div>
-      `;
-      row.addEventListener('click', () => {
-        document.querySelector('.tab[data-page="investigations"]').click();
-        setTimeout(() => {
-          const sel = document.getElementById('driverSelect');
-          sel.value = o.slug;
-          loadDriver(o.slug);
-        }, 50);
-      });
-      list.appendChild(row);
-    });
-  } catch (e) {
-    if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
-  }
-}
+// ============ Tab navigation ============
+const pages = {
+  overview: { el: document.getElementById('page-overview'), loader: loadOverview, loaded: false },
+  audit: { el: document.getElementById('page-audit'), loader: loadAudit, loaded: false },
+  investigate: { el: document.getElementById('page-investigate'), loader: loadInvestigateInit, loaded: false }
+};
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    const page = t.dataset.page;
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+    document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+    pages[page].el.classList.add('active');
+    if (!pages[page].loaded || page === 'overview') {
+      pages[page].loader();
+      pages[page].loaded = true;
+    }
+  });
+});
 
-// ---------- Settings modal ----------
+// ============ Settings modal ============
 document.getElementById('openSettings').addEventListener('click', () => {
   document.getElementById('secretInput').value = getSecret();
+  document.getElementById('secretError').style.display = 'none';
   document.getElementById('settingsModal').classList.add('open');
-  // Refresh data scope display
-  api('dashboard').then(d => {
-    document.getElementById('dataScopeDisplay').textContent = `${d.totalDriverDays} records · ${d.datesPresent[0]} to ${d.datesPresent[d.datesPresent.length-1]}`;
-  }).catch(() => {});
+  if (getSecret()) {
+    api('dashboard').then(d => {
+      document.getElementById('dataScopeDisplay').textContent =
+        `${d.totalDriverDays} records · ${d.datesPresent[0]} → ${d.datesPresent[d.datesPresent.length-1]}`;
+    }).catch(() => {});
+  }
 });
 document.getElementById('closeSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
@@ -666,16 +903,11 @@ document.getElementById('closeSettings').addEventListener('click', () => {
 document.getElementById('saveSecret').addEventListener('click', async () => {
   const entered = document.getElementById('secretInput').value.trim();
   const errEl = document.getElementById('secretError');
-  errEl.style.display = 'none';
-  if (!entered) {
-    errEl.textContent = 'Paste the secret first';
-    errEl.style.display = 'block';
-    return;
-  }
-  // Verify by hitting the server BEFORE saving locally
   const btn = document.getElementById('saveSecret');
+  errEl.style.display = 'none';
+  if (!entered) { errEl.textContent = 'Paste the secret first'; errEl.style.display = 'block'; return; }
   const origText = btn.textContent;
-  btn.textContent = 'Verifying...';
+  btn.textContent = 'Verifying…';
   btn.disabled = true;
   try {
     const qs = new URLSearchParams({ secret: entered, action: 'dates' });
@@ -683,49 +915,39 @@ document.getElementById('saveSecret').addEventListener('click', async () => {
     if (res.status === 401) {
       errEl.textContent = 'Wrong secret — check for typos, caps, or extra spaces';
       errEl.style.display = 'block';
-      btn.textContent = origText;
-      btn.disabled = false;
-      return;
-    }
-    if (!res.ok) {
-      errEl.textContent = `Server returned HTTP ${res.status}`;
+    } else if (!res.ok) {
+      errEl.textContent = 'Server HTTP ' + res.status;
       errEl.style.display = 'block';
-      btn.textContent = origText;
-      btn.disabled = false;
+    } else {
+      setSecret(entered);
+      document.getElementById('settingsModal').classList.remove('open');
+      Object.values(pages).forEach(p => p.loaded = false);
+      cachedDates = null; cachedDrivers = null;
+      loadOverview();
+      pages.overview.loaded = true;
       return;
     }
-    // Success — save and load
-    setSecret(entered);
-    document.getElementById('settingsModal').classList.remove('open');
-    cachedDates = null; cachedDrivers = null;
-    loadAudit();
   } catch (e) {
     errEl.textContent = 'Network error: ' + e.message;
     errEl.style.display = 'block';
-    btn.textContent = origText;
-    btn.disabled = false;
   }
+  btn.textContent = origText;
+  btn.disabled = false;
 });
 
-// ---------- Boot ----------
-function showFirstRunWelcome() {
-  const welcome = `
-    <div class="empty">
-      <div class="icon">🔑</div>
-      <div style="font-size:16px;color:var(--text);margin-bottom:6px">Welcome to SENTINEL</div>
-      <div style="font-size:13px;line-height:1.5;max-width:280px;margin:0 auto">
-        Paste your access secret in the Settings drawer below, then tap Save &amp; reload.
-      </div>
+// ============ Boot ============
+if (!getSecret()) {
+  document.getElementById('overviewContent').innerHTML = `
+    <div class="empty" style="padding-top:80px">
+      <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <h3>Welcome to SENTINEL</h3>
+      <p>Paste your access secret in the Settings drawer to load the dashboard</p>
     </div>
   `;
-  document.getElementById('auditContent').innerHTML = welcome;
-}
-
-if (!getSecret()) {
-  showFirstRunWelcome();
   document.getElementById('settingsModal').classList.add('open');
 } else {
-  loadAudit();
+  loadOverview();
+  pages.overview.loaded = true;
 }
 </script>
 </body>
