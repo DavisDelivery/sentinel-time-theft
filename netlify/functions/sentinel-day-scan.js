@@ -20,7 +20,7 @@ import { getDb } from './_firebase-admin.js';
 import { travelFromYard, travelToYard } from './_distance.js';
 import { scoreDriverDay, parseNuvizzDeliveryEnd, runSelfTest } from './_sentinel-engine.js';
 
-const VERSION = 'v4.0.1-phase1';
+const VERSION = 'v4.0.2-phase1';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -148,7 +148,15 @@ async function getNuvizzStops(db, employee, date) {
     limit: 2000
   });
   const nuvizzName = employee?.externalIds?.nuvizz || employee?.fullName;
-  if (!nuvizzName) return [];
+  const diag = {
+    rowsScannedForDate: rows.length,
+    driverNameMatches: 0,
+    statusBreakdown: {},
+    countedAsComplete: 0,
+    skippedNoTime: 0,
+    manualCompletions: 0
+  };
+  if (!nuvizzName) return { matches: [], diag: { ...diag, reason: 'no nuvizz external ID on employee' } };
 
   // Normalize for fuzzy matching: collapse whitespace, lowercase
   const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -158,20 +166,37 @@ async function getNuvizzStops(db, employee, date) {
   for (const r of rows) {
     const raw = r.raw || {};
     if (norm(raw['driver name']) !== target) continue;
-    if ((raw['stop status'] || '').toLowerCase() !== 'completed') continue;
+    diag.driverNameMatches++;
+
+    const status = raw['stop status'] || '(none)';
+    diag.statusBreakdown[status] = (diag.statusBreakdown[status] || 0) + 1;
+
+    // Treat anything with "complet" in the status as a delivered stop.
+    // Covers "Completed" (auto-completed by driver) and "Manually Completed"
+    // (closed by dispatch when driver has device trouble) and any other variant.
+    if (!status.toLowerCase().includes('complet')) continue;
+
     const deliveryEnd = parseNuvizzDeliveryEnd(raw['delivery end']);
-    if (!deliveryEnd) continue;
+    if (!deliveryEnd) {
+      diag.skippedNoTime++;
+      continue;
+    }
+
+    if (status.toLowerCase() !== 'completed') diag.manualCompletions++;
+    diag.countedAsComplete++;
+
     matches.push({
       pro: r.pro,
       deliveryEnd,
       shipTo: raw['ship to'],
       shipToName: raw['ship to name'],
       city: raw['ship to - city'],
-      zip: raw['ship to - zip code']
+      zip: raw['ship to - zip code'],
+      status
     });
   }
   matches.sort((a, b) => a.deliveryEnd - b.deliveryEnd);
-  return matches;
+  return { matches, diag };
 }
 
 // ---------- Main scan ----------
@@ -191,7 +216,7 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
   const punch = await getB600Punch(db, employee, date);
 
   // NuVizz stops
-  const stops = await getNuvizzStops(db, employee, date);
+  const { matches: stops, diag: nuvizzDiag } = await getNuvizzStops(db, employee, date);
   const firstStop = stops[0] || null;
   const lastStop = stops.length > 0 ? stops[stops.length - 1] : null;
 
@@ -235,6 +260,13 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
   });
 
   // Write
+  // Post-engine: append manual-completions note to dataHealth (informational, not theft)
+  if (nuvizzDiag.manualCompletions > 0) {
+    result.dataHealth.push(`manual_completions:${nuvizzDiag.manualCompletions}`);
+  }
+  if (nuvizzDiag.skippedNoTime > 0) {
+    result.dataHealth.push(`stops_with_unparseable_time:${nuvizzDiag.skippedNoTime}`);
+  }
   await db.setDoc('sentinelDriverDays', result._id, result);
 
   return {
@@ -244,9 +276,11 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
       truckType,
       truckTypeMapSize: Object.keys(truckTypeMap.trucks).length,
       b600Match: punch ? { matchedOn: punch.matchedOn, clockIn: punch.clockIn, clockOut: punch.clockOut } : null,
-      nuvizzStopsFound: stops.length,
-      firstStop: firstStop ? { customer: firstStop.shipToName, time: firstStop.deliveryEnd?.toISOString() } : null,
-      lastStop: lastStop ? { customer: lastStop.shipToName, time: lastStop.deliveryEnd?.toISOString() } : null,
+      nuvizzDiag,
+      stopsSummary: stops.map(s => ({
+        pro: s.pro, time: s.deliveryEnd.toISOString().slice(11, 16),
+        customer: s.shipToName, zip: s.zip, status: s.status
+      })),
       travelToFirst,
       travelFromLast
     }
