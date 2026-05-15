@@ -256,7 +256,8 @@ body { padding-top: env(safe-area-inset-top); padding-bottom: calc(60px + env(sa
     <h2>Settings <button id="closeSettings">✕</button></h2>
     <div class="row-setting">
       <div class="label">Access Secret</div>
-      <input type="password" id="secretInput" placeholder="paste secret to enable">
+      <input type="text" id="secretInput" placeholder="paste secret here" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false">
+      <div id="secretError" style="color:var(--risk-critical);font-size:12px;margin:6px 0;display:none"></div>
       <button class="primary" id="saveSecret">Save & reload</button>
     </div>
     <div class="row-setting">
@@ -662,11 +663,48 @@ document.getElementById('openSettings').addEventListener('click', () => {
 document.getElementById('closeSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
 });
-document.getElementById('saveSecret').addEventListener('click', () => {
-  setSecret(document.getElementById('secretInput').value.trim());
-  document.getElementById('settingsModal').classList.remove('open');
-  cachedDates = null; cachedDrivers = null;
-  loadAudit();
+document.getElementById('saveSecret').addEventListener('click', async () => {
+  const entered = document.getElementById('secretInput').value.trim();
+  const errEl = document.getElementById('secretError');
+  errEl.style.display = 'none';
+  if (!entered) {
+    errEl.textContent = 'Paste the secret first';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Verify by hitting the server BEFORE saving locally
+  const btn = document.getElementById('saveSecret');
+  const origText = btn.textContent;
+  btn.textContent = 'Verifying...';
+  btn.disabled = true;
+  try {
+    const qs = new URLSearchParams({ secret: entered, action: 'dates' });
+    const res = await fetch('/api/sentinel-read?' + qs);
+    if (res.status === 401) {
+      errEl.textContent = 'Wrong secret — check for typos, caps, or extra spaces';
+      errEl.style.display = 'block';
+      btn.textContent = origText;
+      btn.disabled = false;
+      return;
+    }
+    if (!res.ok) {
+      errEl.textContent = `Server returned HTTP ${res.status}`;
+      errEl.style.display = 'block';
+      btn.textContent = origText;
+      btn.disabled = false;
+      return;
+    }
+    // Success — save and load
+    setSecret(entered);
+    document.getElementById('settingsModal').classList.remove('open');
+    cachedDates = null; cachedDrivers = null;
+    loadAudit();
+  } catch (e) {
+    errEl.textContent = 'Network error: ' + e.message;
+    errEl.style.display = 'block';
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
 });
 
 // ---------- Boot ----------
