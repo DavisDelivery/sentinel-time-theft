@@ -19,8 +19,9 @@
 import { getDb } from './_firebase-admin.js';
 import { travelFromYard, travelToYard } from './_distance.js';
 import { scoreDriverDay, parseNuvizzDeliveryEnd, runSelfTest } from './_sentinel-engine.js';
+import { getDrivingPeriods, classifyDestinations, summarizePeriods, parseZipFromAddress } from './_motive.js';
 
-const VERSION = 'v4.0.3-phase1';
+const VERSION = 'v4.0.4-phase1c-preview';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -304,6 +305,59 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
   if (postClockoutStops.length > 0) {
     result.dataHealth.push(`post_clockout_completions:${postClockoutStops.length}`);
   }
+
+  // ---------- Phase 1c preview: Motive in-route (Flag Class 3) ----------
+  // For this iteration we FETCH and CLASSIFY Motive driving periods, then
+  // surface the off-route destinations in result.motive AND debug output.
+  // We do NOT yet fold the signal into riskScore — operator eyeball pass first.
+  const motiveId = employee?.externalIds?.motive;
+  const yardZip = '30518'; // Davis Delivery yard (Buford GA)
+  let motiveDebug = { skipped: true, reason: 'no motive id on employee' };
+  if (motiveId) {
+    try {
+      const { periods: rawPeriods, raw } = await getDrivingPeriods(motiveId, date);
+      const customerZipSet = new Set(allStops.map(s => s.zip).filter(Boolean));
+      const classified = classifyDestinations(rawPeriods, yardZip, customerZipSet);
+      const summary = summarizePeriods(classified);
+
+      result.motive = {
+        driverId: motiveId,
+        periodsCount: classified.length,
+        totalMi: summary.totalMi,
+        totalDriveMin: summary.totalDriveMin,
+        offRouteVisits: summary.offRouteVisits,
+        offRouteZips: summary.offRouteZips,
+        customerZips: [...customerZipSet],
+        yardZip
+      };
+      if (summary.offRouteCount > 0) {
+        result.dataHealth.push(`motive_off_route_visits:${summary.offRouteCount}`);
+      }
+      motiveDebug = {
+        skipped: false,
+        motiveDriverId: motiveId,
+        rawTotalReported: raw.total,
+        fetched: raw.fetched,
+        periodsClassified: classified.map(p => ({
+          startET: p.startDt?.toISOString().slice(11, 16),
+          endET: p.endDt?.toISOString().slice(11, 16),
+          durMin: p.durationMin,
+          mi: p.distanceMi,
+          origin: p.originAddr?.slice(0, 45),
+          dest: p.destAddr?.slice(0, 45),
+          destZip: p.destZip,
+          destClass: p.destClass
+        })),
+        summary
+      };
+    } catch (err) {
+      motiveDebug = { skipped: true, reason: `motive fetch failed: ${err.message}` };
+      result.dataHealth.push('motive_fetch_failed');
+    }
+  } else {
+    result.dataHealth.push('no_motive_id_on_employee');
+  }
+
   await db.setDoc('sentinelDriverDays', result._id, result);
 
   return {
@@ -330,7 +384,8 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
         lastUsedForAnchor: (lastStop && lastStop !== firstStop) ? { pro: lastStop.pro, time: lastStop.deliveryEnd.toISOString().slice(11, 16), customer: lastStop.shipToName } : null
       },
       travelToFirst,
-      travelFromLast
+      travelFromLast,
+      motive: motiveDebug
     }
   };
 }
