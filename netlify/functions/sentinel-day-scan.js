@@ -21,7 +21,7 @@ import { travelFromYard, travelToYard } from './_distance.js';
 import { scoreDriverDay, parseNuvizzDeliveryEnd, runSelfTest } from './_sentinel-engine.js';
 import { getDrivingPeriods, classifyDestinations, summarizePeriods, parseZipFromAddress } from './_motive.js';
 
-const VERSION = 'v4.0.4-phase1c-preview';
+const VERSION = 'v4.0.5-phase1c';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -45,7 +45,9 @@ const DEFAULT_DEFAULTS = {
   wrapUpMin: 15,
   wageRates: { tractor: 27.50, straight: 23.00, unknown: 25.00 },
   morningGapStaticThresholds: { ok: 30, warn: 60, flag: 90 },
-  afternoonGapStaticThresholds: { ok: 30, warn: 60, flag: 90 }
+  afternoonGapStaticThresholds: { ok: 30, warn: 60, flag: 90 },
+  yardZips: ['30518', '30542'],
+  inRouteStaticThresholds: { ok: 15, warn: 30, flag: 60 }
 };
 
 // ---------- Config bootstrap ----------
@@ -53,14 +55,30 @@ const DEFAULT_DEFAULTS = {
 async function loadOrBootstrapDefaults(db) {
   let doc;
   try { doc = await db.getDoc('sentinelConfig', 'defaults'); } catch (e) { doc = null; }
-  if (doc && doc.loadPrepMin != null) return doc;
-  const fresh = {
-    ...DEFAULT_DEFAULTS,
-    generatedAt: new Date().toISOString(),
-    version: 1
-  };
-  await db.setDoc('sentinelConfig', 'defaults', fresh);
-  return fresh;
+  if (!doc || doc.loadPrepMin == null) {
+    const fresh = {
+      ...DEFAULT_DEFAULTS,
+      generatedAt: new Date().toISOString(),
+      version: 1
+    };
+    await db.setDoc('sentinelConfig', 'defaults', fresh);
+    return fresh;
+  }
+  // Auto-merge any missing keys (e.g. yardZips added in v4.0.5) without
+  // overwriting fields the operator may have customized.
+  let needsUpdate = false;
+  const merged = { ...doc };
+  for (const [key, value] of Object.entries(DEFAULT_DEFAULTS)) {
+    if (merged[key] == null) {
+      merged[key] = value;
+      needsUpdate = true;
+    }
+  }
+  if (needsUpdate) {
+    merged.lastMigrated = new Date().toISOString();
+    await db.setDoc('sentinelConfig', 'defaults', merged);
+  }
+  return merged;
 }
 
 async function loadOrBootstrapTruckTypeMap(db) {
@@ -306,30 +324,151 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
     result.dataHealth.push(`post_clockout_completions:${postClockoutStops.length}`);
   }
 
-  // ---------- Phase 1c preview: Motive in-route (Flag Class 3) ----------
-  // For this iteration we FETCH and CLASSIFY Motive driving periods, then
-  // surface the off-route destinations in result.motive AND debug output.
-  // We do NOT yet fold the signal into riskScore — operator eyeball pass first.
+  // ---------- Phase 1c: Motive in-route (Flag Class 3) ----------
   const motiveId = employee?.externalIds?.motive;
-  const yardZip = '30518'; // Davis Delivery yard (Buford GA)
+  // Refinement A: yard isn't a single ZIP. Motive geocodes the yard address as
+  // both 30518 (real) and 30542 (nearby) inconsistently. Accept both as "yard".
+  // Operator can edit /sentinelConfig/defaults.yardZips at any time.
+  const yardZips = defaults.yardZips || ['30518', '30542'];
   let motiveDebug = { skipped: true, reason: 'no motive id on employee' };
   if (motiveId) {
     try {
       const { periods: rawPeriods, raw } = await getDrivingPeriods(motiveId, date);
+
+      // Refinement B: filter to within shift window (clockIn − 30min, clockOut + 30min).
+      // Late-night yard moves attributed to whoever last logged in shouldn't count
+      // against this driver. If we have no B600 punch, fall back to using all periods.
+      const buffer = 30 * 60 * 1000; // 30 minutes in ms
+      const windowStart = clockInDt ? new Date(clockInDt.getTime() - buffer) : null;
+      const windowEnd = clockOutDt ? new Date(clockOutDt.getTime() + buffer) : null;
+      const inWindow = rawPeriods.filter(p => {
+        if (!p.startDt) return false;
+        if (windowStart && p.startDt < windowStart) return false;
+        if (windowEnd && p.startDt > windowEnd) return false;
+        return true;
+      });
+      const outOfWindow = rawPeriods.length - inWindow.length;
+
       const customerZipSet = new Set(allStops.map(s => s.zip).filter(Boolean));
-      const classified = classifyDestinations(rawPeriods, yardZip, customerZipSet);
+      // Pass yardZips as Set for classifyDestinations
+      const yardZipSet = new Set(yardZips.map(String));
+      const classified = inWindow.map(p => {
+        let cls = 'unknown';
+        if (!p.destZip) cls = 'unknown';
+        else if (yardZipSet.has(p.destZip)) cls = 'yard';
+        else if (customerZipSet.has(p.destZip)) cls = 'customer';
+        else cls = 'off_route';
+        return { ...p, destClass: cls };
+      });
       const summary = summarizePeriods(classified);
+
+      // Partition off-route visits by which gap window they fall in
+      // (pre-route, in-route, post-route) for double-count avoidance.
+      const firstDeliveryDt = firstStop?.deliveryEnd || null;
+      const lastDeliveryDt = (lastStop && lastStop !== firstStop) ? lastStop.deliveryEnd : firstDeliveryDt;
+      const partitionVisit = (v) => {
+        // v has start time as the period start, but visits also include stationary
+        // time after. We use the period's startDt for partitioning since that's
+        // when the off-route activity *began*. Match against route window.
+        if (!firstDeliveryDt || !lastDeliveryDt) return 'unknown';
+        const visitStart = v._startDt;
+        if (visitStart < firstDeliveryDt) return 'pre_route';
+        if (visitStart > lastDeliveryDt) return 'post_route';
+        return 'in_route';
+      };
+      const offRoutePeriods = classified.filter(p => p.destClass === 'off_route');
+      const offRouteVisits = offRoutePeriods.map((p, idx) => {
+        const idxInAll = classified.indexOf(p);
+        const next = classified[idxInAll + 1];
+        const stationarySec = next?.startDt && p.endDt ? Math.max(0, (next.startDt - p.endDt) / 1000) : 0;
+        const visit = {
+          _startDt: p.startDt,
+          arrivedAt: p.endDt ? p.endDt.toISOString().slice(11, 16) : null,
+          leftAt: next?.startDt ? next.startDt.toISOString().slice(11, 16) : null,
+          destAddr: p.destAddr,
+          destZip: p.destZip,
+          stationaryMin: Math.round(stationarySec / 60),
+          driveMinToReach: p.durationMin,
+          driveMi: p.distanceMi
+        };
+        visit.window = partitionVisit(visit);
+        delete visit._startDt;
+        return visit;
+      });
+
+      // Compute in-route off-route minutes (the Class 3 signal — strictly the
+      // off-route time between first and last delivery, to avoid double-counting
+      // with morning/afternoon gaps which already cover pre/post-route idle).
+      const inRouteOffRouteMin = offRouteVisits
+        .filter(v => v.window === 'in_route')
+        .reduce((s, v) => s + v.driveMinToReach + v.stationaryMin, 0);
 
       result.motive = {
         driverId: motiveId,
         periodsCount: classified.length,
         totalMi: summary.totalMi,
         totalDriveMin: summary.totalDriveMin,
-        offRouteVisits: summary.offRouteVisits,
+        offRouteVisits,
         offRouteZips: summary.offRouteZips,
         customerZips: [...customerZipSet],
-        yardZip
+        yardZips,
+        inRouteOffRouteMin
       };
+
+      // Class 3 flag against static thresholds
+      const t = defaults.inRouteStaticThresholds || { ok: 15, warn: 30, flag: 60 };
+      let inRouteFlag = 'ok';
+      if (inRouteOffRouteMin > t.flag) inRouteFlag = 'critical';
+      else if (inRouteOffRouteMin > t.warn) inRouteFlag = 'flag';
+      else if (inRouteOffRouteMin > t.ok) inRouteFlag = 'warn';
+      result.inRouteFlag = inRouteFlag;
+      result.inRouteOffRouteMin = inRouteOffRouteMin;
+
+      // Class 3 contribution to riskScore (same weights as morning/afternoon)
+      const FLAG_TO_SCORE = { ok: 0, warn: 10, flag: 25, critical: 40, no_data: 0 };
+      const class3Contribution = FLAG_TO_SCORE[inRouteFlag] || 0;
+      result.riskScore = (result.riskScore || 0) + class3Contribution;
+      // Re-derive risk level from updated score
+      if (result.riskScore >= 70) result.riskLevel = 'critical';
+      else if (result.riskScore >= 45) result.riskLevel = 'high';
+      else if (result.riskScore >= 25) result.riskLevel = 'medium';
+      else if (result.riskScore >= 10) result.riskLevel = 'low';
+      else result.riskLevel = 'clean';
+
+      // Add stolen-minute attribution for in-route off-route (over the "ok" floor)
+      const stolenFromInRoute = Math.max(0, inRouteOffRouteMin - t.ok);
+      result.stolenMinutes = (result.stolenMinutes || 0) + stolenFromInRoute;
+      const wage = (defaults.wageRates[result.truckType] != null) ? defaults.wageRates[result.truckType] : defaults.wageRates.unknown;
+      result.stolenDollars = +((result.stolenMinutes / 60) * wage).toFixed(2);
+
+      // Add flag entry to result.flags
+      if (inRouteFlag !== 'ok' && inRouteFlag !== 'no_data') {
+        const inRouteVisits = offRouteVisits.filter(v => v.window === 'in_route');
+        const evidenceLocations = inRouteVisits
+          .map(v => `${v.destZip}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}`)
+          .join(', ');
+        result.flags.push({
+          kind: 'in_route_off_route',
+          severity: inRouteFlag,
+          evidence: `${inRouteOffRouteMin} min of off-route activity between first and last delivery. Locations: ${evidenceLocations}.`,
+          deltaMin: inRouteOffRouteMin
+        });
+      }
+
+      // Annotate post-route off-route as evidence on the afternoon flag (not its
+      // own riskScore contribution — the afternoon gap already covers this time)
+      const postRouteVisits = offRouteVisits.filter(v => v.window === 'post_route');
+      if (postRouteVisits.length > 0) {
+        const afternoonFlag = result.flags.find(f => f.kind === 'afternoon_gap');
+        const detourSummary = postRouteVisits
+          .map(v => `${v.destZip}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}${v.driveMi > 1 ? ` via ${v.driveMi}mi detour` : ''}`)
+          .join(', ');
+        if (afternoonFlag) {
+          afternoonFlag.evidence += ` Motive shows detour to: ${detourSummary}.`;
+        }
+        result.dataHealth.push(`motive_post_route_detour:${postRouteVisits.length}`);
+      }
+
       if (summary.offRouteCount > 0) {
         result.dataHealth.push(`motive_off_route_visits:${summary.offRouteCount}`);
       }
@@ -338,6 +477,7 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
         motiveDriverId: motiveId,
         rawTotalReported: raw.total,
         fetched: raw.fetched,
+        filteredOutOfWindow: outOfWindow,
         periodsClassified: classified.map(p => ({
           startET: p.startDt?.toISOString().slice(11, 16),
           endET: p.endDt?.toISOString().slice(11, 16),
@@ -348,7 +488,8 @@ async function scanOneDriverDay({ driverSlug, date, scanId }) {
           destZip: p.destZip,
           destClass: p.destClass
         })),
-        summary
+        summary,
+        inRouteOffRouteMin
       };
     } catch (err) {
       motiveDebug = { skipped: true, reason: `motive fetch failed: ${err.message}` };
