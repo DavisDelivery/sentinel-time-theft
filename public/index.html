@@ -670,7 +670,21 @@ document.getElementById('saveSecret').addEventListener('click', () => {
 });
 
 // ---------- Boot ----------
+function showFirstRunWelcome() {
+  const welcome = `
+    <div class="empty">
+      <div class="icon">🔑</div>
+      <div style="font-size:16px;color:var(--text);margin-bottom:6px">Welcome to SENTINEL</div>
+      <div style="font-size:13px;line-height:1.5;max-width:280px;margin:0 auto">
+        Paste your access secret in the Settings drawer below, then tap Save &amp; reload.
+      </div>
+    </div>
+  `;
+  document.getElementById('auditContent').innerHTML = welcome;
+}
+
 if (!getSecret()) {
+  showFirstRunWelcome();
   document.getElementById('settingsModal').classList.add('open');
 } else {
   loadAudit();
