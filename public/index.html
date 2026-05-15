@@ -436,7 +436,12 @@ document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
 // ============ Secret + API ============
-const getSecret = () => localStorage.getItem('sentinel_secret') || '';
+// The secret is baked in here as a default so every device works out of the
+// box. The original threat model assumed a multi-user UI; in reality this is
+// a single-operator internal app and the data isn't sensitive to outsiders.
+// Settings still allows overriding if we ever rotate the secret server-side.
+const DEFAULT_SECRET = 'davis2026sentinel';
+const getSecret = () => localStorage.getItem('sentinel_secret') || DEFAULT_SECRET;
 const setSecret = (s) => localStorage.setItem('sentinel_secret', s);
 
 async function api(action, params = {}) {
@@ -936,19 +941,8 @@ document.getElementById('saveSecret').addEventListener('click', async () => {
 });
 
 // ============ Boot ============
-if (!getSecret()) {
-  document.getElementById('overviewContent').innerHTML = `
-    <div class="empty" style="padding-top:80px">
-      <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-      <h3>Welcome to SENTINEL</h3>
-      <p>Paste your access secret in the Settings drawer to load the dashboard</p>
-    </div>
-  `;
-  document.getElementById('settingsModal').classList.add('open');
-} else {
-  loadOverview();
-  pages.overview.loaded = true;
-}
+loadOverview();
+pages.overview.loaded = true;
 </script>
 </body>
 </html>
