@@ -235,6 +235,13 @@ body {
 .flag-card .kind.flag { color: var(--high); }
 .flag-card .kind.critical { color: var(--crit); }
 .flag-card .ev { font-size: var(--fs-md); line-height: 1.5; margin-top: 4px; padding-left: var(--s-2); }
+.flag-card .src {
+  font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: none;
+  padding: 1px 6px; border-radius: 3px; margin-left: 6px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.flag-card .src.src-baseline { background: var(--brand-2); color: var(--brand); }
+.flag-card .src.src-static { background: var(--bg-3); color: var(--text-3); }
 .visit-row {
   display: grid; grid-template-columns: 50px 1fr auto; gap: var(--s-3);
   font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px solid var(--line);
@@ -423,7 +430,17 @@ body {
       <div id="secretError" style="color:var(--crit);font-size:12px;margin-top:6px;display:none"></div>
       <button class="primary" id="saveSecret">Save &amp; Reload</button>
     </div>
-    <div class="field"><div class="l">App Version</div><div class="v mono" id="versionDisplay">v4.0.5-phase1c</div></div>
+    <div class="field"><div class="l">App Version</div><div class="v mono" id="versionDisplay">v4.0.6-phase3</div></div>
+    <div class="field">
+      <div class="l">Baselines</div>
+      <button class="primary" id="recomputeBaselines" style="margin-top:0">Recompute Baselines</button>
+      <div id="recomputeBaselinesStatus" class="v mono" style="margin-top:8px;color:var(--text-3)"></div>
+    </div>
+    <div class="field">
+      <div class="l">Rescore</div>
+      <button class="primary" id="rescoreAll" style="margin-top:0">Re-score All Records</button>
+      <div id="rescoreAllStatus" class="v mono" style="margin-top:8px;color:var(--text-3)"></div>
+    </div>
     <div class="field"><div class="l">Yard ZIP Variants</div><div class="v mono" id="yardZipsDisplay">30518, 30542</div></div>
     <div class="field"><div class="l">Static Thresholds (min)</div><div class="v mono" style="line-height:1.6">morn ok≤30 / warn≤60 / flag≤90<br>aft ok≤30 / warn≤60 / flag≤90<br>in-route ok≤15 / warn≤30 / flag≤60</div></div>
     <div class="field"><div class="l">Data Scope</div><div class="v mono" id="dataScopeDisplay">Loading…</div></div>
@@ -431,7 +448,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.0.5-phase1c';
+const APP_VERSION = 'v4.0.6-phase3';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -562,6 +579,24 @@ async function loadOverview() {
         <div class="card">${renderDistBar(dist, total)}</div>
       </div>
 
+      ${d.baselines ? `
+        <div class="section">
+          <div class="section-head">
+            <h2>Baselines</h2>
+            <div class="aux">${d.baselines.recordsScoredAgainst} of ${total} flags vs baseline</div>
+          </div>
+          <div class="card">
+            <div style="display:flex;gap:var(--s-4);flex-wrap:wrap;font-size:var(--fs-md)">
+              <div><span class="num" style="font-weight:700">${d.baselines.total}</span> <span style="color:var(--text-3)">drivers</span></div>
+              <div><span class="num" style="font-weight:700;color:var(--clean)">${d.baselines.byConfidence.high || 0}</span> <span style="color:var(--text-3)">high</span></div>
+              <div><span class="num" style="font-weight:700;color:var(--low)">${d.baselines.byConfidence.medium || 0}</span> <span style="color:var(--text-3)">medium</span></div>
+              <div><span class="num" style="font-weight:700;color:var(--med)">${d.baselines.byConfidence.low || 0}</span> <span style="color:var(--text-3)">low</span></div>
+              <div><span class="num" style="font-weight:700;color:var(--text-4)">${d.baselines.byConfidence.insufficient || 0}</span> <span style="color:var(--text-3)">insufficient</span></div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
       <div class="section">
         <div class="section-head">
           <h2>Top Offenders · 12-day Total</h2>
@@ -660,7 +695,7 @@ function renderDetail(r) {
         <span class="k">Truck</span><span class="v">${r.truckType || '?'}</span>
         <span class="k">Stops</span><span class="v">${r.completedStops || 0} delivered</span>
         <span class="k">Score</span><span class="v">${r.riskScore} · ${r.riskLevel}</span>
-        <span class="k">Stolen</span><span class="v">${r.stolenMinutes || 0}m · ${fmt$Plain(r.stolenDollars || 0)}</span>
+        <span class="k">Unexplained</span><span class="v">${r.stolenMinutes || 0}m · ${fmt$Plain(r.stolenDollars || 0)}</span>
         ${bookends.join('')}
       </div>
     </div>
@@ -668,12 +703,17 @@ function renderDetail(r) {
 
   // Flags
   if (r.flags && r.flags.length) {
-    const flagsHtml = r.flags.map(f => `
-      <div class="flag-card ${flagCls(f.severity)}">
-        <div class="kind ${flagCls(f.severity)}">${f.kind.replace(/_/g, ' ')} · ${f.severity}</div>
-        <div class="ev">${f.evidence}</div>
-      </div>
-    `).join('');
+    const flagsHtml = r.flags.map(f => {
+      const usedBaseline = f.severitySource === 'baseline';
+      const srcLabel = usedBaseline ? '(vs your baseline)' : '(static threshold)';
+      const srcCls = usedBaseline ? 'src-baseline' : 'src-static';
+      return `
+        <div class="flag-card ${flagCls(f.severity)}">
+          <div class="kind ${flagCls(f.severity)}">${f.kind.replace(/_/g, ' ')} · ${f.severity} <span class="src ${srcCls}">${srcLabel}</span></div>
+          <div class="ev">${f.evidence}</div>
+        </div>
+      `;
+    }).join('');
     parts.push(`<div class="dd-sec"><div class="dh">Why this flagged</div>${flagsHtml}</div>`);
   }
 
@@ -795,6 +835,7 @@ async function loadInvestigateInit() {
   }
 }
 
+let currentBaseline = null;
 async function loadDriver(slug) {
   const container = document.getElementById('investContent');
   if (!slug) {
@@ -804,6 +845,7 @@ async function loadDriver(slug) {
   container.innerHTML = '<div class="loading">Loading driver history</div>';
   try {
     const r = await api('byDriver', { driverSlug: slug });
+    currentBaseline = r.baseline || null;
     const records = r.records.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
     if (!records.length) {
       container.innerHTML = `<div class="empty"><h3>No data</h3><p>No records found for this driver</p></div>`;
@@ -833,13 +875,31 @@ async function loadDriver(slug) {
     const firstDate = records[0].date;
     const lastDate = records[records.length - 1].date;
 
+    // "Your Typical Day" panel — only renders when the driver has a baseline
+    let typicalHtml = '';
+    if (currentBaseline?.metrics) {
+      const m = currentBaseline.metrics;
+      const fmtP = v => (v == null ? '—' : `${Math.round(v)}m`);
+      const fmtSph = v => (v == null ? '—' : v.toFixed(2));
+      typicalHtml = `
+        <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
+          <div class="dh" style="margin-bottom:8px">Your Typical Day <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· baseline confidence: ${currentBaseline.confidence} (n=${currentBaseline.daysAnalyzed})</span></div>
+          <div class="driver-hero-stat">
+            <div class="item"><div class="v num">${fmtP(m.morningGapMin?.p50)}</div><div class="l">P50 Morning Gap</div></div>
+            <div class="item"><div class="v num">${fmtP(m.afternoonGapMin?.p50)}</div><div class="l">P50 Afternoon Gap</div></div>
+            <div class="item"><div class="v num">${fmtSph(m.stopsPerHour?.p50)}</div><div class="l">P50 Stops / hr</div></div>
+          </div>
+        </div>
+      `;
+    }
+
     container.innerHTML = `
       <div class="driver-hero">
         <div class="driver-hero-name">${display}</div>
         <div class="driver-hero-meta">${truck || 'driver'} · ${records.length} days analyzed · ${daysWithData} w/ data</div>
         <div class="driver-hero-stat">
-          <div class="item"><div class="v num">${fmt$Plain(total$.toFixed(2))}</div><div class="l">Total Stolen</div></div>
-          <div class="item"><div class="v num">${fmtHr(totalMin)}</div><div class="l">Unexplained</div></div>
+          <div class="item"><div class="v num">${fmt$Plain(total$.toFixed(2))}</div><div class="l">Unexplained</div></div>
+          <div class="item"><div class="v num">${fmtHr(totalMin)}</div><div class="l">Unexplained hrs</div></div>
           <div class="item"><div class="v num">${fmt$Plain(avgPerWorkDay.toFixed(2))}</div><div class="l">Avg / day</div></div>
         </div>
         <div style="margin-top:var(--s-4)">
@@ -848,6 +908,7 @@ async function loadDriver(slug) {
           <div class="heatmap-axis"><span>${fmtDate(firstDate)}</span><span>${fmtDate(lastDate)}</span></div>
         </div>
         <div style="margin-top:var(--s-4)">${renderDistBar(dist, records.length)}</div>
+        ${typicalHtml}
       </div>
 
       <div class="section">
@@ -905,6 +966,37 @@ document.getElementById('openSettings').addEventListener('click', () => {
 document.getElementById('closeSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
 });
+async function runMaintenance(endpoint, statusId, btnId, doneLabel) {
+  const statusEl = document.getElementById(statusId);
+  const btn = document.getElementById(btnId);
+  statusEl.style.color = 'var(--text-3)';
+  statusEl.textContent = 'Working…';
+  btn.disabled = true;
+  try {
+    const qs = new URLSearchParams({ secret: getSecret() });
+    const res = await fetch(`/api/${endpoint}?` + qs);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    statusEl.style.color = 'var(--clean)';
+    statusEl.textContent = doneLabel(body);
+    // Invalidate cached UI state so reopening pages refetches
+    Object.values(pages).forEach(p => p.loaded = false);
+  } catch (e) {
+    statusEl.style.color = 'var(--crit)';
+    statusEl.textContent = 'Failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+document.getElementById('recomputeBaselines').addEventListener('click', () => {
+  runMaintenance('sentinel-compute-baselines', 'recomputeBaselinesStatus', 'recomputeBaselines',
+    b => `Done. Wrote ${b.written} baselines (${b.byConfidence.high} high · ${b.byConfidence.medium} medium · ${b.byConfidence.low} low · ${b.byConfidence.insufficient} insufficient) in ${b.wallMs}ms.`);
+});
+document.getElementById('rescoreAll').addEventListener('click', () => {
+  runMaintenance('sentinel-rescore-all', 'rescoreAllStatus', 'rescoreAll',
+    b => `Done. Rescored ${b.rescored} records. Baseline: ${b.baselineUsed}, static: ${b.staticFallback}. Unexplained: $${b.totalStolen.before} → $${b.totalStolen.after} (Δ$${b.totalStolen.delta}).`);
+});
+
 document.getElementById('saveSecret').addEventListener('click', async () => {
   const entered = document.getElementById('secretInput').value.trim();
   const errEl = document.getElementById('secretError');

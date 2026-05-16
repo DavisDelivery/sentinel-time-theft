@@ -14,7 +14,7 @@
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.0.5-phase1c';
+const VERSION = 'v4.0.6-phase3';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -44,12 +44,23 @@ async function byDate(db, date) {
 }
 
 async function byDriver(db, driverSlug) {
-  const rows = await db.listDocs('sentinelDriverDays', {
-    where: [{ field: 'driverSlug', op: '==', value: driverSlug }],
-    limit: 200
-  });
+  const [rows, baseline] = await Promise.all([
+    db.listDocs('sentinelDriverDays', {
+      where: [{ field: 'driverSlug', op: '==', value: driverSlug }],
+      limit: 200
+    }),
+    getBaseline(db, driverSlug)
+  ]);
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  return rows;
+  return { records: rows, baseline };
+}
+
+async function getBaseline(db, driverSlug) {
+  try {
+    return await db.getDoc('sentinelBaselines', driverSlug);
+  } catch (_) {
+    return null;
+  }
 }
 
 async function driverList(db) {
@@ -94,11 +105,33 @@ async function detail(db, driverSlug, date) {
 }
 
 async function dashboard(db) {
-  // Pull a slim projection of ALL records for the summary panel
-  const rows = await db.listDocs('sentinelDriverDays', {
-    limit: 600,
-    fields: ['date', 'driverSlug', 'displayName', 'riskLevel', 'riskScore', 'stolenDollars', 'stolenMinutes', 'b600Matched', 'nuvizzMatched']
-  });
+  // Pull a slim projection of ALL records + all baselines in parallel
+  const [rows, baselineDocs] = await Promise.all([
+    db.listDocs('sentinelDriverDays', {
+      limit: 600,
+      fields: ['date', 'driverSlug', 'displayName', 'riskLevel', 'riskScore', 'stolenDollars', 'stolenMinutes', 'b600Matched', 'nuvizzMatched', 'morningSeveritySource', 'afternoonSeveritySource', 'inRouteSeveritySource']
+    }),
+    db.listDocs('sentinelBaselines', {
+      limit: 200,
+      fields: ['driverSlug', 'confidence', 'daysAnalyzed']
+    })
+  ]);
+  const baselinesBySlug = {};
+  const baselineConfidence = { insufficient: 0, low: 0, medium: 0, high: 0 };
+  for (const b of baselineDocs) {
+    const slug = b.driverSlug || b.id;
+    if (slug) baselinesBySlug[slug] = b;
+    const c = b.confidence || 'insufficient';
+    baselineConfidence[c] = (baselineConfidence[c] || 0) + 1;
+  }
+  let recordsScoredAgainstBaseline = 0;
+  for (const r of rows) {
+    if (r.morningSeveritySource === 'baseline' ||
+        r.afternoonSeveritySource === 'baseline' ||
+        r.inRouteSeveritySource === 'baseline') {
+      recordsScoredAgainstBaseline++;
+    }
+  }
   const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
   let totalStolen$ = 0, totalStolenMin = 0;
   const perDriver = {};
@@ -136,7 +169,12 @@ async function dashboard(db) {
     datesPresent: [...datesPresent].sort(),
     dist,
     totalStolen: { dollars: +totalStolen$.toFixed(2), minutes: totalStolenMin },
-    topOffenders
+    topOffenders,
+    baselines: {
+      total: baselineDocs.length,
+      byConfidence: baselineConfidence,
+      recordsScoredAgainst: recordsScoredAgainstBaseline
+    }
   };
 }
 
@@ -165,7 +203,14 @@ export default async (req) => {
       case 'byDriver': {
         const driverSlug = url.searchParams.get('driverSlug');
         if (!driverSlug) return new Response(JSON.stringify({ error: 'driverSlug required' }), { status: 400, headers: CORS });
-        body = { action, driverSlug, records: await byDriver(db, driverSlug) };
+        const { records, baseline } = await byDriver(db, driverSlug);
+        body = { action, driverSlug, records, baseline };
+        break;
+      }
+      case 'getBaseline': {
+        const driverSlug = url.searchParams.get('driverSlug');
+        if (!driverSlug) return new Response(JSON.stringify({ error: 'driverSlug required' }), { status: 400, headers: CORS });
+        body = { action, driverSlug, baseline: await getBaseline(db, driverSlug) };
         break;
       }
       case 'driverList':
