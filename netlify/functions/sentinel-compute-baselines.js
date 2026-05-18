@@ -12,7 +12,7 @@
 import { getDb } from './_firebase-admin.js';
 import { buildDriverBaseline } from './_baselines.js';
 
-const VERSION = 'v4.0.6-phase3';
+const VERSION = 'v4.1.0-phase3c';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',

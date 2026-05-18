@@ -14,7 +14,7 @@
 //   percentileBucket(value, dist)            → '<P25'|'P25-P50'|...|'>P90'
 //   confidenceBand(n)                        → 'insufficient'|'low'|'medium'|'high'
 
-const VERSION = 'v4.0.6-phase3';
+const VERSION = 'v4.1.0-phase3c';
 
 export function confidenceBand(n) {
   if (n < 5) return 'insufficient';

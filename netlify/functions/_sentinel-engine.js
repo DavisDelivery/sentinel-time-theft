@@ -13,7 +13,7 @@
 //   minutesBetween(a, b)          → number
 //   classifyGap(gapMin, t)        → 'ok' | 'warn' | 'flag' | 'critical'
 
-const VERSION = 'v4.0.3-phase1';
+const VERSION = 'v4.1.0-phase3c';
 
 /**
  * Parse a B600 date + clock time into a Date object.
