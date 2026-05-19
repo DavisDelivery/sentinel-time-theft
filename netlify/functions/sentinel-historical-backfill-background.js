@@ -43,6 +43,7 @@ const CHECKPOINT_EVERY_N = 25;                  // Persist progress every N scan
 const DEFAULT_START_DATE = '2025-01-02';
 const T_MINUS_DAYS = 7;                         // endDate default = today (ET) − 7 days
 const MAX_ERROR_SAMPLES = 25;
+const MAX_DATE_RANGE_DAYS = 1000;               // Sanity cap — refuse to build grids past this size
 
 // ---------- Helpers ----------
 
@@ -53,28 +54,62 @@ function easternYMD(date) {
   }).format(date);
 }
 
-// Add days to a YYYY-MM-DD string and return the new YYYY-MM-DD string.
-// Uses UTC math against the date components — safe for calendar arithmetic.
-function addDays(ymd, n) {
+// Parse "YYYY-MM-DD" into a UTC Date pinned to midnight, so all calendar math
+// stays on a single timezone (no DST jumps, no off-by-one when formatting back).
+function ymdToUTCDate(ymd) {
   const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + n));
-  return easternYMD(dt);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+function utcDateToYMD(dt) {
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dt.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Add days to a YYYY-MM-DD string and return the new YYYY-MM-DD string. UTC-only
+// math: setUTCDate handles month/year rollover correctly without any timezone
+// involvement. (Previous impl built a UTC Date then formatted it in ET, which
+// landed 4–5h behind and made addDays(d, 1) return d unchanged for any UTC
+// midnight — see the v4.1.0 backfill bug that produced 5,001 duplicate entries.)
+function addDays(ymd, n) {
+  const dt = ymdToUTCDate(ymd);
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return utcDateToYMD(dt);
 }
 
 function defaultEndDateYMD() {
-  const todayET = easternYMD(new Date());
-  return addDays(todayET, -T_MINUS_DAYS);
+  // "Today (ET) − 7 days" — find today's ET calendar date, then do UTC math
+  // on that string. We're not crossing into ET wall-clock time, just using ET
+  // to decide which calendar day "today" is.
+  return addDays(easternYMD(new Date()), -T_MINUS_DAYS);
 }
 
+// Walk calendar days inclusively from startYMD through endYMD. Increments one
+// UTC day per iteration and terminates strictly when the cursor passes
+// endYMD. Hard caps at MAX_DATE_RANGE_DAYS to refuse pathological inputs.
 function buildDateRange(startYMD, endYMD) {
+  const start = ymdToUTCDate(startYMD);
+  const end = ymdToUTCDate(endYMD);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error(`buildDateRange: invalid date(s) ${startYMD} → ${endYMD}`);
+  }
+  if (end < start) {
+    throw new Error(`buildDateRange: endDate ${endYMD} is before startDate ${startYMD}`);
+  }
+  const spanDays = Math.round((end - start) / 86400000) + 1;
+  if (spanDays > MAX_DATE_RANGE_DAYS) {
+    throw new Error(
+      `buildDateRange: ${startYMD} → ${endYMD} spans ${spanDays} days, ` +
+      `exceeds MAX_DATE_RANGE_DAYS=${MAX_DATE_RANGE_DAYS}`
+    );
+  }
   const out = [];
-  let cur = startYMD;
-  let safety = 0;
-  while (cur <= endYMD) {
-    out.push(cur);
-    cur = addDays(cur, 1);
-    safety++;
-    if (safety > 5000) break;
+  const cur = new Date(start);
+  while (cur <= end) {
+    out.push(utcDateToYMD(cur));
+    cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return out;
 }
@@ -136,9 +171,30 @@ export default async (req, context) => {
   } catch (_) {}
 
   let status = await loadStatus(db);
-  const isFirstInvocation = !status || status.state !== 'running';
 
-  if (isFirstInvocation) {
+  // Three distinct invocation modes:
+  //   resume  — status.state === 'running': chain self-invoke continuing an active sweep
+  //   kickoff — status.state === 'pending' (trigger just wrote it) OR body has explicit
+  //             startDate/endDate: build a fresh grid
+  //   orphan  — neither of the above (status is complete/error/missing AND body is empty):
+  //             a stale chain self-invoke whose run was already retired. Refuse to start
+  //             a phantom new sweep — abort cleanly so we don't silently spawn a ~495 day
+  //             grid that nobody asked for.
+  const isResume  = status?.state === 'running';
+  const isPendingKickoff = status?.state === 'pending';
+  const isExplicitKickoff = !!(bodyOpts.startDate || bodyOpts.endDate);
+  const isKickoff = !isResume && (isPendingKickoff || isExplicitKickoff);
+
+  if (!isResume && !isKickoff) {
+    console.log(`[backfill-bg] orphan invocation (state=${status?.state || 'none'}, empty body) — refusing to start a phantom sweep`);
+    return new Response(JSON.stringify({
+      aborted: true,
+      reason: 'no running state and no kickoff signal',
+      observedState: status?.state || null
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (isKickoff) {
     // Fresh kickoff: build the grid, seed status doc.
     const startDate = bodyOpts.startDate || DEFAULT_START_DATE;
     const endDate = bodyOpts.endDate || defaultEndDateYMD();
@@ -151,7 +207,17 @@ export default async (req, context) => {
       return new Response(JSON.stringify({ error: err }), { status: 400 });
     }
 
-    const dates = buildDateRange(startDate, endDate);
+    let dates;
+    try {
+      dates = buildDateRange(startDate, endDate);
+    } catch (e) {
+      console.error('[backfill-bg] buildDateRange rejected:', e.message);
+      await writeStatus(db, {
+        state: 'error', error: e.message, startDate, endDate,
+        startedAt: new Date().toISOString()
+      });
+      return new Response(JSON.stringify({ error: e.message }), { status: 400 });
+    }
     const driverSlugs = await loadActiveDriverSlugs(db);
     const startedAt = new Date().toISOString();
     const scanId = `histbackfill_${startedAt}`;
