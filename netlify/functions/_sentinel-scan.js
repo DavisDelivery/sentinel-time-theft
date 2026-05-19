@@ -1,0 +1,485 @@
+// netlify/functions/_sentinel-scan.js
+// SENTINEL v4 — shared scan core, used by sentinel-day-scan (interactive),
+// sentinel-historical-backfill-background (one-time sweep), and
+// sentinel-nightly-scan-background (daily T-7 catch-up).
+//
+// Exports:
+//   scanOneDriverDay({ driverSlug, date, scanId, skipMotive?, skipWriteIfNoData?, config? })
+//   loadOrBootstrapDefaults(db)
+//   loadOrBootstrapTruckTypeMap(db)
+//
+// Behavior is the same as the original sentinel-day-scan implementation; the
+// three optional knobs only narrow what work runs:
+//   skipMotive: true       → skip Motive/Class 3 entirely, dataHealth gets 'motive_skipped'
+//   skipWriteIfNoData: true → if !b600Matched && !nuvizzMatched, return without writing
+//                             and set result._written = false
+//   config: { defaults, truckTypeMap } → reuse pre-loaded config, skip bootstrap reads
+//
+// When the write does happen, result._written = true.
+
+import { getDb } from './_firebase-admin.js';
+import { travelFromYard, travelToYard } from './_distance.js';
+import { scoreDriverDay, parseNuvizzDeliveryEnd } from './_sentinel-engine.js';
+import { getDrivingPeriods, summarizePeriods } from './_motive.js';
+
+export const DEFAULT_DEFAULTS = {
+  loadPrepMin: 15,
+  wrapUpMin: 15,
+  wageRates: { tractor: 27.50, straight: 23.00, unknown: 25.00 },
+  morningGapStaticThresholds: { ok: 30, warn: 60, flag: 90 },
+  afternoonGapStaticThresholds: { ok: 30, warn: 60, flag: 90 },
+  yardZips: ['30518', '30542'],
+  inRouteStaticThresholds: { ok: 15, warn: 30, flag: 60 }
+};
+
+// ---------- Config bootstrap ----------
+
+export async function loadOrBootstrapDefaults(db) {
+  let doc;
+  try { doc = await db.getDoc('sentinelConfig', 'defaults'); } catch (e) { doc = null; }
+  if (!doc || doc.loadPrepMin == null) {
+    const fresh = {
+      ...DEFAULT_DEFAULTS,
+      generatedAt: new Date().toISOString(),
+      version: 1
+    };
+    await db.setDoc('sentinelConfig', 'defaults', fresh);
+    return fresh;
+  }
+  let needsUpdate = false;
+  const merged = { ...doc };
+  for (const [key, value] of Object.entries(DEFAULT_DEFAULTS)) {
+    if (merged[key] == null) {
+      merged[key] = value;
+      needsUpdate = true;
+    }
+  }
+  if (needsUpdate) {
+    merged.lastMigrated = new Date().toISOString();
+    await db.setDoc('sentinelConfig', 'defaults', merged);
+  }
+  return merged;
+}
+
+export async function loadOrBootstrapTruckTypeMap(db) {
+  let doc;
+  try { doc = await db.getDoc('sentinelConfig', 'truckTypeMap'); } catch (e) { doc = null; }
+  if (doc && doc.trucks) return doc;
+
+  const rows = await db.listDocs('driverPerformanceDaily', {
+    limit: 1000,
+    fields: ['truck', 'driverType', 'updatedAt']
+  });
+  const trucks = {};
+  for (const r of rows) {
+    const t = r.truck;
+    const ty = r.driverType;
+    if (!t || !ty) continue;
+    if (!/^\d{3,5}$/.test(String(t).trim())) continue;
+    if (!trucks[String(t).trim()]) trucks[String(t).trim()] = String(ty).toLowerCase();
+  }
+  const fresh = {
+    trucks,
+    derivedFrom: 'driverPerformanceDaily',
+    sampleSize: rows.length,
+    distinctTrucks: Object.keys(trucks).length,
+    generatedAt: new Date().toISOString(),
+    version: 1
+  };
+  await db.setDoc('sentinelConfig', 'truckTypeMap', fresh);
+  return fresh;
+}
+
+function resolveTruckType(defaultTruck, truckTypeMap) {
+  if (!defaultTruck) return 'unknown';
+  const key = String(defaultTruck).trim();
+  const type = truckTypeMap?.trucks?.[key];
+  if (type === 'tractor' || type === 'straight') return type;
+  return 'unknown';
+}
+
+// ---------- Data gathering ----------
+
+async function getEmployee(db, driverSlug) {
+  try {
+    const emp = await db.getDoc('employees', driverSlug);
+    if (!emp) throw new Error(`employee not found: ${driverSlug}`);
+    return emp;
+  } catch (e) {
+    throw new Error(`employee fetch failed for ${driverSlug}: ${e.message}`);
+  }
+}
+
+async function getB600Punch(db, employee, date) {
+  const rows = await db.listDocs('timeclock_daily', {
+    where: [{ field: 'date', op: '==', value: date }],
+    limit: 200
+  });
+  const b600Name = employee?.externalIds?.b600;
+  const candidates = [b600Name, employee?.fullName, `${employee?.firstName} ${employee?.lastName}`].filter(Boolean);
+
+  for (const r of rows) {
+    const candidates2 = [r.display_id, r.display_name, r.payroll_id].filter(Boolean);
+    const hit = candidates.some(c1 => candidates2.some(c2 => c1.toLowerCase() === c2.toLowerCase()));
+    if (hit) {
+      let clockIn = r.clock_in;
+      let clockOut = r.clock_out;
+      if (Array.isArray(r.punches) && r.punches.length > 0) {
+        clockIn = r.punches[0]?.in || clockIn;
+        clockOut = r.punches[r.punches.length - 1]?.out || clockOut;
+      }
+      return { clockIn, clockOut, totalHours: r.total_hours, matchedOn: r.display_id, rawRow: r };
+    }
+  }
+  return null;
+}
+
+async function getNuvizzStops(db, employee, date) {
+  const rows = await db.listDocs('nuvizz_rows_raw', {
+    where: [{ field: 'delivery_date', op: '==', value: date }],
+    limit: 2000
+  });
+  const nuvizzName = employee?.externalIds?.nuvizz || employee?.fullName;
+  const diag = {
+    rowsScannedForDate: rows.length,
+    driverNameMatches: 0,
+    statusBreakdown: {},
+    countedAsComplete: 0,
+    skippedNoTime: 0,
+    manualCompletions: 0
+  };
+  if (!nuvizzName) return { matches: [], diag: { ...diag, reason: 'no nuvizz external ID on employee' } };
+
+  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const target = norm(nuvizzName);
+
+  const matches = [];
+  for (const r of rows) {
+    const raw = r.raw || {};
+    if (norm(raw['driver name']) !== target) continue;
+    diag.driverNameMatches++;
+
+    const status = raw['stop status'] || '(none)';
+    diag.statusBreakdown[status] = (diag.statusBreakdown[status] || 0) + 1;
+
+    if (!status.toLowerCase().includes('complet')) continue;
+
+    const deliveryEnd = parseNuvizzDeliveryEnd(raw['delivery end']);
+    if (!deliveryEnd) {
+      diag.skippedNoTime++;
+      continue;
+    }
+
+    if (status.toLowerCase() !== 'completed') diag.manualCompletions++;
+    diag.countedAsComplete++;
+
+    matches.push({
+      pro: r.pro,
+      deliveryEnd,
+      shipTo: raw['ship to'],
+      shipToName: raw['ship to name'],
+      city: raw['ship to - city'],
+      zip: raw['ship to - zip code'],
+      status
+    });
+  }
+  matches.sort((a, b) => a.deliveryEnd - b.deliveryEnd);
+  return { matches, diag };
+}
+
+// ---------- Main scan ----------
+
+export async function scanOneDriverDay({
+  driverSlug,
+  date,
+  scanId,
+  skipMotive = false,
+  skipWriteIfNoData = false,
+  config = null
+}) {
+  const db = getDb();
+
+  const defaults = config?.defaults || await loadOrBootstrapDefaults(db);
+  const truckTypeMap = config?.truckTypeMap || await loadOrBootstrapTruckTypeMap(db);
+
+  const employee = await getEmployee(db, driverSlug);
+  const truckType = resolveTruckType(employee.defaultTruck, truckTypeMap);
+
+  const punch = await getB600Punch(db, employee, date);
+  const { matches: allStops, diag: nuvizzDiag } = await getNuvizzStops(db, employee, date);
+
+  const [yy, mo, dd] = date.split('-').map(Number);
+  const buildDt = (hhmm) => {
+    if (!hhmm) return null;
+    const m = String(hhmm).match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    return new Date(Date.UTC(yy, mo - 1, dd, +m[1], +m[2], 0));
+  };
+  const clockInDt = buildDt(punch?.clockIn);
+  const clockOutDt = buildDt(punch?.clockOut);
+
+  let onShiftStops = allStops;
+  let preClockinStops = [];
+  let postClockoutStops = [];
+  if (clockInDt) {
+    preClockinStops = allStops.filter(s => s.deliveryEnd < clockInDt);
+  }
+  if (clockOutDt) {
+    postClockoutStops = allStops.filter(s => s.deliveryEnd > clockOutDt);
+  }
+  if (clockInDt || clockOutDt) {
+    onShiftStops = allStops.filter(s =>
+      (!clockInDt || s.deliveryEnd >= clockInDt) &&
+      (!clockOutDt || s.deliveryEnd <= clockOutDt)
+    );
+  }
+
+  const firstStop = onShiftStops[0] || null;
+  const lastStop = onShiftStops.length > 0 ? onShiftStops[onShiftStops.length - 1] : null;
+
+  let travelToFirst = { minutes: null, source: 'skipped' };
+  let travelFromLast = { minutes: null, source: 'skipped' };
+  if (firstStop?.shipTo) {
+    travelToFirst = await travelFromYard(firstStop.shipTo);
+  }
+  if (lastStop?.shipTo) {
+    travelFromLast = await travelToYard(lastStop.shipTo);
+  }
+
+  const result = scoreDriverDay({
+    driverSlug,
+    displayName: employee.fullName,
+    date,
+    scanId,
+    truckType,
+
+    clockIn: punch?.clockIn || null,
+    clockOut: punch?.clockOut || null,
+    b600Matched: !!punch,
+
+    firstDeliveryTime: firstStop?.deliveryEnd || null,
+    firstDeliveryAddr: firstStop?.shipTo || null,
+    firstDeliveryCustomer: firstStop?.shipToName || null,
+    lastDeliveryTime: (lastStop && lastStop !== firstStop) ? lastStop.deliveryEnd : null,
+    lastDeliveryAddr: (lastStop && lastStop !== firstStop) ? lastStop.shipTo : null,
+    lastDeliveryCustomer: (lastStop && lastStop !== firstStop) ? lastStop.shipToName : null,
+    completedStops: allStops.length,
+    nuvizzMatched: allStops.length > 0,
+
+    expectedTravelMinToFirst: travelToFirst.minutes,
+    expectedTravelMinToFirstSource: travelToFirst.source,
+    expectedTravelMinFromLast: travelFromLast.minutes,
+    expectedTravelMinFromLastSource: travelFromLast.source,
+
+    defaults
+  });
+
+  if (nuvizzDiag.manualCompletions > 0) {
+    result.dataHealth.push(`manual_completions:${nuvizzDiag.manualCompletions}`);
+  }
+  if (nuvizzDiag.skippedNoTime > 0) {
+    result.dataHealth.push(`stops_with_unparseable_time:${nuvizzDiag.skippedNoTime}`);
+  }
+  if (preClockinStops.length > 0) {
+    result.dataHealth.push(`pre_clockin_completions:${preClockinStops.length}`);
+  }
+  if (postClockoutStops.length > 0) {
+    result.dataHealth.push(`post_clockout_completions:${postClockoutStops.length}`);
+  }
+
+  // ---------- Motive in-route (Flag Class 3) ----------
+  let motiveDebug = { skipped: true, reason: 'no motive id on employee' };
+  if (skipMotive) {
+    motiveDebug = { skipped: true, reason: 'motive_skipped (caller opted out)' };
+    result.dataHealth.push('motive_skipped');
+  } else {
+    const motiveId = employee?.externalIds?.motive;
+    const yardZips = defaults.yardZips || ['30518', '30542'];
+    if (motiveId) {
+      try {
+        const { periods: rawPeriods, raw } = await getDrivingPeriods(motiveId, date);
+
+        const buffer = 30 * 60 * 1000;
+        const windowStart = clockInDt ? new Date(clockInDt.getTime() - buffer) : null;
+        const windowEnd = clockOutDt ? new Date(clockOutDt.getTime() + buffer) : null;
+        const inWindow = rawPeriods.filter(p => {
+          if (!p.startDt) return false;
+          if (windowStart && p.startDt < windowStart) return false;
+          if (windowEnd && p.startDt > windowEnd) return false;
+          return true;
+        });
+        const outOfWindow = rawPeriods.length - inWindow.length;
+
+        const customerZipSet = new Set(allStops.map(s => s.zip).filter(Boolean));
+        const yardZipSet = new Set(yardZips.map(String));
+        const classified = inWindow.map(p => {
+          let cls = 'unknown';
+          if (!p.destZip) cls = 'unknown';
+          else if (yardZipSet.has(p.destZip)) cls = 'yard';
+          else if (customerZipSet.has(p.destZip)) cls = 'customer';
+          else cls = 'off_route';
+          return { ...p, destClass: cls };
+        });
+        const summary = summarizePeriods(classified);
+
+        const firstDeliveryDt = firstStop?.deliveryEnd || null;
+        const lastDeliveryDt = (lastStop && lastStop !== firstStop) ? lastStop.deliveryEnd : firstDeliveryDt;
+        const partitionVisit = (v) => {
+          if (!firstDeliveryDt || !lastDeliveryDt) return 'unknown';
+          const visitStart = v._startDt;
+          if (visitStart < firstDeliveryDt) return 'pre_route';
+          if (visitStart > lastDeliveryDt) return 'post_route';
+          return 'in_route';
+        };
+        const offRoutePeriods = classified.filter(p => p.destClass === 'off_route');
+        const offRouteVisits = offRoutePeriods.map((p) => {
+          const idxInAll = classified.indexOf(p);
+          const next = classified[idxInAll + 1];
+          const stationarySec = next?.startDt && p.endDt ? Math.max(0, (next.startDt - p.endDt) / 1000) : 0;
+          const visit = {
+            _startDt: p.startDt,
+            arrivedAt: p.endDt ? p.endDt.toISOString().slice(11, 16) : null,
+            leftAt: next?.startDt ? next.startDt.toISOString().slice(11, 16) : null,
+            destAddr: p.destAddr,
+            destZip: p.destZip,
+            stationaryMin: Math.round(stationarySec / 60),
+            driveMinToReach: p.durationMin,
+            driveMi: p.distanceMi
+          };
+          visit.window = partitionVisit(visit);
+          delete visit._startDt;
+          return visit;
+        });
+
+        const inRouteOffRouteMin = offRouteVisits
+          .filter(v => v.window === 'in_route')
+          .reduce((s, v) => s + v.driveMinToReach + v.stationaryMin, 0);
+
+        result.motive = {
+          driverId: motiveId,
+          periodsCount: classified.length,
+          totalMi: summary.totalMi,
+          totalDriveMin: summary.totalDriveMin,
+          offRouteVisits,
+          offRouteZips: summary.offRouteZips,
+          customerZips: [...customerZipSet],
+          yardZips,
+          inRouteOffRouteMin
+        };
+
+        const t = defaults.inRouteStaticThresholds || { ok: 15, warn: 30, flag: 60 };
+        let inRouteFlag = 'ok';
+        if (inRouteOffRouteMin > t.flag) inRouteFlag = 'critical';
+        else if (inRouteOffRouteMin > t.warn) inRouteFlag = 'flag';
+        else if (inRouteOffRouteMin > t.ok) inRouteFlag = 'warn';
+        result.inRouteFlag = inRouteFlag;
+        result.inRouteOffRouteMin = inRouteOffRouteMin;
+
+        const FLAG_TO_SCORE = { ok: 0, warn: 10, flag: 25, critical: 40, no_data: 0 };
+        const class3Contribution = FLAG_TO_SCORE[inRouteFlag] || 0;
+        result.riskScore = (result.riskScore || 0) + class3Contribution;
+        if (result.riskScore >= 70) result.riskLevel = 'critical';
+        else if (result.riskScore >= 45) result.riskLevel = 'high';
+        else if (result.riskScore >= 25) result.riskLevel = 'medium';
+        else if (result.riskScore >= 10) result.riskLevel = 'low';
+        else result.riskLevel = 'clean';
+
+        const stolenFromInRoute = Math.max(0, inRouteOffRouteMin - t.ok);
+        result.stolenMinutes = (result.stolenMinutes || 0) + stolenFromInRoute;
+        const wage = (defaults.wageRates[result.truckType] != null) ? defaults.wageRates[result.truckType] : defaults.wageRates.unknown;
+        result.stolenDollars = +((result.stolenMinutes / 60) * wage).toFixed(2);
+
+        if (inRouteFlag !== 'ok' && inRouteFlag !== 'no_data') {
+          const inRouteVisits = offRouteVisits.filter(v => v.window === 'in_route');
+          const evidenceLocations = inRouteVisits
+            .map(v => `${v.destZip}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}`)
+            .join(', ');
+          result.flags.push({
+            kind: 'in_route_off_route',
+            severity: inRouteFlag,
+            evidence: `${inRouteOffRouteMin} min of off-route activity between first and last delivery. Locations: ${evidenceLocations}.`,
+            deltaMin: inRouteOffRouteMin
+          });
+        }
+
+        const postRouteVisits = offRouteVisits.filter(v => v.window === 'post_route');
+        if (postRouteVisits.length > 0) {
+          const afternoonFlag = result.flags.find(f => f.kind === 'afternoon_gap');
+          const detourSummary = postRouteVisits
+            .map(v => `${v.destZip}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}${v.driveMi > 1 ? ` via ${v.driveMi}mi detour` : ''}`)
+            .join(', ');
+          if (afternoonFlag) {
+            afternoonFlag.evidence += ` Motive shows detour to: ${detourSummary}.`;
+          }
+          result.dataHealth.push(`motive_post_route_detour:${postRouteVisits.length}`);
+        }
+
+        if (summary.offRouteCount > 0) {
+          result.dataHealth.push(`motive_off_route_visits:${summary.offRouteCount}`);
+        }
+        motiveDebug = {
+          skipped: false,
+          motiveDriverId: motiveId,
+          rawTotalReported: raw.total,
+          fetched: raw.fetched,
+          filteredOutOfWindow: outOfWindow,
+          periodsClassified: classified.map(p => ({
+            startET: p.startDt?.toISOString().slice(11, 16),
+            endET: p.endDt?.toISOString().slice(11, 16),
+            durMin: p.durationMin,
+            mi: p.distanceMi,
+            origin: p.originAddr?.slice(0, 45),
+            dest: p.destAddr?.slice(0, 45),
+            destZip: p.destZip,
+            destClass: p.destClass
+          })),
+          summary,
+          inRouteOffRouteMin
+        };
+      } catch (err) {
+        motiveDebug = { skipped: true, reason: `motive fetch failed: ${err.message}` };
+        result.dataHealth.push('motive_fetch_failed');
+      }
+    } else {
+      result.dataHealth.push('no_motive_id_on_employee');
+    }
+  }
+
+  // Write (or skip if caller asked us to suppress empty rows)
+  const hasData = !!punch || allStops.length > 0;
+  if (skipWriteIfNoData && !hasData) {
+    result._written = false;
+  } else {
+    await db.setDoc('sentinelDriverDays', result._id, result);
+    result._written = true;
+  }
+
+  return {
+    result,
+    debug: {
+      employeeFound: true,
+      truckType,
+      truckTypeMapSize: Object.keys(truckTypeMap.trucks).length,
+      b600Match: punch ? { matchedOn: punch.matchedOn, clockIn: punch.clockIn, clockOut: punch.clockOut } : null,
+      nuvizzDiag,
+      stopsSummary: allStops.map(s => ({
+        pro: s.pro, time: s.deliveryEnd.toISOString().slice(11, 16),
+        customer: s.shipToName, zip: s.zip, status: s.status,
+        onShift: (!clockInDt || s.deliveryEnd >= clockInDt) && (!clockOutDt || s.deliveryEnd <= clockOutDt)
+      })),
+      partitionCounts: {
+        allStops: allStops.length,
+        onShiftStops: onShiftStops.length,
+        preClockinStops: preClockinStops.length,
+        postClockoutStops: postClockoutStops.length
+      },
+      anchors: {
+        firstUsedForAnchor: firstStop ? { pro: firstStop.pro, time: firstStop.deliveryEnd.toISOString().slice(11, 16), customer: firstStop.shipToName } : null,
+        lastUsedForAnchor: (lastStop && lastStop !== firstStop) ? { pro: lastStop.pro, time: lastStop.deliveryEnd.toISOString().slice(11, 16), customer: lastStop.shipToName } : null
+      },
+      travelToFirst,
+      travelFromLast,
+      motive: motiveDebug
+    }
+  };
+}
