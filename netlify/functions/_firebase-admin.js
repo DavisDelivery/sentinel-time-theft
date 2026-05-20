@@ -97,6 +97,44 @@ export function getDb() {
       if (!res.ok) throw new Error(`setDoc failed: ${res.status} ${await res.text()}`);
       return await res.json();
     },
+    // Field-masked update — only the fields listed in `fieldPaths` are touched on
+    // the server; everything else on the document (including fields the caller
+    // doesn't know about, e.g. `epoch`) is preserved exactly.
+    //
+    // Firestore semantics for masked PATCH:
+    //   - field in mask + present in body  → field is set to body value
+    //   - field in mask + missing in body  → field is DELETED on the server
+    //   - field not in mask                → field is preserved untouched
+    //
+    // Use this for incremental progress writes that must not clobber sibling
+    // fields owned by another writer. `fieldPaths` is REQUIRED and non-empty —
+    // we refuse to fall back to full-replace silently because that is exactly
+    // the footgun this method exists to prevent.
+    async patchDoc(collection, docId, data, fieldPaths) {
+      if (!Array.isArray(fieldPaths) || fieldPaths.length === 0) {
+        throw new Error('patchDoc requires a non-empty fieldPaths array (use setDoc for full replace)');
+      }
+      const token = await getAccessToken();
+      const params = new URLSearchParams();
+      for (const fp of fieldPaths) params.append('updateMask.fieldPaths', fp);
+      const url = `${BASE(getProjectId())}/${collection}/${encodeURIComponent(docId)}?${params.toString()}`;
+      const fields = {};
+      for (const fp of fieldPaths) {
+        if (Object.prototype.hasOwnProperty.call(data, fp)) {
+          fields[fp] = toFirestoreValue(data[fp]);
+        }
+        // If a fieldPath is in the mask but not present in `data`, Firestore
+        // treats that as a deletion. Caller controls intent — we don't paper
+        // over it by silently injecting null.
+      }
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields })
+      });
+      if (!res.ok) throw new Error(`patchDoc failed: ${res.status} ${await res.text()}`);
+      return await res.json();
+    },
     async getDoc(collection, docId) {
       const token = await getAccessToken();
       const url = `${BASE(getProjectId())}/${collection}/${encodeURIComponent(docId)}`;

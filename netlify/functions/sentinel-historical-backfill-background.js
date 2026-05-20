@@ -130,9 +130,60 @@ async function loadStatus(db) {
   try { return await db.getDoc(STATUS_COLLECTION, STATUS_DOC); } catch (_) { return null; }
 }
 
-async function writeStatus(db, status) {
+// Full-document write — used at kickoff (when we DO want to set `epoch` and
+// install a fresh grid) and at error-bailout. Sets updatedAt.
+async function writeStatusFull(db, status) {
   status.updatedAt = new Date().toISOString();
   await db.setDoc(STATUS_COLLECTION, STATUS_DOC, status);
+}
+
+// Fields the bg is allowed to touch during incremental progress writes
+// (checkpoints, wall-budget checkpoints, final completion). `epoch` is NOT in
+// this list — that's the whole point of using a masked PATCH: a worker writing
+// progress physically cannot overwrite the epoch chosen at kickoff, so a
+// concurrent reset that bumps the epoch survives even if this worker's write
+// lands a few milliseconds later. `dates` / `driverSlugs` / `startDate` /
+// `endDate` / `scanId` / `startedAt` are also kickoff-immutable and excluded.
+const CHECKPOINT_FIELD_PATHS = [
+  'state',
+  'cursorDate', 'cursorDriver',
+  'scanned', 'written', 'empty', 'errors',
+  'errorSamples',
+  'chainCount',
+  'progressText',
+  'completedAt',
+  'updatedAt'
+];
+
+// Field-masked progress write. Cannot clobber epoch (or any other kickoff
+// field) by construction — see CHECKPOINT_FIELD_PATHS.
+async function writeCheckpoint(db, status) {
+  status.updatedAt = new Date().toISOString();
+  await db.patchDoc(STATUS_COLLECTION, STATUS_DOC, status, CHECKPOINT_FIELD_PATHS);
+}
+
+// Epoch supersession check. Re-reads the doc and compares its `epoch` field
+// against the one this worker captured at startup.
+//
+// Conservative semantics: we only declare supersession when the doc explicitly
+// holds a DIFFERENT epoch. A doc whose epoch is null/undefined is treated as
+// "compatible" — that handles the brief transition window where a pre-epoch
+// chain (e.g. the in-flight v4.1.0 zombie) is still issuing full-replace
+// setDoc writes that drop the epoch field on the floor. The new chain takes
+// over cleanly without aborting itself during that handoff.
+async function checkSuperseded(db, myEpoch) {
+  let cur;
+  try {
+    cur = await db.getDoc(STATUS_COLLECTION, STATUS_DOC);
+  } catch (e) {
+    // A transient read failure isn't grounds for suicide — fall through.
+    console.warn('[backfill-bg] epoch re-read failed, assuming not superseded:', e.message);
+    return { superseded: false };
+  }
+  if (cur && cur.epoch != null && cur.epoch !== myEpoch) {
+    return { superseded: true, currentEpoch: cur.epoch, myEpoch };
+  }
+  return { superseded: false };
 }
 
 function buildProgressText(s) {
@@ -201,7 +252,7 @@ export default async (req, context) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
       const err = `Invalid startDate/endDate: ${startDate} → ${endDate}`;
       console.error('[backfill-bg]', err);
-      await writeStatus(db, {
+      await writeStatusFull(db, {
         state: 'error', error: err, startedAt: new Date().toISOString()
       });
       return new Response(JSON.stringify({ error: err }), { status: 400 });
@@ -212,7 +263,7 @@ export default async (req, context) => {
       dates = buildDateRange(startDate, endDate);
     } catch (e) {
       console.error('[backfill-bg] buildDateRange rejected:', e.message);
-      await writeStatus(db, {
+      await writeStatusFull(db, {
         state: 'error', error: e.message, startDate, endDate,
         startedAt: new Date().toISOString()
       });
@@ -222,8 +273,16 @@ export default async (req, context) => {
     const startedAt = new Date().toISOString();
     const scanId = `histbackfill_${startedAt}`;
 
+    // Bump epoch off whatever is currently in the doc — could be a trigger's
+    // pending write that already incremented, or a stale doc from a prior
+    // (possibly pre-epoch) run. Adding 1 to (null/undefined ?? 0) = 1 gives us
+    // a strictly-monotonic-per-kickoff value that any chain captured before
+    // this moment will see as a mismatch.
+    const newEpoch = (status?.epoch ?? 0) + 1;
+
     status = {
       state: 'running',
+      epoch: newEpoch,
       startDate, endDate,
       dates, driverSlugs,
       cursorDate: 0, cursorDriver: 0,
@@ -236,12 +295,17 @@ export default async (req, context) => {
       progressText: ''
     };
     status.progressText = buildProgressText(status);
-    await writeStatus(db, status);
-    console.log(`[backfill-bg] kickoff: ${dates.length} dates × ${driverSlugs.length} drivers = ${dates.length * driverSlugs.length} cells, scanId=${scanId}`);
+    await writeStatusFull(db, status);
+    console.log(`[backfill-bg] kickoff epoch=${newEpoch}: ${dates.length} dates × ${driverSlugs.length} drivers = ${dates.length * driverSlugs.length} cells, scanId=${scanId}`);
   } else {
     status.chainCount = (status.chainCount || 1) + 1;
-    console.log(`[backfill-bg] resume chain#${status.chainCount} at date[${status.cursorDate}]=${status.dates?.[status.cursorDate]} driver[${status.cursorDriver}]`);
+    console.log(`[backfill-bg] resume chain#${status.chainCount} epoch=${status.epoch ?? '(none)'} at date[${status.cursorDate}]=${status.dates?.[status.cursorDate]} driver[${status.cursorDriver}]`);
   }
+
+  // Capture the epoch we were spawned under, ONCE. Every subsequent doc write
+  // checks this against the doc's live `epoch` and aborts on mismatch — that's
+  // how a reset:true kills an in-flight chain on its very next checkpoint.
+  const myEpoch = status.epoch;
 
   // Load config once for this invocation — passed into every scan to avoid 24,000 redundant getDoc calls.
   const [defaults, truckTypeMap] = await Promise.all([
@@ -291,10 +355,20 @@ export default async (req, context) => {
 
       sinceCheckpoint++;
       if (sinceCheckpoint >= CHECKPOINT_EVERY_N) {
+        // Re-read the doc's epoch BEFORE writing — if a reset bumped it while
+        // we were mid-batch, abandon ship without writing our stale progress.
+        const guard = await checkSuperseded(db, myEpoch);
+        if (guard.superseded) {
+          console.log(`[backfill-bg] superseded mid-loop (myEpoch=${myEpoch}, doc.epoch=${guard.currentEpoch}) — aborting before checkpoint`);
+          return new Response(JSON.stringify({
+            superseded: true, myEpoch, currentEpoch: guard.currentEpoch,
+            scanned: status.scanned
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
         // Advance cursor past this driver so the resume cleanly starts on the next cell.
         status.cursorDriver++;
         status.progressText = buildProgressText(status);
-        await writeStatus(db, status);
+        await writeCheckpoint(db, status);
         sinceCheckpoint = 0;
         status.cursorDriver--; // restore for the normal increment to take over
       }
@@ -305,9 +379,22 @@ export default async (req, context) => {
 
   // Decide: chain on, or finish.
   if (wallExhausted) {
+    // Re-read epoch BEFORE both the checkpoint write and the self-reinvoke
+    // fetch. If a reset landed during our final batch we want to disappear
+    // without (a) clobbering its pending doc and (b) firing a successor chain
+    // that would just resume our soon-to-be-stale grid.
+    const guard = await checkSuperseded(db, myEpoch);
+    if (guard.superseded) {
+      console.log(`[backfill-bg] superseded at wall-budget exit (myEpoch=${myEpoch}, doc.epoch=${guard.currentEpoch}) — not chaining`);
+      return new Response(JSON.stringify({
+        superseded: true, myEpoch, currentEpoch: guard.currentEpoch,
+        chainCount: status.chainCount, scanned: status.scanned
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
     // Persist checkpoint as-is (cursors point at the next cell to process).
     status.progressText = buildProgressText(status);
-    await writeStatus(db, status);
+    await writeCheckpoint(db, status);
 
     const selfUrl = selfUrlFromReq(req);
     console.log(`[backfill-bg] wall budget exhausted at chain#${status.chainCount}, re-invoking ${selfUrl}`);
@@ -328,14 +415,24 @@ export default async (req, context) => {
     }), { status: 202, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // Grid exhausted — mark complete.
+  // Grid exhausted — mark complete. Same supersession check: a reset that
+  // beat our final scan should win, not lose to a stale "complete" write.
+  const finalGuard = await checkSuperseded(db, myEpoch);
+  if (finalGuard.superseded) {
+    console.log(`[backfill-bg] superseded at completion (myEpoch=${myEpoch}, doc.epoch=${finalGuard.currentEpoch}) — not writing complete`);
+    return new Response(JSON.stringify({
+      superseded: true, myEpoch, currentEpoch: finalGuard.currentEpoch,
+      chainCount: status.chainCount, scanned: status.scanned
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   status.state = 'complete';
   status.completedAt = new Date().toISOString();
   // Snap cursors to the end so the dashboard shows 100%.
   status.cursorDate = status.dates.length;
   status.cursorDriver = 0;
   status.progressText = `Complete: ${status.scanned.toLocaleString()} scanned, ${status.written.toLocaleString()} written, ${status.empty.toLocaleString()} empty, ${status.errors} errors across ${status.chainCount} chained invocation(s)`;
-  await writeStatus(db, status);
+  await writeCheckpoint(db, status);
   console.log(`[backfill-bg] ${status.progressText}`);
   return new Response(JSON.stringify({
     state: 'complete',

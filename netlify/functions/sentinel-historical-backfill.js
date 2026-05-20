@@ -84,12 +84,21 @@ export default async (req, context) => {
       }, null, 2), { status: 409, headers: CORS });
     }
 
-    // Reset the status doc so the background worker treats this as a fresh kickoff.
+    // Bump the epoch so any in-flight chain dies on its next checkpoint guard
+    // read. This is the kill mechanism: by the time the worker re-reads the
+    // doc, doc.epoch != worker.myEpoch → worker exits without re-invoking or
+    // writing stale progress back. The bg's own kickoff path will bump again
+    // (off our pending value) when it builds the fresh grid — cheap insurance
+    // that every kickoff is authoritative even if this trigger is somehow
+    // skipped.
+    const newEpoch = (existing?.epoch ?? 0) + 1;
     await db.setDoc(STATUS_COLLECTION, STATUS_DOC, {
       state: 'pending',
+      epoch: newEpoch,
       requestedAt: new Date().toISOString(),
       requestedOpts: opts
     });
+    console.log(`[backfill-trigger] wrote pending with epoch=${newEpoch} (prev=${existing?.epoch ?? '(none)'})`);
 
     const bgUrl = bgUrlFromReq(req);
     const bgBody = JSON.stringify({
