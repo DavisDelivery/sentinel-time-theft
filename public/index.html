@@ -3,37 +3,37 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-<meta name="theme-color" content="#08090b">
+<meta name="theme-color" content="#ffffff">
 <title>SENTINEL</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* Color system */
-  --bg: #08090b;
-  --bg-1: #0e1014;
-  --bg-2: #15181d;
-  --bg-3: #1d2128;
-  --line: #20242c;
-  --line-strong: #2a2f38;
-  --text: #f0f2f5;
-  --text-2: #a8aeba;
-  --text-3: #6b727f;
-  --text-4: #444a55;
-  --brand: #4a90d9;
-  --brand-2: #1e5b92;
-  --crit: #ef4444;
-  --crit-bg: rgba(239,68,68,0.10);
-  --high: #f97316;
-  --high-bg: rgba(249,115,22,0.10);
-  --med: #eab308;
-  --med-bg: rgba(234,179,8,0.10);
-  --low: #84cc16;
-  --low-bg: rgba(132,204,22,0.10);
-  --clean: #22c55e;
-  --clean-bg: rgba(34,197,94,0.08);
-  --nodata: #3a3f48;
+  /* Color system — light theme */
+  --bg: #ffffff;
+  --bg-1: #f9fafb;
+  --bg-2: #f3f4f6;
+  --bg-3: #e5e7eb;
+  --line: #d1d5db;
+  --line-strong: #9ca3af;
+  --text: #0f172a;
+  --text-2: #475569;
+  --text-3: #64748b;
+  --text-4: #94a3b8;
+  --brand: #1e5b92;
+  --brand-2: #dbeafe;
+  --crit: #b91c1c;
+  --crit-bg: #fee2e2;
+  --high: #c2410c;
+  --high-bg: #ffedd5;
+  --med: #b45309;
+  --med-bg: #fef3c7;
+  --low: #4d7c0f;
+  --low-bg: #ecfccb;
+  --clean: #15803d;
+  --clean-bg: #dcfce7;
+  --nodata: #d1d5db;
 
   /* Spacing */
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
@@ -60,7 +60,7 @@ body {
 /* ============ Topbar ============ */
 .topbar {
   position: sticky; top: 0; z-index: 50;
-  background: rgba(8,9,11,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  background: rgba(255,255,255,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--line);
   padding: var(--s-3) var(--s-4); padding-top: calc(var(--s-3) + env(safe-area-inset-top));
   display: flex; align-items: center; justify-content: space-between;
@@ -79,7 +79,7 @@ body {
 /* ============ Tab bar ============ */
 .tabs {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-  background: rgba(8,9,11,0.92); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  background: rgba(255,255,255,0.92); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid var(--line);
   display: flex; padding-bottom: env(safe-area-inset-bottom);
 }
@@ -448,7 +448,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.1.0-phase3c';
+const APP_VERSION = 'v4.1.1-light';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
