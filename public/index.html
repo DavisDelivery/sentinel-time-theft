@@ -448,7 +448,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.1.2-readers';
+const APP_VERSION = 'v4.1.3-rescore-bg';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -992,10 +992,64 @@ document.getElementById('recomputeBaselines').addEventListener('click', () => {
   runMaintenance('sentinel-compute-baselines', 'recomputeBaselinesStatus', 'recomputeBaselines',
     b => `Done. Wrote ${b.written} baselines (${b.byConfidence.high} high · ${b.byConfidence.medium} medium · ${b.byConfidence.low} low · ${b.byConfidence.insufficient} insufficient) in ${b.wallMs}ms.`);
 });
-document.getElementById('rescoreAll').addEventListener('click', () => {
-  runMaintenance('sentinel-rescore-all', 'rescoreAllStatus', 'rescoreAll',
-    b => `Done. Rescored ${b.rescored} records. Baseline: ${b.baselineUsed}, static: ${b.staticFallback}. Unexplained: $${b.totalStolen.before} → $${b.totalStolen.after} (Δ$${b.totalStolen.delta}).`);
-});
+
+// Rescore-All runs as a Netlify background function (PR #8) — kick off,
+// then poll the same endpoint with &status=true every few seconds until the
+// run completes. Reuses the same doneLabel shape so the final totals render
+// identically to the pre-background version.
+async function runRescoreAll() {
+  const statusEl = document.getElementById('rescoreAllStatus');
+  const btn = document.getElementById('rescoreAll');
+  const done = b => `Done. Rescored ${b.rescored} records. Baseline: ${b.baselineUsed}, static: ${b.staticFallback}. Unexplained: $${b.totalStolen.before} → $${b.totalStolen.after} (Δ$${b.totalStolen.delta}).`;
+  const fmtProgress = b => {
+    if (b.state === 'pending' || (b.totalRecords === 0 && b.state === 'running')) return 'Starting rescore…';
+    return `Rescoring ${b.processed.toLocaleString()}/${b.totalRecords.toLocaleString()} records (${b.totalRecords > 0 ? ((b.processed / b.totalRecords) * 100).toFixed(1) : '0.0'}%) — ${b.baselineUsed} baseline / ${b.staticFallback} static, ${b.errors} errors`;
+  };
+  statusEl.style.color = 'var(--text-3)';
+  statusEl.textContent = 'Starting…';
+  btn.disabled = true;
+  try {
+    const qs = new URLSearchParams({ secret: getSecret() });
+    // Kickoff (GET on the trigger URL — starts a run if none in flight)
+    const kickRes = await fetch('/api/sentinel-rescore-all?' + qs);
+    const kickBody = await kickRes.json();
+    if (!kickRes.ok && kickRes.status !== 202 && kickRes.status !== 409) {
+      throw new Error(kickBody.error || ('HTTP ' + kickRes.status));
+    }
+    // If 409, a run was already in flight — we just attach to it.
+    statusEl.textContent = fmtProgress(kickBody);
+
+    // Poll every 4s for up to ~15 min (background function wall budget)
+    const pollUrl = '/api/sentinel-rescore-all?' + new URLSearchParams({ secret: getSecret(), status: 'true' });
+    const deadline = Date.now() + 16 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 4000));
+      const pollRes = await fetch(pollUrl);
+      const b = await pollRes.json();
+      if (!pollRes.ok) throw new Error(b.error || ('HTTP ' + pollRes.status));
+      if (b.state === 'complete') {
+        statusEl.style.color = 'var(--clean)';
+        statusEl.textContent = done(b);
+        Object.values(pages).forEach(p => p.loaded = false);
+        return;
+      }
+      if (b.state === 'error') {
+        statusEl.style.color = 'var(--crit)';
+        statusEl.textContent = 'Failed: ' + (b.errorSamples?.[0]?.message || 'rescore errored');
+        return;
+      }
+      statusEl.textContent = fmtProgress(b);
+    }
+    statusEl.style.color = 'var(--crit)';
+    statusEl.textContent = 'Timed out waiting for rescore to finish (>16 min). Reload to see final status.';
+  } catch (e) {
+    statusEl.style.color = 'var(--crit)';
+    statusEl.textContent = 'Failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+document.getElementById('rescoreAll').addEventListener('click', runRescoreAll);
 
 document.getElementById('saveSecret').addEventListener('click', async () => {
   const entered = document.getElementById('secretInput').value.trim();
