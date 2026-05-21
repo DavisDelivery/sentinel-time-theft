@@ -185,6 +185,48 @@ export function getDb() {
       } while (pageToken);
       return out;
     },
+    // Paginate the WHOLE collection — uses Firestore's native list endpoint
+    // (which has pageToken built in), not runQuery. No `where` support: this
+    // is the right tool when the caller really wants every doc. Use listDocs
+    // for filtered single-page reads; switch to this when the dataset can grow
+    // past any reasonable single-page limit.
+    //
+    // Supports `fields` projection via mask.fieldPaths to keep payloads small.
+    // Returns [{ id, ...fields }, ...] in the natural list-endpoint order
+    // (Firestore returns __name__ ascending). Sort client-side if needed.
+    //
+    // Default pageSize=500 trades ~28 round-trips for a ~14k collection
+    // against per-page payload size. Caller can bump for slim-projection reads.
+    async listAllDocs(collection, { fields, pageSize = 500 } = {}) {
+      const token = await getAccessToken();
+      const out = [];
+      let pageToken = null;
+      let safety = 0;
+      do {
+        const params = new URLSearchParams({ pageSize: String(pageSize) });
+        if (Array.isArray(fields) && fields.length) {
+          for (const f of fields) params.append('mask.fieldPaths', f);
+        }
+        if (pageToken) params.set('pageToken', pageToken);
+        const url = `${BASE(getProjectId())}/${collection}?${params.toString()}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 404) break;
+        if (!res.ok) throw new Error(`listAllDocs ${collection} failed: ${res.status} ${await res.text()}`);
+        const data = await res.json();
+        const docs = data.documents || [];
+        for (const d of docs) {
+          const id = d.name.split('/').pop();
+          out.push({ id, ...docToObj(d) });
+        }
+        pageToken = data.nextPageToken;
+        safety++;
+        if (safety > 1000) {
+          console.warn(`listAllDocs ${collection}: hit safety ceiling 1000 pages (~${1000 * pageSize} records) — returning partial result`);
+          break;
+        }
+      } while (pageToken);
+      return out;
+    },
     // Batch delete via Firestore :commit endpoint. Limit 500 per call.
     // Recurses for larger sets. Returns { ok, failed }.
     async batchDelete(collection, docIds) {
