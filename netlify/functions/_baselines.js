@@ -10,11 +10,12 @@
 //   computeDistribution(values)              → {n, min, max, mean, p25, p50, p75, p90}
 //   buildDriverBaseline(slug, records)       → full baseline doc
 //   classifyAgainstBaseline(value, dist)     → 'ok'|'warn'|'flag'|'critical' | null
-//   excessOverMedian(value, dist)            → minutes above P50, 0 if insufficient
+//   excessOverP75(value, dist)               → minutes above P75 (stolen-minute attribution)
+//   excessOverMedian(value, dist)            → minutes above P50 (descriptive, evidence text only)
 //   percentileBucket(value, dist)            → '<P25'|'P25-P50'|...|'>P90'
 //   confidenceBand(n)                        → 'insufficient'|'low'|'medium'|'high'
 
-const VERSION = 'v4.1.0-phase3c';
+const VERSION = 'v4.1.4-attribution';
 
 export function confidenceBand(n) {
   if (n < 5) return 'insufficient';
@@ -65,8 +66,26 @@ export function classifyAgainstBaseline(value, dist) {
   return 'critical';
 }
 
-// Minutes above the driver's own median. Replaces "value - staticOkThreshold"
-// as the stolen-minute attribution when a baseline is available.
+// Minutes above the driver's own P75. This is the stolen-minute attribution
+// floor: every "ok" day (value ≤ P75 per classifyAgainstBaseline) contributes
+// zero, and only warn / flag / critical days add to the running total. Anchors
+// attribution to the exact boundary the engine uses to classify severity, so
+// the same record never both says "ok" and adds stolen $.
+//
+// Previous behavior used P50 (median) as the floor, which attributed stolen
+// time on roughly half the days — including ones the engine itself classified
+// as ok. Normal day-to-day variance ≠ theft.
+export function excessOverP75(value, dist) {
+  if (!dist || dist.n == null || dist.n < 5) return 0;
+  if (value == null || !Number.isFinite(value)) return 0;
+  if (dist.p75 == null) return 0;
+  return Math.max(0, value - dist.p75);
+}
+
+// Minutes above the driver's own median. Kept for evidence-text display only
+// ("excess over median Xmin" surfaces how far this day is from the driver's
+// typical; it is NOT used for stolen-minute attribution). For attribution,
+// use excessOverP75.
 export function excessOverMedian(value, dist) {
   if (!dist || dist.n == null || dist.n < 5) return 0;
   if (value == null || !Number.isFinite(value)) return 0;

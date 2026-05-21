@@ -13,9 +13,9 @@
 //   DEFAULT_DEFAULTS                        → fallback when sentinelConfig/defaults missing
 //   ENGINE_VERSION                          → stamped into rescored records
 
-import { classifyAgainstBaseline, excessOverMedian, percentileBucket } from './_baselines.js';
+import { classifyAgainstBaseline, excessOverMedian, excessOverP75, percentileBucket } from './_baselines.js';
 
-export const ENGINE_VERSION = 'v4.1.3-rescore-bg';
+export const ENGINE_VERSION = 'v4.1.4-attribution';
 
 export const DEFAULT_DEFAULTS = {
   loadPrepMin: 15,
@@ -133,7 +133,10 @@ export function rescoreOne(record, baseline, defaults) {
       morningFlag = baseClass;
       next.morningSeveritySource = 'baseline';
       sourceCounts.baseline++;
-      stolen += excessOverMedian(record.morningGapMin, dist);
+      // Anchor attribution at P75 — same boundary classifyAgainstBaseline uses
+      // to call a day "ok". Result: ok days contribute 0, only warn/flag/critical
+      // days add to stolen total.
+      stolen += excessOverP75(record.morningGapMin, dist);
       if (morningFlag !== 'ok') {
         next.flags.push({
           kind: 'morning_gap',
@@ -147,7 +150,9 @@ export function rescoreOne(record, baseline, defaults) {
       morningFlag = classifyStatic(record.morningGapMin, morningT);
       next.morningSeveritySource = 'static';
       sourceCounts.static++;
-      stolen += Math.max(0, record.morningGapMin - morningT.ok);
+      // Static fallback also uses the warn boundary (not ok) — matches the
+      // baseline-path P75 alignment: a day classified static "ok" contributes 0.
+      stolen += Math.max(0, record.morningGapMin - morningT.warn);
       if (morningFlag !== 'ok' && morningFlag !== 'no_data') {
         next.flags.push({
           kind: 'morning_gap',
@@ -170,7 +175,7 @@ export function rescoreOne(record, baseline, defaults) {
       afternoonFlag = baseClass;
       next.afternoonSeveritySource = 'baseline';
       sourceCounts.baseline++;
-      stolen += excessOverMedian(record.afternoonGapMin, dist);
+      stolen += excessOverP75(record.afternoonGapMin, dist);
       if (afternoonFlag !== 'ok') {
         let ev = buildEvidenceAfternoon({ record, defaults, source: 'baseline', dist, gap: record.afternoonGapMin });
         if (detourNote) ev += ' ' + detourNote;
@@ -186,7 +191,7 @@ export function rescoreOne(record, baseline, defaults) {
       afternoonFlag = classifyStatic(record.afternoonGapMin, afternoonT);
       next.afternoonSeveritySource = 'static';
       sourceCounts.static++;
-      stolen += Math.max(0, record.afternoonGapMin - afternoonT.ok);
+      stolen += Math.max(0, record.afternoonGapMin - afternoonT.warn);
       if (afternoonFlag !== 'ok' && afternoonFlag !== 'no_data') {
         let ev = buildEvidenceAfternoon({ record, defaults, source: 'static', dist: null, gap: record.afternoonGapMin });
         if (detourNote) ev += ' ' + detourNote;
@@ -211,7 +216,7 @@ export function rescoreOne(record, baseline, defaults) {
       inRouteFlag = baseClass;
       next.inRouteSeveritySource = 'baseline';
       sourceCounts.baseline++;
-      stolen += excessOverMedian(record.inRouteOffRouteMin, dist);
+      stolen += excessOverP75(record.inRouteOffRouteMin, dist);
       if (inRouteFlag !== 'ok') {
         next.flags.push({
           kind: 'in_route_off_route',
@@ -225,7 +230,7 @@ export function rescoreOne(record, baseline, defaults) {
       inRouteFlag = classifyStatic(record.inRouteOffRouteMin, inRouteT);
       next.inRouteSeveritySource = 'static';
       sourceCounts.static++;
-      stolen += Math.max(0, record.inRouteOffRouteMin - inRouteT.ok);
+      stolen += Math.max(0, record.inRouteOffRouteMin - inRouteT.warn);
       if (inRouteFlag !== 'ok' && inRouteFlag !== 'no_data') {
         next.flags.push({
           kind: 'in_route_off_route',
