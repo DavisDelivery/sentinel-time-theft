@@ -14,7 +14,13 @@
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.1.0-phase3c';
+const VERSION = 'v4.1.2-readers';
+
+// Per-driver listDocs cap. Each driver has at most one record per day; after
+// the 17-month backfill ~374 working days exist per driver. 1500 is ~7 years
+// of headroom under the single-page runQuery cap — if any driver hits this,
+// the per-driver view starts truncating and we'd need to paginate runQuery.
+const BY_DRIVER_LIMIT = 1500;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -47,10 +53,14 @@ async function byDriver(db, driverSlug) {
   const [rows, baseline] = await Promise.all([
     db.listDocs('sentinelDriverDays', {
       where: [{ field: 'driverSlug', op: '==', value: driverSlug }],
-      limit: 200
+      limit: BY_DRIVER_LIMIT
     }),
     getBaseline(db, driverSlug)
   ]);
+  if (rows.length >= BY_DRIVER_LIMIT) {
+    console.warn(`[sentinel-read] byDriver ${driverSlug} hit BY_DRIVER_LIMIT=${BY_DRIVER_LIMIT} — view is truncated, bump the cap or paginate`);
+  }
+  console.log(`[sentinel-read] byDriver ${driverSlug} → ${rows.length} records`);
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return { records: rows, baseline };
 }
@@ -83,13 +93,12 @@ async function driverList(db) {
 }
 
 async function dates(db) {
-  // Pull a slim projection of all sentinelDriverDays, distinct dates.
-  // 500 limit is plenty for the 12-day window.
-  const rows = await db.listDocs('sentinelDriverDays', {
-    limit: 600,
-    fields: ['date'],
-    orderBy: { field: 'date', direction: 'desc' }
-  });
+  // Slim projection across ALL sentinelDriverDays — listAllDocs paginates
+  // natively so the 17-month backfill's ~14k records all reach us, not just
+  // the first 600 (which collapsed to ~13 distinct dates and made the
+  // "DATA SCOPE" dropdown lie about coverage).
+  const rows = await db.listAllDocs('sentinelDriverDays', { fields: ['date'] });
+  console.log(`[sentinel-read] dates → ${rows.length} records, extracting distinct dates`);
   const set = new Set(rows.map(r => r.date).filter(Boolean));
   return [...set].sort().reverse();
 }
@@ -105,17 +114,20 @@ async function detail(db, driverSlug, date) {
 }
 
 async function dashboard(db) {
-  // Pull a slim projection of ALL records + all baselines in parallel
+  // Slim-projection pagination of ALL sentinelDriverDays — listAllDocs uses
+  // pageToken so the dashboard now reflects the entire backfill, not the
+  // alphabetical-by-docId first 600 records (which the totals, distribution,
+  // top-offenders, and baselines-scored-against panels were silently capped to).
   const [rows, baselineDocs] = await Promise.all([
-    db.listDocs('sentinelDriverDays', {
-      limit: 600,
+    db.listAllDocs('sentinelDriverDays', {
       fields: ['date', 'driverSlug', 'displayName', 'riskLevel', 'riskScore', 'stolenDollars', 'stolenMinutes', 'b600Matched', 'nuvizzMatched', 'morningSeveritySource', 'afternoonSeveritySource', 'inRouteSeveritySource']
     }),
     db.listDocs('sentinelBaselines', {
-      limit: 200,
+      limit: 500,
       fields: ['driverSlug', 'confidence', 'daysAnalyzed']
     })
   ]);
+  console.log(`[sentinel-read] dashboard → ${rows.length} sentinelDriverDays, ${baselineDocs.length} baselines`);
   const baselinesBySlug = {};
   const baselineConfidence = { insufficient: 0, low: 0, medium: 0, high: 0 };
   for (const b of baselineDocs) {

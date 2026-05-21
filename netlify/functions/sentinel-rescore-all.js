@@ -19,7 +19,7 @@
 import { getDb } from './_firebase-admin.js';
 import { classifyAgainstBaseline, excessOverMedian, percentileBucket } from './_baselines.js';
 
-const VERSION = 'v4.1.0-phase3c';
+const VERSION = 'v4.1.2-readers';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -322,11 +322,16 @@ export default async (req) => {
     const t0 = Date.now();
     const db = getDb();
 
+    // listAllDocs paginates via Firestore's native list endpoint — handles the
+    // ~14k records produced by the 17-month backfill without truncation. The
+    // single-page listDocs we used previously capped at 1000 and silently
+    // skipped 90% of the dataset (alphabetical by docId, so the tail was lost).
     const [records, baselines, defaults] = await Promise.all([
-      db.listDocs('sentinelDriverDays', { limit: 1000 }),
+      db.listAllDocs('sentinelDriverDays'),
       loadAllBaselines(db),
       loadDefaults(db)
     ]);
+    console.log(`[rescore-all] read ${records.length} records from sentinelDriverDays, ${Object.keys(baselines).length} baselines`);
 
     const totals = {
       rescored: 0,

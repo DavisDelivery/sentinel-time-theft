@@ -108,19 +108,26 @@ function predictOnRoute(model, stops, miles){
 
 // ─── Firestore query ───────────────────────────────────────────────────────
 async function fetchPerformanceRecords(days){
-  // Use the davismarginiq-style runQuery against driverPerformanceDaily
+  // driverPerformanceDaily: ~55 drivers × days docs, ordered date desc.
+  // We don't have a date-bounded runQuery helper (where + orderBy compound
+  // indexes aren't always available), so we over-fetch then filter client-side.
+  // Headroom: 55 drivers × 730 days (2 years) + buffer = 40250. Cap at 50000
+  // so the request never silently truncates for long lookbacks.
   const db = getDb();
-  // Pull last `days` days of records via the listDocs API (which now uses runQuery)
-  // We don't have a date-bounded query helper, so fetch a generous limit and filter client-side.
-  // Daily records: ~55 drivers * days ≈ 1650 docs for 30d. Well under the 5000 cap.
+  const limit = Math.min(50000, 55 * days + 200);
   const all = await db.listDocs('driverPerformanceDaily', {
     orderBy: { field: 'date', direction: 'desc' },
-    limit: Math.min(5000, 55 * days + 50)
+    limit
   });
+  if (all.length >= limit) {
+    console.warn(`[sentinel-performance] hit listDocs limit=${limit} for days=${days} — result may be truncated, paginate runQuery if this fires`);
+  }
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
   const cutoffIso = cutoff.toISOString().slice(0,10);
-  return all.filter(r => r.date && r.date >= cutoffIso);
+  const filtered = all.filter(r => r.date && r.date >= cutoffIso);
+  console.log(`[sentinel-performance] days=${days} → read ${all.length}, kept ${filtered.length} after date filter`);
+  return filtered;
 }
 
 // ─── handler ───────────────────────────────────────────────────────────────
