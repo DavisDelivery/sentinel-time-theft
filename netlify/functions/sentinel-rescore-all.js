@@ -1,25 +1,33 @@
 // netlify/functions/sentinel-rescore-all.js
-// SENTINEL v4 Phase 3 — re-classify every sentinelDriverDays record using
-// per-driver baselines (when available) instead of static thresholds.
+// SENTINEL v4 Phase 3 — thin trigger + status endpoint for the rescore worker.
 //
-// GET /api/sentinel-rescore-all?secret=davis2026sentinel
+// After the 17-month backfill the rescore now touches ~14k records, which
+// can't fit inside Netlify's 26-second request cap. The actual work moved
+// into sentinel-rescore-all-background.js (15-min budget). This file:
 //
-// For each record:
-//   1. Look up its driver's baseline.
-//   2. For morning / afternoon / in-route metrics, try classifyAgainstBaseline.
-//      If the baseline returns null (n<5 or p90<=0), fall back to static.
-//   3. Stolen-minute attribution becomes excessOverMedian when baseline used,
-//      otherwise (value - staticOk).
-//   4. Rebuild flags[] with new evidence including
-//      "P50 X / P90 Y / today P75-P90 / excess Zmin".
-//   5. Preserve Motive post_route detour text from the prior afternoon-gap
-//      flag evidence (regex /Motive shows detour[^.]*\./).
-//   6. Recompute riskScore (cap at 100), riskLevel, stolenMinutes, stolenDollars.
+//   GET  /api/sentinel-rescore-all?secret=<S>
+//     → if a run is currently 'running': return the status doc (no kickoff)
+//     → otherwise: write a 'pending' status with bumped epoch, fire the bg,
+//       return 202 with the pending status doc
+//
+//   GET  /api/sentinel-rescore-all?secret=<S>&status=true
+//     → never kick off, just return the current status doc (poll endpoint)
+//
+//   POST /api/sentinel-rescore-all?secret=<S>
+//        body: { reset?: bool }
+//     → explicit kickoff. If state==running and !reset → 409. Otherwise bump
+//       epoch (which kills any in-flight chain via the bg's epoch guard),
+//       write pending, fire bg, return 202.
+//
+// The GET-as-kickoff path keeps the existing dashboard's "Re-score All"
+// button working without UI changes (the same URL still starts a run); the
+// dashboard now polls the same URL with &status=true for progress.
 
 import { getDb } from './_firebase-admin.js';
-import { classifyAgainstBaseline, excessOverMedian, percentileBucket } from './_baselines.js';
 
-const VERSION = 'v4.1.2-readers';
+const VERSION = 'v4.1.3-rescore-bg';
+const STATUS_COLLECTION = 'sentinelConfig';
+const STATUS_DOC = 'rescoreAllStatus';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -27,17 +35,6 @@ const CORS = {
   'Content-Type': 'application/json',
   'Cache-Control': 'no-store'
 };
-
-const DEFAULT_DEFAULTS = {
-  loadPrepMin: 15,
-  wrapUpMin: 15,
-  wageRates: { tractor: 27.50, straight: 23.00, unknown: 25.00 },
-  morningGapStaticThresholds: { ok: 30, warn: 60, flag: 90 },
-  afternoonGapStaticThresholds: { ok: 30, warn: 60, flag: 90 },
-  inRouteStaticThresholds: { ok: 15, warn: 30, flag: 60 }
-};
-
-const FLAG_TO_SCORE = { ok: 0, warn: 10, flag: 25, critical: 40, no_data: 0, deferred: 0 };
 
 function readEnv(key) {
   try {
@@ -50,265 +47,100 @@ function readEnv(key) {
   return null;
 }
 
-function classifyStatic(value, t) {
-  if (value == null) return 'no_data';
-  if (value <= t.ok) return 'ok';
-  if (value <= t.warn) return 'warn';
-  if (value <= t.flag) return 'flag';
-  return 'critical';
-}
-
-function riskLevelOf(score) {
-  if (score >= 70) return 'critical';
-  if (score >= 45) return 'high';
-  if (score >= 25) return 'medium';
-  if (score >= 10) return 'low';
-  return 'clean';
-}
-
-function fmtTime(iso) {
-  return iso ? String(iso).slice(11, 16) : '—';
-}
-
-// Extract any "Motive shows detour ... ." sentence from the prior afternoon-gap
-// flag evidence so the operator doesn't lose that context after rescore.
-function extractDetourNote(record) {
-  const prior = (record.flags || []).find(f => f.kind === 'afternoon_gap');
-  if (!prior || !prior.evidence) return null;
-  const m = String(prior.evidence).match(/Motive shows detour[^.]*\./);
-  return m ? m[0] : null;
-}
-
-function buildEvidenceMorning({ record, defaults, severity, source, dist, gap }) {
-  const customer = record.firstDeliveryCustomer || 'unknown';
-  const timeStr = fmtTime(record.firstDeliveryTime);
-  const travel = record.expectedTravelMinToFirst;
-  const prep = record.loadPrepMin ?? defaults.loadPrepMin;
-  const expectedTotal = (travel != null) ? travel + prep : null;
-  const prefix = `clockIn ${record.clockIn} → first delivery ${customer} at ${timeStr} (${record.clockInToFirstMin} min).`;
-  if (source === 'baseline' && dist) {
-    const bucket = percentileBucket(gap, dist);
-    const excess = excessOverMedian(gap, dist);
-    return `${prefix} Today's morning gap: ${gap} min. Your baseline P50 ${dist.p50}min / P90 ${dist.p90}min — today ${bucket || '?'} / excess over median ${excess}min.`;
-  }
-  // static fallback — preserve the existing engine evidence shape
-  const expectedStr = expectedTotal != null ? `Expected travel ${travel} min + ${prep} min load prep = ${expectedTotal} min.` : '';
-  return `${prefix} ${expectedStr} Unexplained: ${gap} min. (static threshold)`;
-}
-
-function buildEvidenceAfternoon({ record, defaults, severity, source, dist, gap }) {
-  const customer = record.lastDeliveryCustomer || 'unknown';
-  const timeStr = fmtTime(record.lastDeliveryTime);
-  const travel = record.expectedTravelMinFromLast;
-  const wrap = record.wrapUpMin ?? defaults.wrapUpMin;
-  const expectedTotal = (travel != null) ? travel + wrap : null;
-  const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${record.clockOut} (${record.lastToClockOutMin} min).`;
-  if (source === 'baseline' && dist) {
-    const bucket = percentileBucket(gap, dist);
-    const excess = excessOverMedian(gap, dist);
-    return `${prefix} Today's afternoon gap: ${gap} min. Your baseline P50 ${dist.p50}min / P90 ${dist.p90}min — today ${bucket || '?'} / excess over median ${excess}min.`;
-  }
-  const expectedStr = expectedTotal != null ? `Expected return travel ${travel} min + ${wrap} min wrap-up = ${expectedTotal} min.` : '';
-  return `${prefix} ${expectedStr} Unexplained: ${gap} min. (static threshold)`;
-}
-
-function buildEvidenceInRoute({ record, source, dist, value }) {
-  const visits = record?.motive?.offRouteVisits || [];
-  const inRouteVisits = visits.filter(v => v.window === 'in_route');
-  const locations = inRouteVisits
-    .map(v => `${v.destZip || '?'}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}`)
-    .join(', ');
-  const locStr = locations ? ` Locations: ${locations}.` : '';
-  const prefix = `${value} min of off-route activity between first and last delivery.${locStr}`;
-  if (source === 'baseline' && dist) {
-    const bucket = percentileBucket(value, dist);
-    const excess = excessOverMedian(value, dist);
-    return `${prefix} Your baseline P50 ${dist.p50}min / P90 ${dist.p90}min — today ${bucket || '?'} / excess over median ${excess}min.`;
-  }
-  return `${prefix} (static threshold)`;
-}
-
-// Re-score one record against its baseline + defaults.
-// Returns the new record (mutated copy), plus per-flag source counters.
-function rescoreOne(record, baseline, defaults) {
-  const next = { ...record };
-  const sourceCounts = { baseline: 0, static: 0 };
-
-  const detourNote = extractDetourNote(record);
-
-  // Start fresh on derived fields
-  next.flags = [];
-  next.morningSeveritySource = 'static';
-  next.afternoonSeveritySource = 'static';
-  next.inRouteSeveritySource = 'static';
-
-  const morningT = defaults.morningGapStaticThresholds;
-  const afternoonT = defaults.afternoonGapStaticThresholds;
-  const inRouteT = defaults.inRouteStaticThresholds;
-
-  let stolen = 0;
-
-  // ---------- Morning ----------
-  let morningFlag = 'no_data';
-  if (record.morningGapMin != null) {
-    const dist = baseline?.metrics?.morningGapMin;
-    const baseClass = classifyAgainstBaseline(record.morningGapMin, dist);
-    if (baseClass != null) {
-      morningFlag = baseClass;
-      next.morningSeveritySource = 'baseline';
-      sourceCounts.baseline++;
-      const excess = excessOverMedian(record.morningGapMin, dist);
-      stolen += excess;
-      if (morningFlag !== 'ok') {
-        next.flags.push({
-          kind: 'morning_gap',
-          severity: morningFlag,
-          severitySource: 'baseline',
-          evidence: buildEvidenceMorning({ record, defaults, severity: morningFlag, source: 'baseline', dist, gap: record.morningGapMin }),
-          deltaMin: record.morningGapMin
-        });
-      }
-    } else {
-      morningFlag = classifyStatic(record.morningGapMin, morningT);
-      next.morningSeveritySource = 'static';
-      sourceCounts.static++;
-      const excess = Math.max(0, record.morningGapMin - morningT.ok);
-      stolen += excess;
-      if (morningFlag !== 'ok' && morningFlag !== 'no_data') {
-        next.flags.push({
-          kind: 'morning_gap',
-          severity: morningFlag,
-          severitySource: 'static',
-          evidence: buildEvidenceMorning({ record, defaults, severity: morningFlag, source: 'static', dist: null, gap: record.morningGapMin }),
-          deltaMin: record.morningGapMin
-        });
-      }
-    }
-  }
-  next.morningFlag = morningFlag;
-
-  // ---------- Afternoon ----------
-  let afternoonFlag = 'no_data';
-  if (record.afternoonGapMin != null) {
-    const dist = baseline?.metrics?.afternoonGapMin;
-    const baseClass = classifyAgainstBaseline(record.afternoonGapMin, dist);
-    if (baseClass != null) {
-      afternoonFlag = baseClass;
-      next.afternoonSeveritySource = 'baseline';
-      sourceCounts.baseline++;
-      const excess = excessOverMedian(record.afternoonGapMin, dist);
-      stolen += excess;
-      if (afternoonFlag !== 'ok') {
-        let ev = buildEvidenceAfternoon({ record, defaults, severity: afternoonFlag, source: 'baseline', dist, gap: record.afternoonGapMin });
-        if (detourNote) ev += ' ' + detourNote;
-        next.flags.push({
-          kind: 'afternoon_gap',
-          severity: afternoonFlag,
-          severitySource: 'baseline',
-          evidence: ev,
-          deltaMin: record.afternoonGapMin
-        });
-      }
-    } else {
-      afternoonFlag = classifyStatic(record.afternoonGapMin, afternoonT);
-      next.afternoonSeveritySource = 'static';
-      sourceCounts.static++;
-      const excess = Math.max(0, record.afternoonGapMin - afternoonT.ok);
-      stolen += excess;
-      if (afternoonFlag !== 'ok' && afternoonFlag !== 'no_data') {
-        let ev = buildEvidenceAfternoon({ record, defaults, severity: afternoonFlag, source: 'static', dist: null, gap: record.afternoonGapMin });
-        if (detourNote) ev += ' ' + detourNote;
-        next.flags.push({
-          kind: 'afternoon_gap',
-          severity: afternoonFlag,
-          severitySource: 'static',
-          evidence: ev,
-          deltaMin: record.afternoonGapMin
-        });
-      }
-    }
-  }
-  next.afternoonFlag = afternoonFlag;
-
-  // ---------- In-route ----------
-  let inRouteFlag = record.inRouteFlag || 'deferred';
-  if (record.inRouteOffRouteMin != null) {
-    const dist = baseline?.metrics?.inRouteOffRouteMin;
-    const baseClass = classifyAgainstBaseline(record.inRouteOffRouteMin, dist);
-    if (baseClass != null) {
-      inRouteFlag = baseClass;
-      next.inRouteSeveritySource = 'baseline';
-      sourceCounts.baseline++;
-      const excess = excessOverMedian(record.inRouteOffRouteMin, dist);
-      stolen += excess;
-      if (inRouteFlag !== 'ok') {
-        next.flags.push({
-          kind: 'in_route_off_route',
-          severity: inRouteFlag,
-          severitySource: 'baseline',
-          evidence: buildEvidenceInRoute({ record, source: 'baseline', dist, value: record.inRouteOffRouteMin }),
-          deltaMin: record.inRouteOffRouteMin
-        });
-      }
-    } else {
-      inRouteFlag = classifyStatic(record.inRouteOffRouteMin, inRouteT);
-      next.inRouteSeveritySource = 'static';
-      sourceCounts.static++;
-      const excess = Math.max(0, record.inRouteOffRouteMin - inRouteT.ok);
-      stolen += excess;
-      if (inRouteFlag !== 'ok' && inRouteFlag !== 'no_data') {
-        next.flags.push({
-          kind: 'in_route_off_route',
-          severity: inRouteFlag,
-          severitySource: 'static',
-          evidence: buildEvidenceInRoute({ record, source: 'static', dist: null, value: record.inRouteOffRouteMin }),
-          deltaMin: record.inRouteOffRouteMin
-        });
-      }
-    }
-  }
-  next.inRouteFlag = inRouteFlag;
-
-  // ---------- Composite ----------
-  let score = 0;
-  score += FLAG_TO_SCORE[morningFlag] || 0;
-  score += FLAG_TO_SCORE[afternoonFlag] || 0;
-  score += FLAG_TO_SCORE[inRouteFlag] || 0;
-  if (score > 100) score = 100;
-  next.riskScore = score;
-  next.riskLevel = riskLevelOf(score);
-
-  next.stolenMinutes = stolen;
-  const wage = (defaults.wageRates[record.truckType] != null)
-    ? defaults.wageRates[record.truckType]
-    : defaults.wageRates.unknown;
-  next.stolenDollars = +((stolen / 60) * wage).toFixed(2);
-
-  next.lastUpdated = new Date().toISOString();
-  next.version = VERSION;
-
-  return { next, sourceCounts };
-}
-
-async function loadAllBaselines(db) {
-  const rows = await db.listDocs('sentinelBaselines', { limit: 500 });
-  const bySlug = {};
-  for (const r of rows) {
-    if (r.driverSlug) bySlug[r.driverSlug] = r;
-    else if (r.id) bySlug[r.id] = r;
-  }
-  return bySlug;
-}
-
-async function loadDefaults(db) {
+function siteOrigin(req) {
   try {
-    const doc = await db.getDoc('sentinelConfig', 'defaults');
-    if (doc) return { ...DEFAULT_DEFAULTS, ...doc };
+    if (typeof Netlify !== 'undefined' && Netlify?.env?.get) {
+      const u = Netlify.env.get('URL') || Netlify.env.get('DEPLOY_URL');
+      if (u) return u.replace(/\/$/, '');
+    }
   } catch (_) {}
-  return DEFAULT_DEFAULTS;
+  if (typeof process !== 'undefined' && process?.env) {
+    const u = process.env.URL || process.env.DEPLOY_URL;
+    if (u) return u.replace(/\/$/, '');
+  }
+  return new URL(req.url).origin;
 }
 
-export default async (req) => {
+function bgUrlFromReq(req) {
+  return `${siteOrigin(req)}/.netlify/functions/sentinel-rescore-all-background`;
+}
+
+async function loadStatus(db) {
+  try { return await db.getDoc(STATUS_COLLECTION, STATUS_DOC); } catch (_) { return null; }
+}
+
+// Status shape for backwards-compat with the dashboard's existing button: the
+// final 'complete' run still surfaces `rescored / baselineUsed / staticFallback
+// / totalStolen` at the top level so the doneLabel() formatter from
+// runMaintenance still finds the fields it expects. While a run is in flight
+// those fields hold the running totals so far.
+function dashboardShape(status) {
+  if (!status) return { state: 'never_run' };
+  return {
+    state: status.state,
+    epoch: status.epoch ?? null,
+    scanId: status.scanId ?? null,
+    totalRecords: status.totalRecords ?? 0,
+    processed: status.processed ?? 0,
+    cursor: status.cursor ?? 0,
+    rescored: status.rescored ?? 0,
+    baselineUsed: status.baselineUsed ?? 0,
+    staticFallback: status.staticFallback ?? 0,
+    errors: status.errors ?? 0,
+    levelChanges: status.levelChanges ?? {},
+    totalStolen: status.totalStolen ?? { before: 0, after: 0, delta: 0 },
+    progressText: status.progressText ?? '',
+    startedAt: status.startedAt ?? null,
+    updatedAt: status.updatedAt ?? null,
+    completedAt: status.completedAt ?? null
+  };
+}
+
+async function kickoff(db, context, req) {
+  // Bump epoch off whatever's there. Any in-flight bg worker will see the
+  // mismatch on its next checkpoint guard read and exit cleanly without
+  // writing stale progress — same kill mechanism PR #5 introduced for the
+  // historical backfill.
+  const existing = await loadStatus(db);
+  const newEpoch = (existing?.epoch ?? 0) + 1;
+  const pending = {
+    state: 'pending',
+    epoch: newEpoch,
+    scanId: null,
+    totalRecords: 0,
+    cursor: 0,
+    processed: 0,
+    rescored: 0,
+    baselineUsed: 0,
+    staticFallback: 0,
+    errors: 0,
+    errorSamples: [],
+    levelChanges: {},
+    totalStolen: { before: 0, after: 0, delta: 0 },
+    progressText: 'Starting…',
+    requestedAt: new Date().toISOString(),
+    startedAt: null,
+    completedAt: null,
+    updatedAt: new Date().toISOString()
+  };
+  await db.setDoc(STATUS_COLLECTION, STATUS_DOC, pending);
+  console.log(`[rescore-trigger] wrote pending with epoch=${newEpoch} (prev=${existing?.epoch ?? '(none)'})`);
+
+  const bgUrl = bgUrlFromReq(req);
+  const fire = fetch(bgUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kickoff: true })
+  }).catch(e => console.error('[rescore-trigger] bg invoke failed:', e.message));
+  if (context && typeof context.waitUntil === 'function') {
+    context.waitUntil(fire);
+  } else {
+    await fire;
+  }
+  return pending;
+}
+
+export default async (req, context) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
 
   try {
@@ -319,73 +151,65 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
     }
 
-    const t0 = Date.now();
     const db = getDb();
+    const statusOnly = url.searchParams.get('status') === 'true';
+    const existing = await loadStatus(db);
 
-    // listAllDocs paginates via Firestore's native list endpoint — handles the
-    // ~14k records produced by the 17-month backfill without truncation. The
-    // single-page listDocs we used previously capped at 1000 and silently
-    // skipped 90% of the dataset (alphabetical by docId, so the tail was lost).
-    const [records, baselines, defaults] = await Promise.all([
-      db.listAllDocs('sentinelDriverDays'),
-      loadAllBaselines(db),
-      loadDefaults(db)
-    ]);
-    console.log(`[rescore-all] read ${records.length} records from sentinelDriverDays, ${Object.keys(baselines).length} baselines`);
-
-    const totals = {
-      rescored: 0,
-      baselineUsed: 0,
-      staticFallback: 0,
-      levelChanges: {},
-      totalStolen: { before: 0, after: 0, delta: 0 }
-    };
-
-    // Process in 20-way parallel batches
-    const BATCH = 20;
-    for (let i = 0; i < records.length; i += BATCH) {
-      const batch = records.slice(i, i + BATCH);
-      const results = await Promise.allSettled(batch.map(r => {
-        const baseline = baselines[r.driverSlug] || null;
-        const { next, sourceCounts } = rescoreOne(r, baseline, defaults);
-        // Track totals before doing the write
-        const beforeLevel = r.riskLevel || 'clean';
-        const afterLevel = next.riskLevel;
-        const beforeStolen = r.stolenDollars || 0;
-        const afterStolen = next.stolenDollars || 0;
-        return db.setDoc('sentinelDriverDays', next._id, next)
-          .then(() => ({ beforeLevel, afterLevel, beforeStolen, afterStolen, sourceCounts }));
-      }));
-      for (const res of results) {
-        if (res.status !== 'fulfilled') {
-          console.error('[rescore-all] write failed:', res.reason?.message || res.reason);
-          continue;
-        }
-        const { beforeLevel, afterLevel, beforeStolen, afterStolen, sourceCounts } = res.value;
-        totals.rescored++;
-        totals.baselineUsed += sourceCounts.baseline;
-        totals.staticFallback += sourceCounts.static;
-        totals.totalStolen.before += beforeStolen;
-        totals.totalStolen.after += afterStolen;
-        if (beforeLevel !== afterLevel) {
-          const key = `${beforeLevel}→${afterLevel}`;
-          totals.levelChanges[key] = (totals.levelChanges[key] || 0) + 1;
-        }
-      }
+    // Pure poll — never kicks off. The dashboard hits this every few seconds
+    // while a run is in flight.
+    if (statusOnly) {
+      return new Response(JSON.stringify({
+        version: VERSION,
+        ok: true,
+        action: 'status',
+        ...dashboardShape(existing)
+      }), { status: 200, headers: CORS });
     }
 
-    totals.totalStolen.before = +totals.totalStolen.before.toFixed(2);
-    totals.totalStolen.after = +totals.totalStolen.after.toFixed(2);
-    totals.totalStolen.delta = +(totals.totalStolen.after - totals.totalStolen.before).toFixed(2);
+    // POST with explicit reset semantics — only path that can force-restart
+    // an already-running chain.
+    if (req.method === 'POST') {
+      let opts = {};
+      try {
+        const text = await req.text();
+        if (text && text.trim()) opts = JSON.parse(text);
+      } catch (_) { opts = {}; }
+      if (existing?.state === 'running' && !opts.reset) {
+        return new Response(JSON.stringify({
+          error: 'Rescore already running. POST with { "reset": true } to force-restart.',
+          ...dashboardShape(existing)
+        }), { status: 409, headers: CORS });
+      }
+      const pending = await kickoff(db, context, req);
+      return new Response(JSON.stringify({
+        version: VERSION,
+        ok: true,
+        action: 'kickoff',
+        accepted: true,
+        ...dashboardShape(pending)
+      }), { status: 202, headers: CORS });
+    }
 
+    // Default GET behavior — backwards-compatible with the dashboard's
+    // existing button. If a run is in flight, return its status (no double
+    // kickoff). Otherwise kick off a fresh run and return the pending status.
+    if (existing?.state === 'running') {
+      return new Response(JSON.stringify({
+        version: VERSION,
+        ok: true,
+        action: 'already_running',
+        ...dashboardShape(existing)
+      }), { status: 200, headers: CORS });
+    }
+    const pending = await kickoff(db, context, req);
     return new Response(JSON.stringify({
       version: VERSION,
       ok: true,
-      wallMs: Date.now() - t0,
-      recordsScanned: records.length,
-      baselinesLoaded: Object.keys(baselines).length,
-      ...totals
-    }, null, 2), { status: 200, headers: CORS });
+      action: 'kickoff',
+      accepted: true,
+      ...dashboardShape(pending)
+    }), { status: 202, headers: CORS });
+
   } catch (err) {
     console.error('[sentinel-rescore-all]', err);
     return new Response(JSON.stringify({
