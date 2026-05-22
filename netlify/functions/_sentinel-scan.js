@@ -271,6 +271,9 @@ export async function scanOneDriverDay({
     expectedTravelMinFromLast: travelFromLast.minutes,
     expectedTravelMinFromLastSource: travelFromLast.source,
 
+    loadPrepMin: employee.loadPrepMin,
+    wrapUpMin: employee.wrapUpMin,
+
     defaults
   });
 

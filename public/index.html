@@ -529,6 +529,43 @@ body {
   width: 100%; min-height: 44px; cursor: pointer; margin-top: 10px; font-family: inherit;
 }
 .modal-sheet button.primary:disabled { opacity: 0.5; }
+
+/* ============ Driver config table ============ */
+.dc-help { font-size: var(--fs-sm); color: var(--text-3); line-height: 1.5; margin-bottom: var(--s-3); }
+.dc-list { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-2); }
+.dc-row {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: var(--s-3);
+}
+.dc-row.has-override { border-color: var(--brand); }
+.dc-row .dc-name {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2);
+  font-size: var(--fs-md); font-weight: 600; color: var(--text); margin-bottom: 8px;
+}
+.dc-row .dc-truck { font-size: 10px; color: var(--text-3); font-family: 'JetBrains Mono', monospace; font-weight: 500; }
+.dc-row .dc-fields { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+.dc-row label {
+  display: block; font-size: 10px; color: var(--text-3); text-transform: uppercase;
+  letter-spacing: 0.08em; font-weight: 600; margin-bottom: 4px;
+}
+.dc-row input[type="number"] {
+  width: 100%; background: var(--bg-1); border: 1px solid var(--line); color: var(--text);
+  font-family: 'JetBrains Mono', monospace; font-size: var(--fs-base);
+  padding: 8px 10px; border-radius: 6px; min-height: 38px;
+}
+.dc-row .dc-actions {
+  display: flex; gap: var(--s-2); margin-top: var(--s-2); align-items: center;
+}
+.dc-row .dc-save, .dc-row .dc-clear {
+  flex: 1; padding: 8px 10px; border-radius: 6px; font-size: var(--fs-sm); font-weight: 600;
+  min-height: 38px; cursor: pointer; font-family: inherit; border: 1px solid var(--line);
+  background: var(--bg-1); color: var(--text);
+}
+.dc-row .dc-save { background: var(--brand); border-color: var(--brand); color: white; }
+.dc-row .dc-save:disabled, .dc-row .dc-clear:disabled { opacity: 0.5; }
+.dc-row .dc-status { font-size: 11px; color: var(--text-3); min-width: 60px; text-align: right; }
+.dc-row .dc-status.ok { color: var(--clean); }
+.dc-row .dc-status.err { color: var(--crit); }
 </style>
 </head>
 <body>
@@ -636,12 +673,23 @@ body {
     </div>
     <div class="field"><div class="l">Yard ZIP Variants</div><div class="v mono" id="yardZipsDisplay">30518, 30542</div></div>
     <div class="field"><div class="l">Static Thresholds (min)</div><div class="v mono" style="line-height:1.6">morn ok≤30 / warn≤60 / flag≤90<br>aft ok≤30 / warn≤60 / flag≤90<br>in-route ok≤15 / warn≤30 / flag≤60</div></div>
+    <div class="field">
+      <div class="l">Driver Config — Load Prep / Wrap Up (min)</div>
+      <div class="dc-help">
+        Per-driver overrides for morning load-prep and afternoon wrap-up.
+        Defaults: load prep <span id="dcDefaultLoadPrep" class="mono">15</span>m,
+        wrap up <span id="dcDefaultWrapUp" class="mono">15</span>m.
+        Self-loaders typically need ~120m load prep; pre-loaded drivers stay at default.
+        Leave a field blank to use default. Run <em>Re-score All Records</em> after edits.
+      </div>
+      <div id="driverConfigList" class="dc-list"><div class="loading">Loading drivers</div></div>
+    </div>
     <div class="field"><div class="l">Data Scope</div><div class="v mono" id="dataScopeDisplay">Loading…</div></div>
   </div>
 </div>
 
 <script>
-const APP_VERSION = 'v4.2.3-static-fraud';
+const APP_VERSION = 'v4.3.0-driver-config';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1525,8 +1573,122 @@ document.getElementById('openSettings').addEventListener('click', () => {
       document.getElementById('dataScopeDisplay').textContent =
         `${d.totalDriverDays} records · ${d.datesPresent[0]} → ${d.datesPresent[d.datesPresent.length-1]}`;
     }).catch(() => {});
+    loadDriverConfig().catch(e => {
+      document.getElementById('driverConfigList').innerHTML =
+        `<div class="error-banner">Failed to load drivers: ${e.message}</div>`;
+    });
   }
 });
+
+// ============ Driver Config (per-driver loadPrep / wrapUp) ============
+// One row per active driver. Inputs default to the override value when set,
+// blank when the driver is using the system default. Save sends the current
+// pair (with blank → null = "clear override"). Clear is a one-tap reset to
+// nulls. The "has-override" border lights up when at least one field is set.
+async function loadDriverConfig() {
+  const listEl = document.getElementById('driverConfigList');
+  listEl.innerHTML = '<div class="loading">Loading drivers</div>';
+  const body = await api('driverConfig');
+  document.getElementById('dcDefaultLoadPrep').textContent = body.defaults.loadPrepMin;
+  document.getElementById('dcDefaultWrapUp').textContent = body.defaults.wrapUpMin;
+  if (!body.drivers || body.drivers.length === 0) {
+    listEl.innerHTML = '<div class="dc-help">No active drivers found.</div>';
+    return;
+  }
+  listEl.innerHTML = body.drivers.map(d => renderDriverConfigRow(d)).join('');
+  for (const row of listEl.querySelectorAll('.dc-row')) {
+    const slug = row.dataset.slug;
+    row.querySelector('.dc-save').addEventListener('click', () => saveDriverConfigRow(slug));
+    row.querySelector('.dc-clear').addEventListener('click', () => clearDriverConfigRow(slug));
+  }
+}
+
+function renderDriverConfigRow(d) {
+  const hasOverride = (d.loadPrepMin != null) || (d.wrapUpMin != null);
+  const lpVal = d.loadPrepMin != null ? d.loadPrepMin : '';
+  const wuVal = d.wrapUpMin != null ? d.wrapUpMin : '';
+  const truckBits = [d.role === 'owner_op' ? 'owner-op' : null, d.defaultTruck ? `truck ${d.defaultTruck}` : null].filter(Boolean).join(' · ');
+  return `
+    <div class="dc-row ${hasOverride ? 'has-override' : ''}" data-slug="${d.slug}">
+      <div class="dc-name">
+        <span>${escapeHtml(d.fullName || d.slug)}</span>
+        <span class="dc-truck">${escapeHtml(truckBits)}</span>
+      </div>
+      <div class="dc-fields">
+        <div>
+          <label>Load Prep (min)</label>
+          <input type="number" min="0" max="480" step="1" data-field="loadPrepMin" value="${lpVal}" placeholder="default" inputmode="numeric">
+        </div>
+        <div>
+          <label>Wrap Up (min)</label>
+          <input type="number" min="0" max="480" step="1" data-field="wrapUpMin" value="${wuVal}" placeholder="default" inputmode="numeric">
+        </div>
+      </div>
+      <div class="dc-actions">
+        <button class="dc-save" type="button">Save</button>
+        <button class="dc-clear" type="button">Clear</button>
+        <div class="dc-status" data-status></div>
+      </div>
+    </div>`;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function readFieldValue(input) {
+  const raw = input.value.trim();
+  if (raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 480) return { error: 'must be 0–480' };
+  return Math.round(n);
+}
+
+async function saveDriverConfigRow(slug) {
+  const row = document.querySelector(`.dc-row[data-slug="${slug}"]`);
+  if (!row) return;
+  const statusEl = row.querySelector('[data-status]');
+  const saveBtn = row.querySelector('.dc-save');
+  const clearBtn = row.querySelector('.dc-clear');
+  const lpInput = row.querySelector('[data-field="loadPrepMin"]');
+  const wuInput = row.querySelector('[data-field="wrapUpMin"]');
+
+  const lp = readFieldValue(lpInput);
+  const wu = readFieldValue(wuInput);
+  if (lp && typeof lp === 'object' && lp.error) { setRowStatus(statusEl, lp.error, 'err'); return; }
+  if (wu && typeof wu === 'object' && wu.error) { setRowStatus(statusEl, wu.error, 'err'); return; }
+
+  saveBtn.disabled = true; clearBtn.disabled = true;
+  setRowStatus(statusEl, 'Saving…', '');
+  try {
+    const res = await fetch('/api/sentinel-write?' + new URLSearchParams({ secret: getSecret(), action: 'setDriverConfig' }), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ driverSlug: slug, loadPrepMin: lp, wrapUpMin: wu })
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    setRowStatus(statusEl, 'Saved', 'ok');
+    row.classList.toggle('has-override', (body.loadPrepMin != null) || (body.wrapUpMin != null));
+  } catch (e) {
+    setRowStatus(statusEl, e.message, 'err');
+  } finally {
+    saveBtn.disabled = false; clearBtn.disabled = false;
+  }
+}
+
+async function clearDriverConfigRow(slug) {
+  const row = document.querySelector(`.dc-row[data-slug="${slug}"]`);
+  if (!row) return;
+  row.querySelector('[data-field="loadPrepMin"]').value = '';
+  row.querySelector('[data-field="wrapUpMin"]').value = '';
+  await saveDriverConfigRow(slug);
+}
+
+function setRowStatus(el, text, cls) {
+  el.textContent = text;
+  el.className = 'dc-status' + (cls ? ' ' + cls : '');
+}
 document.getElementById('closeSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
 });
