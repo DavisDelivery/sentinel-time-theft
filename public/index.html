@@ -176,6 +176,13 @@ body {
 .off-bar.high { background: var(--high); }
 .off-bar.medium { background: var(--med); }
 .off-bar.low { background: var(--low); }
+.off-truck {
+  display: inline-block; margin-left: var(--s-2);
+  background: var(--bg-3); color: var(--text-3);
+  font-size: 10px; font-weight: 600;
+  padding: 1px 6px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
 .off-bar.clean { background: var(--clean); }
 .off-bar.no_data, .off-bar.unknown { background: var(--bg-3); height: 3px !important; }
 .off-meta { color: var(--text-3); font-size: var(--fs-xs); margin-top: 4px; }
@@ -497,6 +504,86 @@ body {
   padding: var(--s-3); border-radius: 8px; margin-bottom: var(--s-3); font-size: var(--fs-md);
 }
 
+/* ============ Overview range chips + view-all + reference grid (v4.4.0) ============ */
+.range-chips {
+  display: flex; gap: var(--s-2); margin-bottom: var(--s-4);
+  flex-wrap: wrap;
+}
+.range-chip {
+  background: var(--bg-2); border: 1px solid var(--line); color: var(--text-2);
+  padding: 6px 12px; border-radius: 999px; font-size: var(--fs-sm); font-weight: 600;
+  cursor: pointer; font-family: inherit; min-height: 36px;
+}
+.range-chip.active { background: var(--brand); color: white; border-color: var(--brand); }
+.range-chip:disabled { opacity: 0.6; }
+
+.viewall-toggle {
+  background: transparent; border: 0; color: var(--brand);
+  font-size: var(--fs-sm); font-weight: 600; padding: var(--s-3) var(--s-4);
+  cursor: pointer; font-family: inherit; width: 100%; text-align: center;
+  border-top: 1px solid var(--line);
+}
+.viewall-toggle:active { background: var(--bg-2); }
+
+.viewall-group { margin-top: var(--s-3); }
+.viewall-group h3 {
+  font-size: 11px; font-weight: 700; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: var(--s-3) var(--s-4) var(--s-2); margin: 0;
+  background: var(--bg-2); border-bottom: 1px solid var(--line);
+}
+.viewall-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--s-3); align-items: center;
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.viewall-row:last-child { border-bottom: 0; }
+.viewall-row:active { background: var(--bg-2); }
+.viewall-name { font-weight: 600; font-size: var(--fs-base); }
+.viewall-meta {
+  font-size: var(--fs-xs); color: var(--text-3);
+  margin-top: 2px;
+}
+.viewall-amount {
+  font-size: var(--fs-base); font-weight: 700; text-align: right;
+  font-feature-settings: 'tnum';
+}
+.viewall-trend {
+  display: flex; align-items: center; gap: 4px;
+  font-size: var(--fs-xs); font-weight: 600; min-width: 56px;
+  justify-content: flex-end; font-feature-settings: 'tnum';
+}
+.viewall-trend.up { color: var(--crit); }
+.viewall-trend.down { color: var(--clean); }
+.viewall-trend.flat { color: var(--text-3); }
+
+.ref-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2);
+}
+.ref-cell {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: var(--s-3);
+}
+.ref-cell.empty { color: var(--text-3); }
+.ref-cell h4 {
+  font-size: 10px; font-weight: 700; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 var(--s-2);
+}
+.ref-cell .ref-row {
+  display: flex; justify-content: space-between; font-size: var(--fs-xs);
+  margin-bottom: 4px;
+}
+.ref-cell .ref-row .k { color: var(--text-3); }
+.ref-cell .ref-row .v { color: var(--text); font-weight: 600; font-feature-settings: 'tnum'; }
+.ref-cell .ref-row .v.bad { color: var(--crit); }
+.ref-cell .ref-row .v.ok { color: var(--clean); }
+.ref-cell .ref-foot {
+  font-size: 10px; color: var(--text-4); margin-top: var(--s-2);
+}
+
 /* ============ Settings modal ============ */
 .modal {
   position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.7);
@@ -698,7 +785,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.3.1-truck-type-override';
+const APP_VERSION = 'v4.4.0-overview';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -807,29 +894,89 @@ function renderSparkBars(records, height = 22, getValue) {
 }
 
 // ============ Overview ============
+// Overview state — selected time range + view-all expansion + view-all sort.
+// Persisted in-memory only; tab navigation away clears it. Persisting via
+// localStorage was considered but the brief asked for a rolling window from
+// today, and stale state is more confusing than a fresh default each session.
+const overviewState = {
+  days: 30,            // 30 | 90 | 180 | 365 | 'all'
+  viewAllOpen: false,
+  viewAllSort: 'alpha' // 'alpha' | 'stolen' | 'trend' | 'critical'
+};
+
+function renderTrendIndicator(t30) {
+  if (!t30) return '<div class="viewall-trend flat">—</div>';
+  const delta = t30.delta;
+  if (Math.abs(delta) < 1) return '<div class="viewall-trend flat">±$0</div>';
+  if (delta > 0) return `<div class="viewall-trend up">▲ ${fmt$Plain(delta)}</div>`;
+  return `<div class="viewall-trend down">▼ ${fmt$Plain(Math.abs(delta))}</div>`;
+}
+
+function renderReferenceCell(key, label, ref) {
+  if (!ref) {
+    return `
+      <div class="ref-cell empty">
+        <h4>${label}</h4>
+        <div class="ref-row"><span class="k">Configure self-loaders to populate</span></div>
+        <div class="ref-foot">Driver Config in Settings · set Load Prep ≥ 60m</div>
+      </div>`;
+  }
+  // Expected morning gap from the model = 0 (the threshold is "anything above
+  // ok counts as theft"). What we want to compare is the OBSERVED median
+  // morningGap against the ok threshold. If observed median is below ok,
+  // calibration looks right; above, the loadPrep estimate may be too low.
+  const obsGap = ref.medianMorningGap;
+  const okThr = ref.morningOkThreshold;
+  let gapClass = '';
+  if (typeof obsGap === 'number') {
+    gapClass = obsGap <= okThr ? 'ok' : 'bad';
+  }
+  return `
+    <div class="ref-cell">
+      <h4>${label}</h4>
+      <div class="ref-row"><span class="k">Drivers</span><span class="v">${ref.n_drivers}</span></div>
+      <div class="ref-row"><span class="k">Days observed</span><span class="v">${ref.n_days}</span></div>
+      <div class="ref-row"><span class="k">Median clockIn→1st</span><span class="v">${fmtDur(ref.medianC2F)}</span></div>
+      <div class="ref-row"><span class="k">Median morning gap</span><span class="v ${gapClass}">${fmtDur(obsGap)}</span></div>
+      <div class="ref-row"><span class="k">Median last→clockOut</span><span class="v">${fmtDur(ref.medianL2C)}</span></div>
+      <div class="ref-foot">model: travel + ${ref.representativeLoadPrep}m prep + ${okThr}m ok floor</div>
+    </div>`;
+}
+
+function rangeLabel(days) {
+  if (days === 'all' || days == null) return 'All time';
+  if (days === 30) return '30d';
+  if (days === 90) return '90d';
+  if (days === 180) return '6mo';
+  if (days === 365) return '12mo';
+  return `${days}d`;
+}
+
 async function loadOverview() {
   const container = document.getElementById('overviewContent');
   container.innerHTML = '<div class="loading">Loading fleet snapshot</div>';
   try {
-    const d = await api('dashboard');
+    const daysParam = overviewState.days === 'all' ? 'all' : String(overviewState.days);
+    const d = await api('dashboard', { days: daysParam });
     const dist = d.dist;
     const total = d.totalDriverDays;
-    const annualized = d.totalStolen.dollars * 365 / Math.max(1, d.datesPresent.length);
-
-    // Fetch all driver-day data for sparklines (one shot)
-    const allDays = await api('dashboard');
-    // Get per-driver records for top offenders sparklines
-    const topOffenderPromises = d.topOffenders.slice(0, 10).map(o =>
-      api('byDriver', { driverSlug: o.slug }).then(r => ({ slug: o.slug, records: r.records }))
-    );
-    const topOffenderRecords = await Promise.all(topOffenderPromises);
-    const recordsBySlug = Object.fromEntries(topOffenderRecords.map(x => [x.slug, x.records]));
-
-    const dateRange = d.datesPresent.length ? `${d.datesPresent[0]} → ${d.datesPresent[d.datesPresent.length-1]}` : '—';
+    const rangeDays = d.datesPresent.length || 0;
+    const annualized = d.totalStolen.dollars * 365 / Math.max(1, rangeDays);
+    const dateRange = d.datesPresent.length
+      ? `${d.datesPresent[0]} → ${d.datesPresent[d.datesPresent.length - 1]}`
+      : '—';
+    const rangeText = rangeLabel(overviewState.days);
 
     container.innerHTML = `
+      <div class="range-chips" id="rangeChips">
+        ${[30, 90, 180, 365, 'all'].map(v => {
+          const isActive = (v === overviewState.days);
+          return `<button class="range-chip ${isActive ? 'active' : ''}" data-range="${v}">${rangeLabel(v)}</button>`;
+        }).join('')}
+      </div>
+
       <div class="hero">
-        <div class="hero-label">Unexplained Time · Last ${d.datesPresent.length} Days</div>
+        <div class="hero-label">Unexplained Time · ${rangeText}</div>
         <div class="hero-value num">${fmt$(d.totalStolen.dollars)}</div>
         <div class="hero-sub">${fmtHr(d.totalStolen.minutes)} across ${total} driver-days · ${dateRange}</div>
         <div class="hero-row">
@@ -842,7 +989,7 @@ async function loadOverview() {
             <div class="l">High-risk days</div>
           </div>
           <div class="item">
-            <div class="v num">${Math.round(((dist.critical + dist.high) / total) * 100)}%</div>
+            <div class="v num">${total > 0 ? Math.round(((dist.critical + dist.high) / total) * 100) : 0}%</div>
             <div class="l">of fleet-days</div>
           </div>
         </div>
@@ -851,9 +998,34 @@ async function loadOverview() {
       <div class="section">
         <div class="section-head">
           <h2>Risk Distribution</h2>
-          <div class="aux">${total} records</div>
+          <div class="aux">${total} records · ${rangeText}</div>
         </div>
         <div class="card">${renderDistBar(dist, total)}</div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h2>Top Offenders · ${rangeText}</h2>
+          <div class="aux">tap to investigate · ▲▼ vs prior 30d</div>
+        </div>
+        <div class="card card-flush" id="offenderList"></div>
+        <button class="viewall-toggle" id="viewAllToggle">
+          ${overviewState.viewAllOpen ? '▾ Hide full roster' : '▸ View all drivers by truck type'}
+        </button>
+        <div id="viewAllSection" style="${overviewState.viewAllOpen ? '' : 'display:none'}"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h2>Reference Metrics · ${rangeText}</h2>
+          <div class="aux">model expected vs observed median</div>
+        </div>
+        <div class="ref-grid">
+          ${renderReferenceCell('straight_preload', 'Straight · pre-load', d.referenceMetrics?.straight_preload)}
+          ${renderReferenceCell('straight_selfload', 'Straight · self-load', d.referenceMetrics?.straight_selfload)}
+          ${renderReferenceCell('tractor_preload', 'Tractor · pre-load', d.referenceMetrics?.tractor_preload)}
+          ${renderReferenceCell('tractor_selfload', 'Tractor · self-load', d.referenceMetrics?.tractor_selfload)}
+        </div>
       </div>
 
       ${d.baselines ? `
@@ -873,48 +1045,146 @@ async function loadOverview() {
           </div>
         </div>
       ` : ''}
-
-      <div class="section">
-        <div class="section-head">
-          <h2>Top Offenders · ${
-            (d.datesPresent && d.datesPresent.length)
-              ? `${d.datesPresent[0]} to ${d.datesPresent[d.datesPresent.length - 1]}`
-              : 'All-time'
-          }</h2>
-          <div class="aux">tap to investigate</div>
-        </div>
-        <div class="card card-flush" id="offenderList"></div>
-      </div>
     `;
 
+    // Top-10 offenders (skip rows with $0 — clean drivers don't belong in a
+    // top-offenders list. View-all still shows them.)
     const list = document.getElementById('offenderList');
-    d.topOffenders.slice(0, 10).forEach((o, i) => {
-      const recs = (recordsBySlug[o.slug] || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-      const bars = renderSparkBars(recs, 22, r => r.stolenDollars || 0);
-      const row = document.createElement('div');
-      row.className = 'off-row';
-      row.innerHTML = `
-        <div class="off-rank num">${i + 1}</div>
-        <div class="off-main">
-          <div class="off-name">${o.displayName || o.slug}</div>
-          <div class="off-bars">${bars}</div>
-          <div class="off-meta">${o.criticalDays} critical · ${o.highDays} high · ${o.daysWithData} of ${o.days} days w/ data</div>
-        </div>
-        <div class="off-amount num">${fmt$(o.stolenDollars)}<span class="sub">12d</span></div>
-      `;
-      row.addEventListener('click', () => {
-        document.querySelector('.tab[data-page="investigate"]').click();
-        setTimeout(() => {
-          const sel = document.getElementById('driverSelect');
-          sel.value = o.slug;
-          loadDriver(o.slug);
-        }, 50);
+    const top10 = d.topOffenders.slice(0, 10).filter(o => o.stolenDollars > 0);
+    if (top10.length === 0) {
+      list.innerHTML = `<div style="padding:var(--s-4);color:var(--text-3);font-size:var(--fs-sm);text-align:center">No drivers with unexplained time in ${rangeText}.</div>`;
+    } else {
+      top10.forEach((o, i) => {
+        const row = document.createElement('div');
+        row.className = 'off-row';
+        const truckBadge = o.truckType && o.truckType !== 'unknown'
+          ? `<span class="off-truck">${o.truckType}</span>`
+          : '';
+        row.innerHTML = `
+          <div class="off-rank num">${i + 1}</div>
+          <div class="off-main">
+            <div class="off-name">${escapeHtml(o.displayName || o.slug)}</div>
+            <div class="off-meta">${o.criticalDays} critical · ${o.highDays} high · ${o.daysWithData} of ${o.days} days w/ data ${truckBadge}</div>
+          </div>
+          <div class="off-amount num">${fmt$(o.stolenDollars)}</div>
+        `;
+        row.addEventListener('click', () => navigateToDriver(o.slug));
+        list.appendChild(row);
       });
-      list.appendChild(row);
+    }
+
+    // Range chip handler — re-fetch on click.
+    container.querySelectorAll('.range-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.range;
+        overviewState.days = (v === 'all') ? 'all' : parseInt(v, 10);
+        loadOverview();
+      });
     });
+
+    // View-all toggle.
+    document.getElementById('viewAllToggle').addEventListener('click', () => {
+      overviewState.viewAllOpen = !overviewState.viewAllOpen;
+      const section = document.getElementById('viewAllSection');
+      const toggle = document.getElementById('viewAllToggle');
+      if (overviewState.viewAllOpen) {
+        section.style.display = '';
+        renderViewAll(section, d);
+        toggle.textContent = '▾ Hide full roster';
+      } else {
+        section.style.display = 'none';
+        toggle.textContent = '▸ View all drivers by truck type';
+      }
+    });
+
+    if (overviewState.viewAllOpen) {
+      renderViewAll(document.getElementById('viewAllSection'), d);
+    }
   } catch (e) {
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
   }
+}
+
+function navigateToDriver(slug) {
+  document.querySelector('.tab[data-page="investigate"]').click();
+  setTimeout(() => {
+    const sel = document.getElementById('driverSelect');
+    sel.value = slug;
+    loadDriver(slug);
+  }, 50);
+}
+
+function renderViewAll(container, d) {
+  // Combine ranked offenders + rest-of-roster into a single keyed-by-slug map.
+  // Drivers with zero records in range come from restRoster with stolenDollars=0.
+  const all = [...(d.offendersRanked || []), ...(d.restRoster || [])];
+  const bySlug = {};
+  for (const o of all) { if (!bySlug[o.slug]) bySlug[o.slug] = o; }
+
+  const straight = [], tractor = [], unknown = [];
+  for (const o of Object.values(bySlug)) {
+    if (o.truckType === 'straight') straight.push(o);
+    else if (o.truckType === 'tractor') tractor.push(o);
+    else unknown.push(o);
+  }
+
+  const sortFn = {
+    alpha: (a, b) => (a.displayName || '').localeCompare(b.displayName || ''),
+    stolen: (a, b) => (b.stolenDollars || 0) - (a.stolenDollars || 0),
+    trend: (a, b) => (b.trend30d?.delta || 0) - (a.trend30d?.delta || 0),
+    critical: (a, b) => (b.criticalDays || 0) - (a.criticalDays || 0)
+  }[overviewState.viewAllSort] || ((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+
+  straight.sort(sortFn);
+  tractor.sort(sortFn);
+  unknown.sort(sortFn);
+
+  const sortChips = `
+    <div class="range-chips" style="margin-top:var(--s-3);margin-bottom:var(--s-3);padding:0 var(--s-4)">
+      ${['alpha', 'stolen', 'trend', 'critical'].map(s => {
+        const active = overviewState.viewAllSort === s;
+        const labels = { alpha: 'A→Z', stolen: 'Stolen $', trend: 'Trend Δ', critical: 'Critical days' };
+        return `<button class="range-chip ${active ? 'active' : ''}" data-sort="${s}">${labels[s]}</button>`;
+      }).join('')}
+    </div>`;
+
+  function renderGroup(title, drivers) {
+    if (drivers.length === 0) return '';
+    return `
+      <div class="viewall-group">
+        <h3>${title} · ${drivers.length}</h3>
+        ${drivers.map(o => `
+          <div class="viewall-row" data-slug="${escapeHtml(o.slug)}">
+            <div>
+              <div class="viewall-name">${escapeHtml(o.displayName || o.slug)}</div>
+              <div class="viewall-meta">
+                ${o.criticalDays || 0} crit · ${o.highDays || 0} high · ${o.days || 0}d
+                ${o.role === 'owner_op' ? ' · owner-op' : ''}
+                ${o.isSelfLoader ? ' · self-load' : ''}
+              </div>
+            </div>
+            ${renderTrendIndicator(o.trend30d)}
+            <div class="viewall-amount">${fmt$Plain(o.stolenDollars || 0)}</div>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  container.innerHTML = `
+    ${sortChips}
+    ${renderGroup('Straight trucks', straight)}
+    ${renderGroup('Tractors', tractor)}
+    ${unknown.length ? renderGroup('Truck type unset', unknown) : ''}
+  `;
+
+  container.querySelectorAll('.viewall-row').forEach(row => {
+    row.addEventListener('click', () => navigateToDriver(row.dataset.slug));
+  });
+  container.querySelectorAll('.range-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      overviewState.viewAllSort = btn.dataset.sort;
+      renderViewAll(container, d);
+    });
+  });
 }
 
 // ============ Driver-day row (shared) ============
@@ -1578,9 +1848,13 @@ document.getElementById('openSettings').addEventListener('click', () => {
   document.getElementById('secretError').style.display = 'none';
   document.getElementById('settingsModal').classList.add('open');
   if (getSecret()) {
-    api('dashboard').then(d => {
+    // Settings shows full-history scope (not the Overview's selected range)
+    api('dashboard', { days: 'all' }).then(d => {
+      const dates = d.allDatesPresent || d.datesPresent || [];
       document.getElementById('dataScopeDisplay').textContent =
-        `${d.totalDriverDays} records · ${d.datesPresent[0]} → ${d.datesPresent[d.datesPresent.length-1]}`;
+        dates.length
+          ? `${d.rangeMeta?.totalAvailable ?? d.totalDriverDays} records · ${dates[0]} → ${dates[dates.length - 1]}`
+          : 'No data';
     }).catch(() => {});
     loadDriverConfig().catch(e => {
       document.getElementById('driverConfigList').innerHTML =
