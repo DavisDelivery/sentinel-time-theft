@@ -8,16 +8,16 @@
 //   ?action=dates                           → distinct dates with data, desc
 //   ?action=detail&driverSlug=X&date=Y      → full doc for one driver-day
 //   ?action=stops&driverSlug=X&date=Y       → all NuVizz stops for driver/date (all statuses)
-//   ?action=dashboard                       → summary stats for landing screen
+//   ?action=dashboard[&days=30|90|180|365|all]  → fleet snapshot for selected time range
 //   ?action=getBaseline&driverSlug=X        → full baseline doc for one driver
-//   ?action=driverConfig                    → active drivers + per-driver loadPrep/wrapUp overrides
+//   ?action=driverConfig                    → active drivers + per-driver loadPrep/wrapUp/truckType overrides
 //
 // Auth: ?secret=<SCAN_SECRET>
 // All responses are JSON. CORS open for browser fetch.
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.3.0-driver-config';
+const VERSION = 'v4.4.0-overview';
 
 // Per-driver listDocs cap. Each driver has at most one record per day; after
 // the 17-month backfill ~374 working days exist per driver. 1500 is ~7 years
@@ -95,20 +95,32 @@ async function driverList(db) {
     .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
 }
 
-// Active drivers' load-prep / wrap-up config + current defaults. Backs the
-// "Driver Config" panel in Settings; `loadPrepMin` / `wrapUpMin` are null
-// when the driver is using defaults, numeric when an override is set.
-// owner_op rows are included for completeness (they don't punch B600 so the
-// overrides have no effect today, but the operator may want to mark them).
+// Active drivers' load-prep / wrap-up / truck-type config + current defaults.
+// Backs the "Driver Config" panel in Settings; `loadPrepMin` / `wrapUpMin` are
+// null when the driver is using defaults, numeric when an override is set.
+// `truckType` is the per-driver override when set; `resolvedTruckType` is the
+// effective type after falling back to the truckTypeMap (so the UI can show
+// "auto: straight" for unset rows). owner_op rows are included (they don't
+// punch B600 so loadPrep/wrapUp don't apply today, but the operator wants
+// truckType set so they group correctly in the view-all dashboard).
 async function driverConfig(db) {
-  const [rows, defaultsDoc] = await Promise.all([
+  const [rows, defaultsDoc, truckTypeMapDoc] = await Promise.all([
     db.listDocs('employees', {
       where: [{ field: 'status', op: '==', value: 'active' }],
       limit: 200,
-      fields: ['fullName', 'firstName', 'lastName', 'defaultTruck', 'role', 'loadPrepMin', 'wrapUpMin']
+      fields: ['fullName', 'firstName', 'lastName', 'defaultTruck', 'role', 'loadPrepMin', 'wrapUpMin', 'truckType']
     }),
-    db.getDoc('sentinelConfig', 'defaults').catch(() => null)
+    db.getDoc('sentinelConfig', 'defaults').catch(() => null),
+    db.getDoc('sentinelConfig', 'truckTypeMap').catch(() => null)
   ]);
+  const trucksMap = truckTypeMapDoc?.trucks || {};
+  function resolveTruckType(emp) {
+    if (emp.truckType === 'tractor' || emp.truckType === 'straight') return emp.truckType;
+    const key = emp.defaultTruck ? String(emp.defaultTruck).trim() : null;
+    const fromMap = key ? trucksMap[key] : null;
+    if (fromMap === 'tractor' || fromMap === 'straight') return fromMap;
+    return 'unknown';
+  }
   const drivers = rows
     .filter(r => r.role === 'driver' || r.role === 'owner_op')
     .map(r => ({
@@ -119,7 +131,9 @@ async function driverConfig(db) {
       defaultTruck: r.defaultTruck || null,
       role: r.role,
       loadPrepMin: typeof r.loadPrepMin === 'number' ? r.loadPrepMin : null,
-      wrapUpMin: typeof r.wrapUpMin === 'number' ? r.wrapUpMin : null
+      wrapUpMin: typeof r.wrapUpMin === 'number' ? r.wrapUpMin : null,
+      truckType: (r.truckType === 'tractor' || r.truckType === 'straight') ? r.truckType : null,
+      resolvedTruckType: resolveTruckType(r)
     }))
     .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
   return {
@@ -213,21 +227,101 @@ async function stops(db, driverSlug, date) {
   };
 }
 
-async function dashboard(db) {
-  // Slim-projection pagination of ALL sentinelDriverDays — listAllDocs uses
-  // pageToken so the dashboard now reflects the entire backfill, not the
-  // alphabetical-by-docId first 600 records (which the totals, distribution,
-  // top-offenders, and baselines-scored-against panels were silently capped to).
-  const [rows, baselineDocs] = await Promise.all([
+// Median of a non-empty numeric array (mutates: sorts in place).
+function median(arr) {
+  if (!arr.length) return null;
+  arr.sort((a, b) => a - b);
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : Math.round((arr[mid - 1] + arr[mid]) / 2);
+}
+
+// Resolve effective truckType for the view-all grouping. Identical chain to
+// _sentinel-scan.resolveTruckType so the dashboard categorization matches
+// what the engine writes on next scan.
+function resolveTruckType(emp, trucksMap) {
+  if (emp.truckType === 'tractor' || emp.truckType === 'straight') return emp.truckType;
+  const key = emp.defaultTruck ? String(emp.defaultTruck).trim() : null;
+  const fromMap = key ? trucksMap[key] : null;
+  if (fromMap === 'tractor' || fromMap === 'straight') return fromMap;
+  return 'unknown';
+}
+
+// Threshold above which an employee is treated as a "self-loader" for the
+// reference-metrics 2x2 grid. Anything below (or unset) buckets as
+// "pre-loaded." 60min was chosen so the default-15 + occasional 30-45 outliers
+// stay in the pre-load bucket while genuine self-loaders (~120m) classify
+// cleanly. Lives here, not in /sentinelConfig/defaults, because it's a UI
+// categorization knob, not engine math.
+const SELF_LOAD_THRESHOLD_MIN = 60;
+
+async function dashboard(db, days) {
+  // Compute the date window. `days='all'` (or any non-numeric) → no filter.
+  // Numeric → last N days, inclusive of today (use YYYY-MM-DD lex compare
+  // against record.date which is stored ET-naive YYYY-MM-DD).
+  const today = new Date();
+  let startDate = null;
+  if (typeof days === 'number' && days > 0) {
+    const start = new Date(today.getTime() - (days - 1) * 86400000);
+    const yyyy = start.getUTCFullYear();
+    const mm = String(start.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(start.getUTCDate()).padStart(2, '0');
+    startDate = `${yyyy}-${mm}-${dd}`;
+  }
+  const todayStr = today.toISOString().slice(0, 10);
+
+  // Slim-projection pagination of ALL sentinelDriverDays. We add raw morning /
+  // afternoon fields so the reference-metrics medians can be computed without
+  // a second read. listAllDocs uses pageToken so the entire backfill reaches
+  // us, not just the alphabetical-by-docId first 600 records.
+  const [rows, baselineDocs, employees, truckTypeMapDoc, defaultsDoc] = await Promise.all([
     db.listAllDocs('sentinelDriverDays', {
-      fields: ['date', 'driverSlug', 'displayName', 'riskLevel', 'riskScore', 'stolenDollars', 'stolenMinutes', 'b600Matched', 'nuvizzMatched', 'morningSeveritySource', 'afternoonSeveritySource', 'inRouteSeveritySource']
+      fields: [
+        'date', 'driverSlug', 'displayName', 'riskLevel', 'riskScore',
+        'stolenDollars', 'stolenMinutes', 'b600Matched', 'nuvizzMatched',
+        'morningSeveritySource', 'afternoonSeveritySource', 'inRouteSeveritySource',
+        'clockInToFirstMin', 'morningGapMin',
+        'lastToClockOutMin', 'afternoonGapMin',
+        'expectedTravelMinToFirst', 'expectedTravelMinFromLast',
+        'truckType'
+      ]
     }),
     db.listDocs('sentinelBaselines', {
       limit: 500,
       fields: ['driverSlug', 'confidence', 'daysAnalyzed']
-    })
+    }),
+    db.listDocs('employees', {
+      where: [{ field: 'status', op: '==', value: 'active' }],
+      limit: 200,
+      fields: ['fullName', 'firstName', 'lastName', 'defaultTruck', 'role', 'loadPrepMin', 'truckType']
+    }),
+    db.getDoc('sentinelConfig', 'truckTypeMap').catch(() => null),
+    db.getDoc('sentinelConfig', 'defaults').catch(() => null)
   ]);
-  console.log(`[sentinel-read] dashboard → ${rows.length} sentinelDriverDays, ${baselineDocs.length} baselines`);
+  console.log(`[sentinel-read] dashboard(days=${days}) → ${rows.length} sentinelDriverDays, ${baselineDocs.length} baselines, ${employees.length} employees`);
+
+  const trucksMap = truckTypeMapDoc?.trucks || {};
+  const defaultLoadPrep = defaultsDoc?.loadPrepMin ?? 15;
+
+  // Build driver metadata index: every active driver, with effective truckType
+  // and effective loadPrepMin. UI uses this for view-all grouping + reference
+  // metrics categorization. Drivers with no historical records still show up
+  // (so the operator sees the full active roster, not just the offenders).
+  const driverMeta = {};
+  for (const e of employees) {
+    if (e.role !== 'driver' && e.role !== 'owner_op') continue;
+    const truckType = resolveTruckType(e, trucksMap);
+    const loadPrepMin = typeof e.loadPrepMin === 'number' ? e.loadPrepMin : defaultLoadPrep;
+    driverMeta[e.id] = {
+      slug: e.id,
+      displayName: e.fullName || e.id,
+      lastName: e.lastName || '',
+      role: e.role,
+      truckType,
+      loadPrepMin,
+      isSelfLoader: loadPrepMin >= SELF_LOAD_THRESHOLD_MIN
+    };
+  }
+
   const baselinesBySlug = {};
   const baselineConfidence = { insufficient: 0, low: 0, medium: 0, high: 0 };
   for (const b of baselineDocs) {
@@ -244,16 +338,62 @@ async function dashboard(db) {
       recordsScoredAgainstBaseline++;
     }
   }
+
+  // Split records into current range + 30d trend windows. Trend windows are
+  // always 30d regardless of the user-selected range — gives a consistent
+  // "trending vs prior month" signal even when the operator is viewing a
+  // larger window.
+  const trendCurrentStart = (() => {
+    const d = new Date(today.getTime() - 29 * 86400000);
+    return d.toISOString().slice(0, 10);
+  })();
+  const trendPriorStart = (() => {
+    const d = new Date(today.getTime() - 59 * 86400000);
+    return d.toISOString().slice(0, 10);
+  })();
+  const trendPriorEnd = (() => {
+    const d = new Date(today.getTime() - 30 * 86400000);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const inRange = r => !startDate || (r.date && r.date >= startDate);
+  const inTrendCurrent = r => r.date && r.date >= trendCurrentStart && r.date <= todayStr;
+  const inTrendPrior = r => r.date && r.date >= trendPriorStart && r.date <= trendPriorEnd;
+
   const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
   let totalStolen$ = 0, totalStolenMin = 0;
   const perDriver = {};
   const datesPresent = new Set();
+  const allDatesPresent = new Set();
+  const trendStolen = {};   // slug → { current, prior }
+
+  // Reference-metrics buckets: [truckType_isSelfLoader] → arrays of values
+  // from records in the selected range. Medians computed at the end.
+  const refBuckets = {
+    straight_preload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 },
+    straight_selfload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 },
+    tractor_preload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 },
+    tractor_selfload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 }
+  };
+
   for (const r of rows) {
+    if (r.date) allDatesPresent.add(r.date);
+    const slug = r.driverSlug;
+
+    // 30d trend aggregations — always computed regardless of range filter.
+    if (slug) {
+      if (!trendStolen[slug]) trendStolen[slug] = { current: 0, prior: 0 };
+      if (inTrendCurrent(r)) trendStolen[slug].current += r.stolenDollars || 0;
+      else if (inTrendPrior(r)) trendStolen[slug].prior += r.stolenDollars || 0;
+    }
+
+    if (!inRange(r)) continue;
+
     dist[r.riskLevel] = (dist[r.riskLevel] || 0) + 1;
     totalStolen$ += r.stolenDollars || 0;
     totalStolenMin += r.stolenMinutes || 0;
     if (r.date) datesPresent.add(r.date);
-    const slug = r.driverSlug;
+
     if (!perDriver[slug]) {
       perDriver[slug] = {
         slug, displayName: r.displayName,
@@ -269,19 +409,113 @@ async function dashboard(db) {
     pd.stolenMinutes += r.stolenMinutes || 0;
     if (r.riskLevel === 'critical') pd.criticalDays++;
     if (r.riskLevel === 'high') pd.highDays++;
+
+    // Reference-metrics bucketing — only counts records for drivers we know
+    // the category for (i.e. on the active roster).
+    const meta = driverMeta[slug];
+    if (meta && meta.truckType !== 'unknown') {
+      const bucketKey = `${meta.truckType}_${meta.isSelfLoader ? 'selfload' : 'preload'}`;
+      const bucket = refBuckets[bucketKey];
+      if (bucket) {
+        bucket.drivers.add(slug);
+        bucket.days++;
+        if (typeof r.clockInToFirstMin === 'number') bucket.c2f.push(r.clockInToFirstMin);
+        if (typeof r.morningGapMin === 'number') bucket.morningGap.push(r.morningGapMin);
+        if (typeof r.lastToClockOutMin === 'number') bucket.l2c.push(r.lastToClockOutMin);
+        if (typeof r.afternoonGapMin === 'number') bucket.afternoonGap.push(r.afternoonGapMin);
+      }
+    }
   }
+
   for (const pd of Object.values(perDriver)) {
     pd.stolenDollars = +pd.stolenDollars.toFixed(2);
+    const t = trendStolen[pd.slug];
+    if (t) {
+      pd.trend30d = {
+        current: +t.current.toFixed(2),
+        prior: +t.prior.toFixed(2),
+        delta: +(t.current - t.prior).toFixed(2)
+      };
+    }
+    const meta = driverMeta[pd.slug];
+    if (meta) {
+      pd.truckType = meta.truckType;
+      pd.loadPrepMin = meta.loadPrepMin;
+      pd.isSelfLoader = meta.isSelfLoader;
+      pd.role = meta.role;
+    }
   }
-  const topOffenders = Object.values(perDriver)
-    .sort((a, b) => b.stolenDollars - a.stolenDollars)
-    .slice(0, 15);
+
+  // Top offenders: full sorted list (UI slices top-10 + "View All"). Drivers
+  // with zero records in range are added at the tail so view-all shows the
+  // complete roster, alphabetical fallback.
+  const offendersRanked = Object.values(perDriver)
+    .sort((a, b) => b.stolenDollars - a.stolenDollars);
+  const rankedSlugs = new Set(offendersRanked.map(o => o.slug));
+  const restRoster = Object.values(driverMeta)
+    .filter(d => !rankedSlugs.has(d.slug))
+    .map(d => ({
+      slug: d.slug, displayName: d.displayName,
+      truckType: d.truckType, loadPrepMin: d.loadPrepMin, isSelfLoader: d.isSelfLoader, role: d.role,
+      days: 0, daysWithData: 0, stolenDollars: 0, stolenMinutes: 0, criticalDays: 0, highDays: 0,
+      trend30d: trendStolen[d.slug]
+        ? { current: +trendStolen[d.slug].current.toFixed(2), prior: +trendStolen[d.slug].prior.toFixed(2),
+            delta: +(trendStolen[d.slug].current - trendStolen[d.slug].prior).toFixed(2) }
+        : { current: 0, prior: 0, delta: 0 }
+    }));
+
+  // Reference metrics: median c2f / morningGap / l2c / afternoonGap + model
+  // expected (per-bucket loadPrep + threshold.ok). Buckets with zero drivers
+  // return null so the UI shows "Configure self-loaders to populate."
+  const morningOk = defaultsDoc?.morningGapStaticThresholds?.ok ?? 30;
+  const afternoonOk = defaultsDoc?.afternoonGapStaticThresholds?.ok ?? 30;
+  const refMetricsOut = {};
+  for (const [key, b] of Object.entries(refBuckets)) {
+    if (b.drivers.size === 0) {
+      refMetricsOut[key] = null;
+      continue;
+    }
+    const isSelfLoader = key.endsWith('selfload');
+    // Representative loadPrep for the bucket: pick the median of the bucket's
+    // drivers' loadPrep values (handles a fleet where self-loaders aren't all
+    // at the same minutes setting).
+    const bucketLoadPreps = [...b.drivers]
+      .map(s => driverMeta[s]?.loadPrepMin)
+      .filter(v => typeof v === 'number')
+      .sort((a, b) => a - b);
+    const representativeLoadPrep = bucketLoadPreps.length
+      ? bucketLoadPreps[Math.floor(bucketLoadPreps.length / 2)]
+      : (isSelfLoader ? 120 : defaultLoadPrep);
+    refMetricsOut[key] = {
+      n_drivers: b.drivers.size,
+      n_days: b.days,
+      medianC2F: median(b.c2f),
+      medianMorningGap: median(b.morningGap),
+      medianL2C: median(b.l2c),
+      medianAfternoonGap: median(b.afternoonGap),
+      representativeLoadPrep,
+      representativeWrapUp: defaultsDoc?.wrapUpMin ?? 15,
+      morningOkThreshold: morningOk,
+      afternoonOkThreshold: afternoonOk
+    };
+  }
+
   return {
-    totalDriverDays: rows.length,
+    rangeMeta: {
+      days: typeof days === 'number' ? days : 'all',
+      startDate, endDate: todayStr,
+      totalAvailable: rows.length
+    },
+    totalDriverDays: offendersRanked.reduce((s, o) => s + o.days, 0),
     datesPresent: [...datesPresent].sort(),
+    allDatesPresent: [...allDatesPresent].sort(),
     dist,
     totalStolen: { dollars: +totalStolen$.toFixed(2), minutes: totalStolenMin },
-    topOffenders,
+    topOffenders: offendersRanked.slice(0, 15),
+    offendersRanked,
+    restRoster,
+    drivers: Object.values(driverMeta),
+    referenceMetrics: refMetricsOut,
     baselines: {
       total: baselineDocs.length,
       byConfidence: baselineConfidence,
@@ -348,9 +582,17 @@ export default async (req) => {
         body = { action, driverSlug, date, ...(await stops(db, driverSlug, date)) };
         break;
       }
-      case 'dashboard':
-        body = { action, ...(await dashboard(db)) };
+      case 'dashboard': {
+        const rawDays = url.searchParams.get('days');
+        let days = 30; // default rolling window
+        if (rawDays === 'all') days = 'all';
+        else if (rawDays != null) {
+          const n = parseInt(rawDays, 10);
+          if (Number.isFinite(n) && n > 0 && n <= 36500) days = n;
+        }
+        body = { action, ...(await dashboard(db, days)) };
         break;
+      }
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { status: 400, headers: CORS });
     }

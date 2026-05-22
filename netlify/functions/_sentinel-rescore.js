@@ -13,20 +13,23 @@
 //   DEFAULT_DEFAULTS                        → fallback when sentinelConfig/defaults missing
 //   ENGINE_VERSION                          → stamped into rescored records
 
-// Static-only fraud detection (v4.3.0). Baselines remain in _baselines.js for
+// Static-only fraud detection (v4.3.1). Baselines remain in _baselines.js for
 // the driver-detail "Your Typical Day" context card, but the engine no longer
 // consumes them — fraud is judged against a fixed threshold the same for every
 // driver. Median / P75 / P90 are coaching context ("worse day than usual"),
 // not a moving goalpost for theft.
 //
-// v4.3.0 adds per-driver loadPrepMin / wrapUpMin overrides sourced from
-// /employees/{slug}. Rescore re-derives morningGapMin / afternoonGapMin from
-// raw clockInToFirstMin / lastToClockOutMin + expectedTravelMin* + the current
-// employee override (falling back to defaults). That way changing a driver's
-// loadPrepMin from 15 → 120 in the UI then running Re-score All Records
-// updates every historical record without re-running the scan.
+// v4.3.0 added per-driver loadPrepMin / wrapUpMin overrides sourced from
+// /employees/{slug}. v4.3.1 extends the same per-employee override path to
+// truckType — operator-set via Driver Config. Rescore re-derives
+// morningGapMin / afternoonGapMin from raw clockInToFirstMin /
+// lastToClockOutMin + expectedTravelMin* + the current employee override
+// (falling back to defaults). That way changing a driver's loadPrepMin from
+// 15 → 120, or their truckType from 'unknown' → 'tractor', in the UI then
+// running Re-score All Records updates every historical record without
+// re-running the scan.
 
-export const ENGINE_VERSION = 'v4.3.0-driver-config';
+export const ENGINE_VERSION = 'v4.3.1-truck-type-override';
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
@@ -149,6 +152,15 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
   next.loadPrepMin = loadPrep;
   next.wrapUpMin = wrapUp;
 
+  // Truck-type override: if /employees has a per-driver truckType (operator-
+  // set via Driver Config), prefer it over the record's stamped value. Wage
+  // attribution downstream uses next.truckType, so this is what makes a
+  // mid-stream "this driver actually drives a tractor" edit flow into the
+  // historical stolen$ calculation on the next rescore.
+  if (employee?.truckType === 'tractor' || employee?.truckType === 'straight') {
+    next.truckType = employee.truckType;
+  }
+
   // Re-derive gaps from raw inputs. If the raw inputs aren't present
   // (e.g. no first-delivery time → clockInToFirstMin null), gap is null and
   // the flag stays no_data. Negative values are NOT clamped here — engine
@@ -237,8 +249,8 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
   next.riskLevel = riskLevelOf(score);
 
   next.stolenMinutes = stolen;
-  const wage = (defaults.wageRates[record.truckType] != null)
-    ? defaults.wageRates[record.truckType]
+  const wage = (defaults.wageRates[next.truckType] != null)
+    ? defaults.wageRates[next.truckType]
     : defaults.wageRates.unknown;
   next.stolenDollars = +((stolen / 60) * wage).toFixed(2);
 

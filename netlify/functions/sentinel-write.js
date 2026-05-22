@@ -2,9 +2,10 @@
 // Write endpoint for operator-driven config edits made from the Settings panel.
 //
 // Actions (POST, JSON body):
-//   setDriverConfig: { driverSlug, loadPrepMin?, wrapUpMin? }
+//   setDriverConfig: { driverSlug, loadPrepMin?, wrapUpMin?, truckType? }
 //     - Numeric value     → set/overwrite per-driver override on /employees
-//     - null              → clear the override (revert to defaults)
+//     - 'tractor' / 'straight' → set per-driver truckType override
+//     - null              → clear the override (revert to defaults/auto-resolve)
 //     - Omitted key       → field untouched
 //
 // Auth: ?secret=<SCAN_SECRET>
@@ -13,7 +14,7 @@
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.3.0-driver-config';
+const VERSION = 'v4.3.1-truck-type-override';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -49,8 +50,19 @@ function validateOverrideValue(val, key) {
   return { ok: true, normalized: Math.round(val) };
 }
 
+const VALID_TRUCK_TYPES = ['tractor', 'straight'];
+
+function validateTruckType(val) {
+  if (val === null) return { ok: true, normalized: null };
+  if (typeof val !== 'string') return { ok: false, error: 'truckType must be a string or null' };
+  if (!VALID_TRUCK_TYPES.includes(val)) {
+    return { ok: false, error: `truckType must be one of: ${VALID_TRUCK_TYPES.join(', ')} (or null to clear)` };
+  }
+  return { ok: true, normalized: val };
+}
+
 async function setDriverConfig(db, body) {
-  const { driverSlug, loadPrepMin, wrapUpMin } = body;
+  const { driverSlug, loadPrepMin, wrapUpMin, truckType } = body;
   if (!driverSlug || typeof driverSlug !== 'string') {
     return { status: 400, body: { error: 'driverSlug required' } };
   }
@@ -74,9 +86,15 @@ async function setDriverConfig(db, body) {
     if (v.normalized !== null) patch.wrapUpMin = v.normalized;
     fieldPaths.push('wrapUpMin');
   }
+  if (Object.prototype.hasOwnProperty.call(body, 'truckType')) {
+    const v = validateTruckType(truckType);
+    if (!v.ok) return { status: 400, body: { error: v.error } };
+    if (v.normalized !== null) patch.truckType = v.normalized;
+    fieldPaths.push('truckType');
+  }
 
   if (fieldPaths.length === 0) {
-    return { status: 400, body: { error: 'nothing to update — supply loadPrepMin and/or wrapUpMin' } };
+    return { status: 400, body: { error: 'nothing to update — supply loadPrepMin, wrapUpMin, and/or truckType' } };
   }
 
   await db.patchDoc('employees', driverSlug, patch, fieldPaths);
@@ -86,7 +104,8 @@ async function setDriverConfig(db, body) {
       driverSlug,
       updated: fieldPaths,
       loadPrepMin: Object.prototype.hasOwnProperty.call(patch, 'loadPrepMin') ? patch.loadPrepMin : (typeof emp.loadPrepMin === 'number' ? emp.loadPrepMin : null),
-      wrapUpMin: Object.prototype.hasOwnProperty.call(patch, 'wrapUpMin') ? patch.wrapUpMin : (typeof emp.wrapUpMin === 'number' ? emp.wrapUpMin : null)
+      wrapUpMin: Object.prototype.hasOwnProperty.call(patch, 'wrapUpMin') ? patch.wrapUpMin : (typeof emp.wrapUpMin === 'number' ? emp.wrapUpMin : null),
+      truckType: Object.prototype.hasOwnProperty.call(patch, 'truckType') ? patch.truckType : (emp.truckType || null)
     }
   };
 }
