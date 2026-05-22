@@ -281,6 +281,48 @@ body {
   color: var(--text-3); font-size: var(--fs-sm);
 }
 .stops-err { color: var(--crit); border-color: var(--crit); }
+
+/* ============ Profile tab ============
+ * Per-driver baseline view. Sticks to existing card/section tokens so it
+ * theme-cascades cleanly. The metric-row layout shows P50/P75/P90/range
+ * side-by-side because that's the comparison an operator wants when
+ * sizing a driver's normal day against a flagged outlier. */
+.prof-hero {
+  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg) 100%);
+  border: 1px solid var(--line); border-radius: 14px;
+  padding: var(--s-5); margin-bottom: var(--s-4);
+}
+.prof-name { font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 4px; }
+.prof-sub { color: var(--text-3); font-size: var(--fs-md); }
+.prof-conf {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; vertical-align: middle;
+}
+.prof-conf-high         { background: var(--clean-bg); color: var(--clean); }
+.prof-conf-medium       { background: var(--med-bg); color: var(--med); }
+.prof-conf-low          { background: var(--high-bg); color: var(--high); }
+.prof-conf-insufficient { background: var(--bg-3); color: var(--text-3); }
+.prof-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-3);
+  padding: var(--s-3) 0; border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+.prof-row:last-child { border-bottom: 0; }
+.prof-label {
+  font-weight: 600; font-size: var(--fs-sm);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.prof-n { color: var(--text-4); font-size: var(--fs-xs); font-weight: 500; }
+.prof-vals { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.prof-cell { text-align: right; min-width: 56px; }
+.prof-cell.wide { min-width: 110px; }
+.prof-k { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.prof-v { font-size: var(--fs-base); font-weight: 700; color: var(--text); }
+.prof-empty { color: var(--text-4); font-size: var(--fs-sm); }
+.prof-zip-list { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2) var(--s-4); }
+.prof-zip-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: var(--fs-sm); }
+.prof-zip-n { color: var(--text-3); }
 .dh { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s-2); }
 .dd-sec { margin-bottom: var(--s-4); }
 .dd-sec:last-child { margin-bottom: 0; }
@@ -466,6 +508,22 @@ body {
   </div>
 </div>
 
+<div class="page" id="page-profile">
+  <div class="picker">
+    <select id="profileSelect" aria-label="Driver"></select>
+    <button class="refresh" id="refreshProfile" aria-label="Refresh">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+  </div>
+  <div id="profileContent">
+    <div class="empty">
+      <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <h3>Pick a driver</h3>
+      <p>Their baseline profile — percentiles, typical shift, regular customers — will load here.</p>
+    </div>
+  </div>
+</div>
+
 <nav class="tabs">
   <button class="tab active" data-page="overview">
     <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
@@ -478,6 +536,10 @@ body {
   <button class="tab" data-page="investigate">
     <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
     Investigate
+  </button>
+  <button class="tab" data-page="profile">
+    <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+    Profiles
   </button>
 </nav>
 
@@ -514,7 +576,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.2.0-stops-drilldown';
+const APP_VERSION = 'v4.2.1-profile-tab';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1146,11 +1208,133 @@ document.getElementById('refreshDriver').addEventListener('click', () => {
   if (sel.value) loadDriver(sel.value);
 });
 
+// ============ Profile ============
+// Read-only view of the per-driver baseline doc. Picker on top, content below.
+// Pulls from /api/sentinel-read?action=getBaseline so the load is one Firestore
+// read per driver — no scan, no history fetch.
+async function loadProfileInit() {
+  try {
+    const r = await api('driverList');
+    const sel = document.getElementById('profileSelect');
+    sel.innerHTML = '<option value="">— pick a driver —</option>' +
+      r.drivers.map(d => `<option value="${d.slug}">${d.fullName || d.slug}${d.defaultTruck ? ' · #' + d.defaultTruck : ''}</option>`).join('');
+    sel.addEventListener('change', () => sel.value && loadProfile(sel.value));
+  } catch (e) {
+    document.getElementById('profileContent').innerHTML =
+      `<div class="empty"><h3>Couldn't load drivers</h3><p>${e.message}</p></div>`;
+  }
+}
+async function loadProfile(slug) {
+  const c = document.getElementById('profileContent');
+  c.innerHTML = '<div class="loading">Loading baseline</div>';
+  try {
+    const r = await api('getBaseline', { driverSlug: slug });
+    c.innerHTML = renderProfile(slug, r.baseline);
+  } catch (e) {
+    c.innerHTML = `<div class="empty"><h3>Couldn't load baseline</h3><p>${e.message}</p></div>`;
+  }
+}
+
+// Render one metric row: label · P50 / P75 / P90 (formatted via formatter).
+// Each baseline doc carries {n, min, max, mean, p25, p50, p75, p90} per metric.
+function metricRow(label, dist, fmt) {
+  if (!dist || dist.n == null || dist.n === 0) {
+    return `
+      <div class="prof-row">
+        <div class="prof-label">${label}</div>
+        <div class="prof-vals"><span class="prof-empty">no data</span></div>
+      </div>
+    `;
+  }
+  return `
+    <div class="prof-row">
+      <div class="prof-label">${label}<span class="prof-n">n=${dist.n}</span></div>
+      <div class="prof-vals">
+        <div class="prof-cell"><div class="prof-k">P50</div><div class="prof-v num">${fmt(dist.p50)}</div></div>
+        <div class="prof-cell"><div class="prof-k">P75</div><div class="prof-v num">${fmt(dist.p75)}</div></div>
+        <div class="prof-cell"><div class="prof-k">P90</div><div class="prof-v num">${fmt(dist.p90)}</div></div>
+        <div class="prof-cell wide"><div class="prof-k">Range</div><div class="prof-v num">${fmt(dist.min)} – ${fmt(dist.max)}</div></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderProfile(slug, baseline) {
+  if (!baseline) {
+    return `
+      <div class="empty">
+        <h3>No baseline yet</h3>
+        <p>This driver doesn't have a baseline doc. Run Recompute Baselines (Settings) to generate one if they have any driver-days on record.</p>
+      </div>
+    `;
+  }
+  const m = baseline.metrics || {};
+  const fmtInt = v => v == null ? '—' : String(Math.round(v));
+  const fmtFloat = v => v == null ? '—' : (+v).toFixed(2);
+
+  const confBadge = `<span class="prof-conf prof-conf-${baseline.confidence}">${baseline.confidence}</span>`;
+  const computed = baseline.computedAt ? baseline.computedAt.slice(0, 10) : '—';
+
+  const zipsHtml = (baseline.typicalCustomerZips || []).slice(0, 12).map(z =>
+    `<div class="prof-zip-row"><span class="mono">${z.zip}</span><span class="prof-zip-n num">${z.count} visits</span></div>`
+  ).join('');
+
+  return `
+    <div class="prof-hero">
+      <div class="prof-name">${baseline.displayName || slug}</div>
+      <div class="prof-sub">
+        ${baseline.truckType || 'driver'} ·
+        <span class="num">${baseline.daysAnalyzed}</span> days analyzed ·
+        ${confBadge} confidence ·
+        baseline ${computed}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2>Shift Timing</h2><div class="aux">P50 / P75 / P90 of their own days</div></div>
+      <div class="card">
+        ${metricRow('Morning gap (clockIn → first delivery)', m.morningGapMin, fmtDur)}
+        ${metricRow('Afternoon gap (last delivery → clockOut)', m.afternoonGapMin, fmtDur)}
+        ${metricRow('ClockIn → first delivery (full)', m.clockInToFirstMin, fmtDur)}
+        ${metricRow('Last delivery → clockOut (full)', m.lastToClockOutMin, fmtDur)}
+        ${metricRow('Total shift', m.totalShiftMin, fmtDur)}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2>Off-route Activity</h2><div class="aux">Motive in-route deviations</div></div>
+      <div class="card">
+        ${metricRow('In-route off-route time', m.inRouteOffRouteMin, fmtDur)}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2>Volume</h2><div class="aux">Per-day throughput</div></div>
+      <div class="card">
+        ${metricRow('Completed stops', m.completedStops, fmtInt)}
+        ${metricRow('Stops per hour', m.stopsPerHour, fmtFloat)}
+      </div>
+    </div>
+
+    ${zipsHtml ? `
+      <div class="section">
+        <div class="section-head"><h2>Typical Customer ZIPs</h2><div class="aux">top 12 by visit count</div></div>
+        <div class="card"><div class="prof-zip-list">${zipsHtml}</div></div>
+      </div>
+    ` : ''}
+  `;
+}
+document.getElementById('refreshProfile').addEventListener('click', () => {
+  const sel = document.getElementById('profileSelect');
+  if (sel.value) loadProfile(sel.value);
+});
+
 // ============ Tab navigation ============
 const pages = {
   overview: { el: document.getElementById('page-overview'), loader: loadOverview, loaded: false },
   audit: { el: document.getElementById('page-audit'), loader: loadAudit, loaded: false },
-  investigate: { el: document.getElementById('page-investigate'), loader: loadInvestigateInit, loaded: false }
+  investigate: { el: document.getElementById('page-investigate'), loader: loadInvestigateInit, loaded: false },
+  profile: { el: document.getElementById('page-profile'), loader: loadProfileInit, loaded: false }
 };
 document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => {
