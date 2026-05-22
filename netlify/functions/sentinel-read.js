@@ -10,13 +10,14 @@
 //   ?action=stops&driverSlug=X&date=Y       → all NuVizz stops for driver/date (all statuses)
 //   ?action=dashboard                       → summary stats for landing screen
 //   ?action=getBaseline&driverSlug=X        → full baseline doc for one driver
+//   ?action=driverConfig                    → active drivers + per-driver loadPrep/wrapUp overrides
 //
 // Auth: ?secret=<SCAN_SECRET>
 // All responses are JSON. CORS open for browser fetch.
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.2.0-stops-drilldown';
+const VERSION = 'v4.3.0-driver-config';
 
 // Per-driver listDocs cap. Each driver has at most one record per day; after
 // the 17-month backfill ~374 working days exist per driver. 1500 is ~7 years
@@ -92,6 +93,42 @@ async function driverList(db) {
       role: r.role
     }))
     .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
+}
+
+// Active drivers' load-prep / wrap-up config + current defaults. Backs the
+// "Driver Config" panel in Settings; `loadPrepMin` / `wrapUpMin` are null
+// when the driver is using defaults, numeric when an override is set.
+// owner_op rows are included for completeness (they don't punch B600 so the
+// overrides have no effect today, but the operator may want to mark them).
+async function driverConfig(db) {
+  const [rows, defaultsDoc] = await Promise.all([
+    db.listDocs('employees', {
+      where: [{ field: 'status', op: '==', value: 'active' }],
+      limit: 200,
+      fields: ['fullName', 'firstName', 'lastName', 'defaultTruck', 'role', 'loadPrepMin', 'wrapUpMin']
+    }),
+    db.getDoc('sentinelConfig', 'defaults').catch(() => null)
+  ]);
+  const drivers = rows
+    .filter(r => r.role === 'driver' || r.role === 'owner_op')
+    .map(r => ({
+      slug: r.id,
+      fullName: r.fullName,
+      firstName: r.firstName,
+      lastName: r.lastName,
+      defaultTruck: r.defaultTruck || null,
+      role: r.role,
+      loadPrepMin: typeof r.loadPrepMin === 'number' ? r.loadPrepMin : null,
+      wrapUpMin: typeof r.wrapUpMin === 'number' ? r.wrapUpMin : null
+    }))
+    .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
+  return {
+    drivers,
+    defaults: {
+      loadPrepMin: defaultsDoc?.loadPrepMin ?? 15,
+      wrapUpMin: defaultsDoc?.wrapUpMin ?? 15
+    }
+  };
 }
 
 async function dates(db) {
@@ -290,6 +327,9 @@ export default async (req) => {
       }
       case 'driverList':
         body = { action, drivers: await driverList(db) };
+        break;
+      case 'driverConfig':
+        body = { action, ...(await driverConfig(db)) };
         break;
       case 'dates':
         body = { action, dates: await dates(db) };

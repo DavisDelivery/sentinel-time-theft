@@ -119,14 +119,21 @@ export default async (req) => {
   }
 
   // Load shared inputs once per invocation. listAllDocs paginates so we get
-  // ALL records (the bug PR #7 fixed for the synchronous version); baselines
-  // and defaults are small enough to fit in one listDocs page.
-  const [records, baselines, defaults] = await Promise.all([
+  // ALL records (the bug PR #7 fixed for the synchronous version); baselines,
+  // defaults, and the employees roster are small enough to fit in one
+  // listDocs page. employees-by-slug is consulted on every rescored record to
+  // resolve loadPrepMin / wrapUpMin overrides.
+  const [records, baselines, defaults, employees] = await Promise.all([
     db.listAllDocs('sentinelDriverDays'),
     loadAllBaselines(db),
-    loadDefaults(db)
+    loadDefaults(db),
+    db.listDocs('employees', { limit: 500, fields: ['loadPrepMin', 'wrapUpMin'] })
   ]);
-  console.log(`[rescore-bg] read ${records.length} records, ${Object.keys(baselines).length} baselines`);
+  const employeesBySlug = {};
+  for (const e of employees) {
+    if (e?.id) employeesBySlug[e.id] = e;
+  }
+  console.log(`[rescore-bg] read ${records.length} records, ${Object.keys(baselines).length} baselines, ${Object.keys(employeesBySlug).length} employees`);
 
   if (isKickoff) {
     // Bump epoch off whatever's currently in the doc. Combined with the
@@ -175,7 +182,8 @@ export default async (req) => {
     const batch = records.slice(status.cursor, status.cursor + WRITE_PARALLELISM);
     const results = await Promise.allSettled(batch.map(r => {
       const baseline = baselines[r.driverSlug] || null;
-      const { next, sourceCounts } = rescoreOne(r, baseline, defaults);
+      const employee = employeesBySlug[r.driverSlug] || null;
+      const { next, sourceCounts } = rescoreOne(r, baseline, defaults, employee);
       const beforeLevel = r.riskLevel || 'clean';
       const afterLevel = next.riskLevel;
       const beforeStolen = r.stolenDollars || 0;

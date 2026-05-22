@@ -13,7 +13,19 @@
 //   minutesBetween(a, b)          → number
 //   classifyGap(gapMin, t)        → 'ok' | 'warn' | 'flag' | 'critical'
 
-const VERSION = 'v4.1.0-phase3c';
+const VERSION = 'v4.3.0-driver-config';
+
+// Per-driver load-prep / wrap-up overrides land on /employees/{slug} and flow
+// through scoreDriverDay via the optional `loadPrepMin` / `wrapUpMin` input
+// fields. When unset, scoring falls back to defaults.loadPrepMin /
+// defaults.wrapUpMin. The value actually used is stamped on the record so a
+// later rescore (or a human audit) can see whether the engine charged this
+// driver as a self-loader or a pre-loader.
+function resolveOverride(input, defaults, key) {
+  const ov = input[key];
+  if (typeof ov === 'number' && Number.isFinite(ov) && ov >= 0) return ov;
+  return defaults[key];
+}
 
 /**
  * Parse a B600 date + clock time into a Date object.
@@ -131,6 +143,9 @@ export function scoreDriverDay(input) {
     defaults
   } = input;
 
+  const loadPrepMin = resolveOverride(input, defaults, 'loadPrepMin');
+  const wrapUpMin = resolveOverride(input, defaults, 'wrapUpMin');
+
   const out = {
     _id: `${driverSlug}_${date}`,
     driverSlug,
@@ -157,7 +172,7 @@ export function scoreDriverDay(input) {
     clockInToFirstMin: null,
     expectedTravelMinToFirst: expectedTravelMinToFirst ?? null,
     expectedTravelMinToFirstSource,
-    loadPrepMin: defaults.loadPrepMin,
+    loadPrepMin,
     morningGapMin: null,
     morningFlag: 'no_data',
     morningSeveritySource: 'static',
@@ -166,7 +181,7 @@ export function scoreDriverDay(input) {
     lastToClockOutMin: null,
     expectedTravelMinFromLast: expectedTravelMinFromLast ?? null,
     expectedTravelMinFromLastSource,
-    wrapUpMin: defaults.wrapUpMin,
+    wrapUpMin,
     afternoonGapMin: null,
     afternoonFlag: 'no_data',
     afternoonSeveritySource: 'static',
@@ -219,7 +234,7 @@ export function scoreDriverDay(input) {
       // First delivery before clock-in is data weirdness — flag it as data health
       out.dataHealth.push('first_delivery_before_clockin');
     } else if (expectedTravelMinToFirst != null) {
-      const expectedTotal = expectedTravelMinToFirst + defaults.loadPrepMin;
+      const expectedTotal = expectedTravelMinToFirst + loadPrepMin;
       const gap = clockInToFirstMin - expectedTotal;
       out.morningGapMin = gap;
       out.morningFlag = classifyGap(gap, defaults.morningGapStaticThresholds);
@@ -228,7 +243,7 @@ export function scoreDriverDay(input) {
         out.flags.push({
           kind: 'morning_gap',
           severity: out.morningFlag,
-          evidence: `clockIn ${clockIn} → first delivery ${firstDeliveryCustomer || 'unknown'} at ${firstDeliveryTime.toISOString().slice(11, 16)} (${clockInToFirstMin} min). Expected travel ${expectedTravelMinToFirst} min + ${defaults.loadPrepMin} min load prep = ${expectedTotal} min. Unexplained: ${gap} min.`,
+          evidence: `clockIn ${clockIn} → first delivery ${firstDeliveryCustomer || 'unknown'} at ${firstDeliveryTime.toISOString().slice(11, 16)} (${clockInToFirstMin} min). Expected travel ${expectedTravelMinToFirst} min + ${loadPrepMin} min load prep = ${expectedTotal} min. Unexplained: ${gap} min.`,
           deltaMin: gap
         });
       }
@@ -253,7 +268,7 @@ export function scoreDriverDay(input) {
     } else {
       out.lastToClockOutMin = lastToClockOutMin;
       if (expectedTravelMinFromLast != null) {
-        const expectedTotal = expectedTravelMinFromLast + defaults.wrapUpMin;
+        const expectedTotal = expectedTravelMinFromLast + wrapUpMin;
         const gap = lastToClockOutMin - expectedTotal;
         out.afternoonGapMin = gap;
         out.afternoonFlag = classifyGap(gap, defaults.afternoonGapStaticThresholds);
@@ -262,7 +277,7 @@ export function scoreDriverDay(input) {
           out.flags.push({
             kind: 'afternoon_gap',
             severity: out.afternoonFlag,
-            evidence: `last delivery ${lastDeliveryCustomer || 'unknown'} at ${lastDeliveryTime.toISOString().slice(11, 16)} → clockOut ${clockOut} (${lastToClockOutMin} min). Expected return travel ${expectedTravelMinFromLast} min + ${defaults.wrapUpMin} min wrap-up = ${expectedTotal} min. Unexplained: ${gap} min.`,
+            evidence: `last delivery ${lastDeliveryCustomer || 'unknown'} at ${lastDeliveryTime.toISOString().slice(11, 16)} → clockOut ${clockOut} (${lastToClockOutMin} min). Expected return travel ${expectedTravelMinFromLast} min + ${wrapUpMin} min wrap-up = ${expectedTotal} min. Unexplained: ${gap} min.`,
             deltaMin: gap
           });
         }

@@ -13,13 +13,20 @@
 //   DEFAULT_DEFAULTS                        → fallback when sentinelConfig/defaults missing
 //   ENGINE_VERSION                          → stamped into rescored records
 
-// Static-only fraud detection (v4.2.3). Baselines remain in _baselines.js for
+// Static-only fraud detection (v4.3.0). Baselines remain in _baselines.js for
 // the driver-detail "Your Typical Day" context card, but the engine no longer
 // consumes them — fraud is judged against a fixed threshold the same for every
 // driver. Median / P75 / P90 are coaching context ("worse day than usual"),
 // not a moving goalpost for theft.
+//
+// v4.3.0 adds per-driver loadPrepMin / wrapUpMin overrides sourced from
+// /employees/{slug}. Rescore re-derives morningGapMin / afternoonGapMin from
+// raw clockInToFirstMin / lastToClockOutMin + expectedTravelMin* + the current
+// employee override (falling back to defaults). That way changing a driver's
+// loadPrepMin from 15 → 120 in the UI then running Re-score All Records
+// updates every historical record without re-running the scan.
 
-export const ENGINE_VERSION = 'v4.2.3-static-fraud';
+export const ENGINE_VERSION = 'v4.3.0-driver-config';
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
@@ -76,22 +83,20 @@ function extractDetourNote(record) {
   return m ? m[0] : null;
 }
 
-function buildEvidenceMorning({ record, defaults, gap }) {
+function buildEvidenceMorning({ record, prep, gap }) {
   const customer = record.firstDeliveryCustomer || 'unknown';
   const timeStr = fmtTime(record.firstDeliveryTime);
   const travel = record.expectedTravelMinToFirst;
-  const prep = record.loadPrepMin ?? defaults.loadPrepMin;
   const expectedTotal = (travel != null) ? travel + prep : null;
   const prefix = `clockIn ${record.clockIn} → first delivery ${customer} at ${timeStr} (${fmtDur(record.clockInToFirstMin)}).`;
   const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)} + ${fmtDur(prep)} load prep = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
-function buildEvidenceAfternoon({ record, defaults, gap }) {
+function buildEvidenceAfternoon({ record, wrap, gap }) {
   const customer = record.lastDeliveryCustomer || 'unknown';
   const timeStr = fmtTime(record.lastDeliveryTime);
   const travel = record.expectedTravelMinFromLast;
-  const wrap = record.wrapUpMin ?? defaults.wrapUpMin;
   const expectedTotal = (travel != null) ? travel + wrap : null;
   const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${record.clockOut} (${fmtDur(record.lastToClockOutMin)}).`;
   const expectedStr = expectedTotal != null ? `Expected return travel ${fmtDur(travel)} + ${fmtDur(wrap)} wrap-up = ${fmtDur(expectedTotal)}.` : '';
@@ -108,9 +113,20 @@ function buildEvidenceInRoute({ record, value }) {
   return `${fmtDur(value)} of off-route activity between first and last delivery.${locStr} (static threshold)`;
 }
 
-// Re-score one record against its baseline + defaults. Pure: no I/O.
+// Resolve a per-driver override against defaults. Numeric, non-negative,
+// finite; anything else falls back. Matches _sentinel-engine.resolveOverride.
+function resolveOverride(employee, defaults, key) {
+  const ov = employee?.[key];
+  if (typeof ov === 'number' && Number.isFinite(ov) && ov >= 0) return ov;
+  return defaults[key];
+}
+
+// Re-score one record against the current defaults + per-driver employee
+// overrides. Pure: no I/O. `employee` may be null when the employee doc was
+// missing (rare — typically a driverSlug that has historical days but was
+// removed from the roster); in that case overrides default to defaults.
 // Returns the new record (shallow copy) plus per-flag source counters.
-export function rescoreOne(record, baseline, defaults) {
+export function rescoreOne(record, baseline, defaults, employee = null) {
   const next = { ...record };
   const sourceCounts = { baseline: 0, static: 0 };
 
@@ -125,24 +141,47 @@ export function rescoreOne(record, baseline, defaults) {
   const afternoonT = defaults.afternoonGapStaticThresholds;
   const inRouteT = defaults.inRouteStaticThresholds;
 
+  // Always derive from the current employee config + defaults — the value
+  // baked into the record at scan time may be stale relative to a roster
+  // edit since. Stamp the value used so the record self-documents.
+  const loadPrep = resolveOverride(employee, defaults, 'loadPrepMin');
+  const wrapUp = resolveOverride(employee, defaults, 'wrapUpMin');
+  next.loadPrepMin = loadPrep;
+  next.wrapUpMin = wrapUp;
+
+  // Re-derive gaps from raw inputs. If the raw inputs aren't present
+  // (e.g. no first-delivery time → clockInToFirstMin null), gap is null and
+  // the flag stays no_data. Negative values are NOT clamped here — engine
+  // handles the data-integrity edge cases at scan time, and rescore is meant
+  // to be a pure recompute of the same math with potentially-different
+  // loadPrep / wrapUp inputs.
+  const reMorningGap = (record.clockInToFirstMin != null && record.expectedTravelMinToFirst != null)
+    ? record.clockInToFirstMin - record.expectedTravelMinToFirst - loadPrep
+    : null;
+  const reAfternoonGap = (record.lastToClockOutMin != null && record.expectedTravelMinFromLast != null)
+    ? record.lastToClockOutMin - record.expectedTravelMinFromLast - wrapUp
+    : null;
+  next.morningGapMin = reMorningGap;
+  next.afternoonGapMin = reAfternoonGap;
+
   let stolen = 0;
 
   // ---------- Morning ----------
   // Fraud is judged absolutely: anything above the static `ok` threshold is
   // unexplained, regardless of the driver's own historical pattern.
   let morningFlag = 'no_data';
-  if (record.morningGapMin != null) {
-    morningFlag = classifyStatic(record.morningGapMin, morningT);
+  if (reMorningGap != null) {
+    morningFlag = classifyStatic(reMorningGap, morningT);
     next.morningSeveritySource = 'static';
     sourceCounts.static++;
-    stolen += Math.max(0, record.morningGapMin - morningT.ok);
+    stolen += Math.max(0, reMorningGap - morningT.ok);
     if (morningFlag !== 'ok' && morningFlag !== 'no_data') {
       next.flags.push({
         kind: 'morning_gap',
         severity: morningFlag,
         severitySource: 'static',
-        evidence: buildEvidenceMorning({ record, defaults, gap: record.morningGapMin }),
-        deltaMin: record.morningGapMin
+        evidence: buildEvidenceMorning({ record, prep: loadPrep, gap: reMorningGap }),
+        deltaMin: reMorningGap
       });
     }
   }
@@ -150,20 +189,20 @@ export function rescoreOne(record, baseline, defaults) {
 
   // ---------- Afternoon ----------
   let afternoonFlag = 'no_data';
-  if (record.afternoonGapMin != null) {
-    afternoonFlag = classifyStatic(record.afternoonGapMin, afternoonT);
+  if (reAfternoonGap != null) {
+    afternoonFlag = classifyStatic(reAfternoonGap, afternoonT);
     next.afternoonSeveritySource = 'static';
     sourceCounts.static++;
-    stolen += Math.max(0, record.afternoonGapMin - afternoonT.ok);
+    stolen += Math.max(0, reAfternoonGap - afternoonT.ok);
     if (afternoonFlag !== 'ok' && afternoonFlag !== 'no_data') {
-      let ev = buildEvidenceAfternoon({ record, defaults, gap: record.afternoonGapMin });
+      let ev = buildEvidenceAfternoon({ record, wrap: wrapUp, gap: reAfternoonGap });
       if (detourNote) ev += ' ' + detourNote;
       next.flags.push({
         kind: 'afternoon_gap',
         severity: afternoonFlag,
         severitySource: 'static',
         evidence: ev,
-        deltaMin: record.afternoonGapMin
+        deltaMin: reAfternoonGap
       });
     }
   }
