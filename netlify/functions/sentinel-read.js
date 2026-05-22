@@ -7,14 +7,16 @@
 //   ?action=driverList                      → all active drivers (slug + display + truck)
 //   ?action=dates                           → distinct dates with data, desc
 //   ?action=detail&driverSlug=X&date=Y      → full doc for one driver-day
+//   ?action=stops&driverSlug=X&date=Y       → all NuVizz stops for driver/date (all statuses)
 //   ?action=dashboard                       → summary stats for landing screen
+//   ?action=getBaseline&driverSlug=X        → full baseline doc for one driver
 //
 // Auth: ?secret=<SCAN_SECRET>
 // All responses are JSON. CORS open for browser fetch.
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.1.2-readers';
+const VERSION = 'v4.2.0-stops-drilldown';
 
 // Per-driver listDocs cap. Each driver has at most one record per day; after
 // the 17-month backfill ~374 working days exist per driver. 1500 is ~7 years
@@ -111,6 +113,67 @@ async function detail(db, driverSlug, date) {
   } catch (e) {
     return null;
   }
+}
+
+// All NuVizz stops for a (driver, date) pair, including non-completed rows so
+// the operator sees the full picture — the scan engine drops anything whose
+// status doesn't contain "complet"; this endpoint reports them all with status
+// preserved so a partial / failed / cancelled delivery is visible.
+//
+// Doesn't share _sentinel-scan.getNuvizzStops because that helper is
+// completion-filtered by design (it powers the scoring). Different consumer,
+// different filter.
+async function stops(db, driverSlug, date) {
+  const emp = await db.getDoc('employees', driverSlug);
+  if (!emp) return { stops: [], diag: { reason: 'employee not found', driverSlug } };
+  const nuvizzName = emp?.externalIds?.nuvizz || emp?.fullName;
+  if (!nuvizzName) return { stops: [], diag: { reason: 'no nuvizz external ID on employee', driverSlug } };
+
+  const rows = await db.listDocs('nuvizz_rows_raw', {
+    where: [{ field: 'delivery_date', op: '==', value: date }],
+    limit: 2000
+  });
+  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const target = norm(nuvizzName);
+
+  const out = [];
+  const statusBreakdown = {};
+  let matched = 0;
+  for (const r of rows) {
+    const raw = r.raw || {};
+    if (norm(raw['driver name']) !== target) continue;
+    matched++;
+    const status = raw['stop status'] || '(none)';
+    statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
+    out.push({
+      pro: r.pro || raw['pro #'] || raw['pro'] || null,
+      status,
+      deliveryEnd: raw['delivery end'] || null,
+      deliveryStart: raw['delivery start'] || null,
+      shipTo: raw['ship to'] || null,
+      shipToName: raw['ship to name'] || null,
+      city: raw['ship to - city'] || null,
+      state: raw['ship to - state'] || null,
+      zip: raw['ship to - zip code'] || null,
+      pieces: raw['pieces'] || null,
+      weight: raw['weight'] || null
+    });
+  }
+  // Sort by deliveryEnd (lex on the raw "MM/DD/YYYY HH:MM AM" string is fine
+  // within a single day — fall back to PRO order when time is missing).
+  out.sort((a, b) => {
+    const at = a.deliveryEnd || '';
+    const bt = b.deliveryEnd || '';
+    if (at && bt) return at.localeCompare(bt);
+    if (at) return -1;
+    if (bt) return 1;
+    return String(a.pro || '').localeCompare(String(b.pro || ''));
+  });
+  console.log(`[sentinel-read] stops ${driverSlug} ${date} → ${out.length} matched of ${rows.length} scanned`);
+  return {
+    stops: out,
+    diag: { rowsScannedForDate: rows.length, driverNameMatches: matched, statusBreakdown, nuvizzName }
+  };
 }
 
 async function dashboard(db) {
@@ -236,6 +299,13 @@ export default async (req) => {
         const date = url.searchParams.get('date');
         if (!driverSlug || !date) return new Response(JSON.stringify({ error: 'driverSlug + date required' }), { status: 400, headers: CORS });
         body = { action, record: await detail(db, driverSlug, date) };
+        break;
+      }
+      case 'stops': {
+        const driverSlug = url.searchParams.get('driverSlug');
+        const date = url.searchParams.get('date');
+        if (!driverSlug || !date) return new Response(JSON.stringify({ error: 'driverSlug + date required' }), { status: 400, headers: CORS });
+        body = { action, driverSlug, date, ...(await stops(db, driverSlug, date)) };
         break;
       }
       case 'dashboard':

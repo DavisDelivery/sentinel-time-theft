@@ -233,6 +233,54 @@ body {
   text-transform: uppercase; color: var(--text-2); margin-bottom: 6px;
 }
 .no-signal .ns-body { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.5; }
+
+/* "Show all deliveries" drill-down inside an expanded day card.
+ * Lazy-loaded — clicking the button fetches NuVizz rows for the
+ * (driverSlug, date) pair and renders them grouped by status. */
+.stops-btn {
+  background: var(--bg-2); color: var(--brand); border: 1px solid var(--line);
+  border-radius: 8px; padding: var(--s-3) var(--s-4);
+  font: 600 var(--fs-sm) inherit; cursor: pointer; width: 100%;
+  text-align: left; transition: background 0.15s, border-color 0.15s;
+}
+.stops-btn:hover:not(:disabled) { background: var(--bg-3); border-color: var(--line-strong); }
+.stops-btn:disabled { color: var(--text-3); cursor: progress; }
+.stops-list { margin-top: var(--s-3); }
+.stops-list:empty { display: none; }
+.stops-total { color: var(--text-3); font-size: var(--fs-xs); margin-bottom: var(--s-3); }
+.stops-group { margin-bottom: var(--s-3); }
+.stops-group:last-child { margin-bottom: 0; }
+.stops-group-h {
+  display: flex; align-items: center; gap: var(--s-2);
+  font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px;
+}
+.stops-status {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  background: var(--bg-3); color: var(--text-2); letter-spacing: 0;
+  text-transform: none; font-weight: 600;
+}
+.stops-status.completed { background: var(--clean-bg); color: var(--clean); }
+.stops-status.manual    { background: var(--brand-2); color: var(--brand); }
+.stops-status.other     { background: var(--med-bg); color: var(--med); }
+.stops-count { color: var(--text-4); font-weight: 500; }
+.stop-row {
+  display: grid; grid-template-columns: 56px 1fr auto;
+  gap: var(--s-3); padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+.stop-row:last-child { border-bottom: 0; }
+.stop-t { color: var(--text-2); font-size: var(--fs-sm); }
+.stop-mid { min-width: 0; }
+.stop-name { font-weight: 600; font-size: var(--fs-base); color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.stop-sub  { color: var(--text-3); font-size: var(--fs-xs); margin-top: 2px; }
+.stop-pro  { color: var(--text-3); font-size: var(--fs-xs); }
+.stops-empty, .stops-err {
+  padding: var(--s-3); border: 1px dashed var(--line); border-radius: 8px;
+  color: var(--text-3); font-size: var(--fs-sm);
+}
+.stops-err { color: var(--crit); border-color: var(--crit); }
 .dh { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s-2); }
 .dd-sec { margin-bottom: var(--s-4); }
 .dd-sec:last-child { margin-bottom: 0; }
@@ -466,7 +514,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.1.7-hours-fmt';
+const APP_VERSION = 'v4.2.0-stops-drilldown';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -801,7 +849,110 @@ function renderDetail(r) {
     parts.push(`<div class="dd-sec"><div class="dh">Data Health Notes</div><div class="dh-chips">${chips}</div></div>`);
   }
 
+  // All-deliveries drill-down. Day cards only show first/last delivery
+  // anchors; this button lazy-loads the full NuVizz roster for the day
+  // (including non-completed rows). data-* attrs let the click handler
+  // resolve which (driverSlug, date) to fetch without re-parsing the DOM.
+  parts.push(`
+    <div class="dd-sec" data-stops-section>
+      <button class="stops-btn" data-stops-toggle data-driver-slug="${r.driverSlug}" data-date="${r.date}">
+        Show all deliveries for this day →
+      </button>
+      <div class="stops-list" data-stops-body></div>
+    </div>
+  `);
+
   return parts.join('');
+}
+
+// Lazy stops loader — wired up via event delegation on the page container so
+// it survives every re-render of dd-detail without re-binding.
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest && ev.target.closest('[data-stops-toggle]');
+  if (!btn) return;
+  const section = btn.closest('[data-stops-section]');
+  const body = section.querySelector('[data-stops-body]');
+  // Toggle off if already loaded and visible
+  if (body.dataset.loaded === '1' && body.style.display !== 'none') {
+    body.style.display = 'none';
+    btn.textContent = 'Show all deliveries for this day →';
+    return;
+  }
+  if (body.dataset.loaded === '1') {
+    body.style.display = '';
+    btn.textContent = 'Hide deliveries ↑';
+    return;
+  }
+  const slug = btn.dataset.driverSlug;
+  const date = btn.dataset.date;
+  btn.disabled = true;
+  btn.textContent = 'Loading deliveries…';
+  try {
+    const qs = new URLSearchParams({ secret: getSecret(), action: 'stops', driverSlug: slug, date });
+    const res = await fetch('/api/sentinel-read?' + qs);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    body.innerHTML = renderStops(data.stops || [], data.diag || {});
+    body.dataset.loaded = '1';
+    btn.textContent = 'Hide deliveries ↑';
+  } catch (e) {
+    body.innerHTML = `<div class="stops-err">Failed to load deliveries: ${e.message}</div>`;
+    btn.textContent = 'Show all deliveries for this day →';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Parse a NuVizz "delivery end" string like "05/10/2026 13:42:00" to "HH:MM".
+// Returns "—" on unparseable input so the row still renders cleanly.
+function fmtNuvizzTime(s) {
+  if (!s) return '—';
+  const m = String(s).match(/(\d{1,2}):(\d{2})/);
+  return m ? `${m[1].padStart(2,'0')}:${m[2]}` : '—';
+}
+
+function renderStops(stops, diag) {
+  if (!stops.length) {
+    return `<div class="stops-empty">No NuVizz stops found for this driver/date. ${diag.reason || ''}</div>`;
+  }
+  // Group by status so the operator immediately sees completed vs failed vs other.
+  const byStatus = {};
+  for (const s of stops) {
+    const k = s.status || '(none)';
+    if (!byStatus[k]) byStatus[k] = [];
+    byStatus[k].push(s);
+  }
+  const statusOrder = Object.keys(byStatus).sort((a, b) => {
+    // Completed first, then manually completed, then everything else alpha.
+    if (/^completed$/i.test(a)) return -1;
+    if (/^completed$/i.test(b)) return 1;
+    if (/complet/i.test(a) && !/complet/i.test(b)) return -1;
+    if (!/complet/i.test(a) && /complet/i.test(b)) return 1;
+    return a.localeCompare(b);
+  });
+  const sections = statusOrder.map(status => {
+    const rows = byStatus[status].map(s => `
+      <div class="stop-row">
+        <div class="stop-t mono">${fmtNuvizzTime(s.deliveryEnd)}</div>
+        <div class="stop-mid">
+          <div class="stop-name">${s.shipToName || s.shipTo || 'unknown'}</div>
+          <div class="stop-sub">${s.shipTo ? s.shipTo : ''}${s.city ? ` · ${s.city}` : ''}${s.zip ? ` ${s.zip}` : ''}</div>
+        </div>
+        <div class="stop-pro mono">${s.pro || ''}</div>
+      </div>
+    `).join('');
+    const statusCls = /^completed$/i.test(status) ? 'completed' : /complet/i.test(status) ? 'manual' : 'other';
+    return `
+      <div class="stops-group">
+        <div class="stops-group-h"><span class="stops-status ${statusCls}">${status}</span> <span class="stops-count">${byStatus[status].length}</span></div>
+        ${rows}
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="stops-total mono">Total: ${stops.length} stops · matched to NuVizz name "${diag.nuvizzName || '?'}"</div>
+    ${sections}
+  `;
 }
 
 // ============ Daily Audit ============
