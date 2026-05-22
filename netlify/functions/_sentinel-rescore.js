@@ -13,13 +13,13 @@
 //   DEFAULT_DEFAULTS                        → fallback when sentinelConfig/defaults missing
 //   ENGINE_VERSION                          → stamped into rescored records
 
-// Static-only fraud detection (v4.2.0). Baselines remain in _baselines.js for
+// Static-only fraud detection (v4.2.3). Baselines remain in _baselines.js for
 // the driver-detail "Your Typical Day" context card, but the engine no longer
 // consumes them — fraud is judged against a fixed threshold the same for every
 // driver. Median / P75 / P90 are coaching context ("worse day than usual"),
 // not a moving goalpost for theft.
 
-export const ENGINE_VERSION = 'v4.2.0-static-fraud';
+export const ENGINE_VERSION = 'v4.2.3-static-fraud';
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
