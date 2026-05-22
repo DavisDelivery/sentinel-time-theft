@@ -466,7 +466,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.1.6-attribution';
+const APP_VERSION = 'v4.1.7-hours-fmt';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -503,8 +503,24 @@ const fmt$Plain = n => {
   if (n == null) return '$0';
   return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: n < 1000 ? 2 : 0, maximumFractionDigits: n < 1000 ? 2 : 0 });
 };
-const fmtMin = m => m == null ? '—' : `${m}m`;
-const fmtHr = m => (m / 60).toFixed(1) + 'h';
+// Render a duration (in minutes) as the operator-facing "Xh Ym" / "Xm" format.
+//   null / undefined / NaN → "—"
+//   0..59 → "5m"
+//   exact hours → "2h"
+//   otherwise → "1h 40m"
+// Negative inputs are clamped to 0 (rounding artefacts; we never display "−5m").
+const fmtDur = m => {
+  if (m == null || !Number.isFinite(+m)) return '—';
+  const total = Math.max(0, Math.round(+m));
+  if (total < 60) return `${total}m`;
+  const h = Math.floor(total / 60);
+  const mm = total % 60;
+  return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
+};
+// fmtHr / fmtMin retained as aliases so any unaudited call site keeps working —
+// but every existing usage now routes through fmtDur for the "1h 40m" format.
+const fmtMin = fmtDur;
+const fmtHr = fmtDur;
 const fmtTime = iso => iso ? iso.slice(11, 16) : '—';
 const fmtDate = d => {
   if (!d) return '';
@@ -742,7 +758,7 @@ function renderDetail(r) {
         <span class="k">Truck</span><span class="v">${r.truckType || '?'}</span>
         <span class="k">Stops</span><span class="v">${r.completedStops || 0} delivered</span>
         <span class="k">Score</span><span class="v">${r.riskScore} · ${r.riskLevel}</span>
-        <span class="k">Unexplained</span><span class="v">${r.stolenMinutes || 0}m · ${fmt$Plain(r.stolenDollars || 0)}</span>
+        <span class="k">Unexplained</span><span class="v">${fmtDur(r.stolenMinutes || 0)} · ${fmt$Plain(r.stolenDollars || 0)}</span>
         ${bookends.join('')}
       </div>
     </div>
@@ -770,10 +786,10 @@ function renderDetail(r) {
       <div class="visit-row">
         <div class="t">${v.arrivedAt || '—'}</div>
         <div class="a">${v.destAddr || 'ZIP ' + v.destZip}<span class="w ${v.window}">${v.window.replace('_', ' ')}</span></div>
-        <div class="m">${v.stationaryMin}m · ${v.driveMi}mi</div>
+        <div class="m">${fmtDur(v.stationaryMin)} · ${v.driveMi}mi</div>
       </div>
     `).join('');
-    parts.push(`<div class="dd-sec"><div class="dh">Motive — Off-route activity</div>${visits}<div style="color:var(--text-4);font-size:11px;margin-top:8px">Total drive: ${r.motive.totalMi}mi · ${r.motive.totalDriveMin}min</div></div>`);
+    parts.push(`<div class="dd-sec"><div class="dh">Motive — Off-route activity</div>${visits}<div style="color:var(--text-4);font-size:11px;margin-top:8px">Total drive: ${r.motive.totalMi}mi · ${fmtDur(r.motive.totalDriveMin)}</div></div>`);
   }
 
   // Data health
@@ -926,7 +942,7 @@ async function loadDriver(slug) {
     let typicalHtml = '';
     if (currentBaseline?.metrics) {
       const m = currentBaseline.metrics;
-      const fmtP = v => (v == null ? '—' : `${Math.round(v)}m`);
+      const fmtP = v => fmtDur(v);
       const fmtSph = v => (v == null ? '—' : v.toFixed(2));
       typicalHtml = `
         <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">

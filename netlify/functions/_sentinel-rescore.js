@@ -15,7 +15,22 @@
 
 import { classifyAgainstBaseline, excessOverMedian, excessOverP75, percentileBucket } from './_baselines.js';
 
-export const ENGINE_VERSION = 'v4.1.4-attribution';
+export const ENGINE_VERSION = 'v4.1.7-hours-fmt';
+
+// Operator-facing duration formatter — matches the dashboard's fmtDur.
+//   null/undefined/NaN → "—"
+//   0..59 min          → "5m"
+//   exact hours        → "2h"
+//   otherwise          → "1h 40m"
+// Every evidence string now stamps "1h 40m" instead of "100 min".
+function fmtDur(m) {
+  if (m == null || !Number.isFinite(+m)) return '—';
+  const total = Math.max(0, Math.round(+m));
+  if (total < 60) return `${total}m`;
+  const h = Math.floor(total / 60);
+  const mm = total % 60;
+  return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
+}
 
 export const DEFAULT_DEFAULTS = {
   loadPrepMin: 15,
@@ -63,14 +78,14 @@ function buildEvidenceMorning({ record, defaults, source, dist, gap }) {
   const travel = record.expectedTravelMinToFirst;
   const prep = record.loadPrepMin ?? defaults.loadPrepMin;
   const expectedTotal = (travel != null) ? travel + prep : null;
-  const prefix = `clockIn ${record.clockIn} → first delivery ${customer} at ${timeStr} (${record.clockInToFirstMin} min).`;
+  const prefix = `clockIn ${record.clockIn} → first delivery ${customer} at ${timeStr} (${fmtDur(record.clockInToFirstMin)}).`;
   if (source === 'baseline' && dist) {
     const bucket = percentileBucket(gap, dist);
     const excess = excessOverMedian(gap, dist);
-    return `${prefix} Today's morning gap: ${gap} min. Your baseline P50 ${dist.p50}min / P90 ${dist.p90}min — today ${bucket || '?'} / excess over median ${excess}min.`;
+    return `${prefix} Today's morning gap: ${fmtDur(gap)}. Your baseline P50 ${fmtDur(dist.p50)} / P90 ${fmtDur(dist.p90)} — today ${bucket || '?'} / excess over median ${fmtDur(excess)}.`;
   }
-  const expectedStr = expectedTotal != null ? `Expected travel ${travel} min + ${prep} min load prep = ${expectedTotal} min.` : '';
-  return `${prefix} ${expectedStr} Unexplained: ${gap} min. (static threshold)`;
+  const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)} + ${fmtDur(prep)} load prep = ${fmtDur(expectedTotal)}.` : '';
+  return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
 function buildEvidenceAfternoon({ record, defaults, source, dist, gap }) {
@@ -79,28 +94,28 @@ function buildEvidenceAfternoon({ record, defaults, source, dist, gap }) {
   const travel = record.expectedTravelMinFromLast;
   const wrap = record.wrapUpMin ?? defaults.wrapUpMin;
   const expectedTotal = (travel != null) ? travel + wrap : null;
-  const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${record.clockOut} (${record.lastToClockOutMin} min).`;
+  const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${record.clockOut} (${fmtDur(record.lastToClockOutMin)}).`;
   if (source === 'baseline' && dist) {
     const bucket = percentileBucket(gap, dist);
     const excess = excessOverMedian(gap, dist);
-    return `${prefix} Today's afternoon gap: ${gap} min. Your baseline P50 ${dist.p50}min / P90 ${dist.p90}min — today ${bucket || '?'} / excess over median ${excess}min.`;
+    return `${prefix} Today's afternoon gap: ${fmtDur(gap)}. Your baseline P50 ${fmtDur(dist.p50)} / P90 ${fmtDur(dist.p90)} — today ${bucket || '?'} / excess over median ${fmtDur(excess)}.`;
   }
-  const expectedStr = expectedTotal != null ? `Expected return travel ${travel} min + ${wrap} min wrap-up = ${expectedTotal} min.` : '';
-  return `${prefix} ${expectedStr} Unexplained: ${gap} min. (static threshold)`;
+  const expectedStr = expectedTotal != null ? `Expected return travel ${fmtDur(travel)} + ${fmtDur(wrap)} wrap-up = ${fmtDur(expectedTotal)}.` : '';
+  return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
 function buildEvidenceInRoute({ record, source, dist, value }) {
   const visits = record?.motive?.offRouteVisits || [];
   const inRouteVisits = visits.filter(v => v.window === 'in_route');
   const locations = inRouteVisits
-    .map(v => `${v.destZip || '?'}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}`)
+    .map(v => `${v.destZip || '?'}${v.stationaryMin > 0 ? ` (${fmtDur(v.stationaryMin)} stop)` : ''}`)
     .join(', ');
   const locStr = locations ? ` Locations: ${locations}.` : '';
-  const prefix = `${value} min of off-route activity between first and last delivery.${locStr}`;
+  const prefix = `${fmtDur(value)} of off-route activity between first and last delivery.${locStr}`;
   if (source === 'baseline' && dist) {
     const bucket = percentileBucket(value, dist);
     const excess = excessOverMedian(value, dist);
-    return `${prefix} Your baseline P50 ${dist.p50}min / P90 ${dist.p90}min — today ${bucket || '?'} / excess over median ${excess}min.`;
+    return `${prefix} Your baseline P50 ${fmtDur(dist.p50)} / P90 ${fmtDur(dist.p90)} — today ${bucket || '?'} / excess over median ${fmtDur(excess)}.`;
   }
   return `${prefix} (static threshold)`;
 }
