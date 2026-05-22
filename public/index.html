@@ -323,6 +323,68 @@ body {
 .prof-zip-list { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2) var(--s-4); }
 .prof-zip-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: var(--fs-sm); }
 .prof-zip-n { color: var(--text-3); }
+
+/* ============ PR-B4 redesign ============ */
+
+/* Distribution-bar header — adds absolute counts above the segmented bar
+ * so "319 days · 1 critical · 52 medium · 71 low · 194 clean" reads at
+ * a glance without parsing percentages. */
+.dist-header {
+  font-size: var(--fs-sm); color: var(--text-2);
+  margin-bottom: var(--s-2);
+}
+.dist-header .num { color: var(--text); font-weight: 700; }
+
+/* Month-axis row above the risk-pattern heatmap. Each label is
+ * absolutely positioned at the proportional offset of the run of
+ * days it covers — 17 labels for a full-backfill view, but only
+ * one per month so the strip stays scannable. */
+.heatmap-months {
+  position: relative; height: 14px;
+  margin-bottom: 4px;
+}
+.hm-month {
+  position: absolute; top: 0;
+  font-size: 10px; font-weight: 600; color: var(--text-3);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  white-space: nowrap; transform: translateX(-2px);
+}
+
+/* "Your Typical Day" grid — three rows (morning, afternoon, stops/hr),
+ * each row paired with its P50 median + P75 OK ceiling so the operator
+ * sees the attribution boundary alongside the typical value. */
+.typical-grid { display: flex; flex-direction: column; gap: var(--s-3); }
+.typical-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s-3); align-items: center;
+}
+.typical-label { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
+.typical-vals { display: flex; gap: var(--s-4); align-items: flex-end; }
+.typical-vals .t-k { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.typical-vals .t-v { font-size: var(--fs-lg); font-weight: 700; }
+.typical-vals .t-ceil .t-k { color: var(--brand); }
+.typical-vals .t-ceil .t-v { color: var(--brand); }
+
+/* Off-route activity, grouped by window (pre/in/post-route). In-route
+ * is the one that affects scoring; pre/post are surface-only context. */
+.or-total {
+  color: var(--text-3); font-size: var(--fs-xs); margin-bottom: var(--s-3);
+}
+.or-group { margin-bottom: var(--s-3); }
+.or-group:last-child { margin-bottom: 0; }
+.or-group-h {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 6px; font-size: var(--fs-xs);
+}
+.or-window {
+  font-size: var(--fs-xs); font-weight: 700; padding: 2px 8px; border-radius: 4px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.or-window.in_route   { background: var(--med-bg); color: var(--med); }
+.or-window.pre_route  { background: var(--brand-2); color: var(--brand); }
+.or-window.post_route { background: var(--brand-2); color: var(--brand); }
+.or-window.unknown    { background: var(--bg-3); color: var(--text-3); }
+.or-group-n { color: var(--text-3); font-weight: 600; }
 .dh { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s-2); }
 .dd-sec { margin-bottom: var(--s-4); }
 .dd-sec:last-child { margin-bottom: 0; }
@@ -576,7 +638,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.2.1-profile-tab';
+const APP_VERSION = 'v4.2.2-driver-detail-redesign';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -651,13 +713,24 @@ function renderDistBar(dist, total) {
     const pct = (n / total) * 100;
     return `<div class="dist-seg ${k}" style="width:${pct}%"></div>`;
   }).join('');
+  // Show absolute counts inline next to the percentage so the operator gets
+  // both the raw "1 critical" and the share-of-total at a glance.
   const legend = order.map(k => {
     const n = dist[k] || 0;
     if (n === 0) return '';
     const pct = ((n / total) * 100).toFixed(0);
-    return `<div class="item"><span class="dot ${k}"></span><span class="n">${n}</span> ${k} <span class="pct">${pct}%</span></div>`;
+    return `<div class="item"><span class="dot ${k}"></span><span class="n num">${n}</span> ${k} <span class="pct">(${pct}%)</span></div>`;
   }).join('');
-  return `<div class="dist-bar">${segs}</div><div class="dist-legend">${legend}</div>`;
+  // Header line: "319 days · 1 critical · 52 medium · 71 low · 194 clean"
+  const headerCounts = order
+    .filter(k => (dist[k] || 0) > 0)
+    .map(k => `<span class="num">${dist[k]}</span> ${k}`)
+    .join(' · ');
+  return `
+    <div class="dist-header"><span class="num">${total}</span> days · ${headerCounts}</div>
+    <div class="dist-bar">${segs}</div>
+    <div class="dist-legend">${legend}</div>
+  `;
 }
 
 // ============ Sparkline (per-day stolen $ bars) ============
@@ -785,10 +858,24 @@ async function loadOverview() {
 }
 
 // ============ Driver-day row (shared) ============
+// Day-of-week prefix for the breakdown row label.
+// Parses YYYY-MM-DD as UTC midnight to dodge the local-tz off-by-one trap.
+function dayOfWeek(ymd) {
+  if (!ymd) return '';
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()];
+}
+
 function renderDriverDayRow(r, context) {
   const div = document.createElement('div');
   div.className = 'dd-row';
-  const dateOrName = context === 'audit' ? r.displayName : fmtDate(r.date);
+  // Investigate context — show "Mon 5/10" instead of just "5/10". The
+  // day-of-week is critical for understanding whether a "low" day is a
+  // Saturday route or a midweek anomaly.
+  const dateOrName = context === 'audit'
+    ? r.displayName
+    : `${dayOfWeek(r.date)} ${fmtDate(r.date)}`;
   const metaParts = [];
   metaParts.push(r.truckType || '?');
   if (r.completedStops != null) metaParts.push(`${r.completedStops} stops`);
@@ -890,16 +977,49 @@ function renderDetail(r) {
     parts.push(`<div class="dd-sec"><div class="dh">Why this flagged</div>${flagsHtml}</div>`);
   }
 
-  // Motive
+  // Motive — group off-route visits by window (pre / in / post route) so the
+  // operator can immediately see "where in the day did things go wrong?"
+  // In-route deviations are the ones that contribute to stolen $ per the
+  // scoring engine; pre/post merely annotate the morning/afternoon gaps.
   if (r.motive && r.motive.offRouteVisits && r.motive.offRouteVisits.length) {
-    const visits = r.motive.offRouteVisits.map(v => `
-      <div class="visit-row">
-        <div class="t">${v.arrivedAt || '—'}</div>
-        <div class="a">${v.destAddr || 'ZIP ' + v.destZip}<span class="w ${v.window}">${v.window.replace('_', ' ')}</span></div>
-        <div class="m">${fmtDur(v.stationaryMin)} · ${v.driveMi}mi</div>
+    const windows = { in_route: [], pre_route: [], post_route: [], unknown: [] };
+    for (const v of r.motive.offRouteVisits) {
+      const w = (v.window in windows) ? v.window : 'unknown';
+      windows[w].push(v);
+    }
+    const windowOrder = ['in_route', 'pre_route', 'post_route', 'unknown'];
+    const windowLabel = { in_route: 'In-route (between first and last delivery)',
+                          pre_route: 'Pre-route (before first delivery)',
+                          post_route: 'Post-route (after last delivery)',
+                          unknown: 'Unclassified' };
+    const groupsHtml = windowOrder
+      .filter(w => windows[w].length)
+      .map(w => {
+        const rows = windows[w].map(v => `
+          <div class="visit-row">
+            <div class="t">${v.arrivedAt || '—'}</div>
+            <div class="a">${v.destAddr || 'ZIP ' + v.destZip}</div>
+            <div class="m">${fmtDur(v.stationaryMin)} · ${v.driveMi}mi</div>
+          </div>
+        `).join('');
+        const groupMin = windows[w].reduce((s, v) => s + (v.stationaryMin || 0) + (v.driveMinToReach || 0), 0);
+        return `
+          <div class="or-group">
+            <div class="or-group-h">
+              <span class="or-window w ${w}">${windowLabel[w]}</span>
+              <span class="or-group-n">${windows[w].length} · ${fmtDur(groupMin)}</span>
+            </div>
+            ${rows}
+          </div>
+        `;
+      }).join('');
+    parts.push(`
+      <div class="dd-sec">
+        <div class="dh">Motive — Off-route activity</div>
+        <div class="or-total mono">Total: ${r.motive.totalMi}mi driven · ${fmtDur(r.motive.totalDriveMin)} on the road · ${r.motive.offRouteVisits.length} off-route locations</div>
+        ${groupsHtml}
       </div>
-    `).join('');
-    parts.push(`<div class="dd-sec"><div class="dh">Motive — Off-route activity</div>${visits}<div style="color:var(--text-4);font-size:11px;margin-top:8px">Total drive: ${r.motive.totalMi}mi · ${fmtDur(r.motive.totalDriveMin)}</div></div>`);
+    `);
   }
 
   // Data health
@@ -1147,11 +1267,34 @@ async function loadDriver(slug) {
       return `<div class="heatmap-day ${cls}" title="${rec.date}: ${rec.riskLevel} · $${rec.stolenDollars || 0}">${day}</div>`;
     }).join('');
 
+    // Month markers above the heatmap. The 17-month backfill makes plain
+    // day numbers unreadable — there's no way to tell "is this April or
+    // November?". Walk the records in order and emit a label every time
+    // the year-month changes. Positioned proportionally so each label
+    // sits above the run of days belonging to that month.
+    const monthLabels = [];
+    let lastYM = null;
+    records.forEach((rec, i) => {
+      const ym = rec.date.slice(0, 7); // "YYYY-MM"
+      if (ym !== lastYM) {
+        const [y, m] = ym.split('-');
+        const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m,10) - 1];
+        const left = (i / records.length) * 100;
+        monthLabels.push(`<span class="hm-month" style="left:${left}%">${monthName} ${y.slice(2)}</span>`);
+        lastYM = ym;
+      }
+    });
+    const monthAxis = `<div class="heatmap-months">${monthLabels.join('')}</div>`;
+
     // Find first and last date labels for the axis
     const firstDate = records[0].date;
     const lastDate = records[records.length - 1].date;
 
-    // "Your Typical Day" panel — only renders when the driver has a baseline
+    // "Your Typical Day" panel — only renders when the driver has a baseline.
+    // Shows P50 (median: their normal day) AND P75 (the attribution floor:
+    // anything above this contributes to stolen $ per PR #9). Surfacing the
+    // OK ceiling makes the dashboard explain itself — operators can see why
+    // a 1h 50m morning gap costs nothing when the driver's P75 is 2h.
     let typicalHtml = '';
     if (currentBaseline?.metrics) {
       const m = currentBaseline.metrics;
@@ -1160,10 +1303,28 @@ async function loadDriver(slug) {
       typicalHtml = `
         <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
           <div class="dh" style="margin-bottom:8px">Your Typical Day <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· baseline confidence: ${currentBaseline.confidence} (n=${currentBaseline.daysAnalyzed})</span></div>
-          <div class="driver-hero-stat">
-            <div class="item"><div class="v num">${fmtP(m.morningGapMin?.p50)}</div><div class="l">P50 Morning Gap</div></div>
-            <div class="item"><div class="v num">${fmtP(m.afternoonGapMin?.p50)}</div><div class="l">P50 Afternoon Gap</div></div>
-            <div class="item"><div class="v num">${fmtSph(m.stopsPerHour?.p50)}</div><div class="l">P50 Stops / hr</div></div>
+          <div class="typical-grid">
+            <div class="typical-row">
+              <div class="typical-label">Morning gap</div>
+              <div class="typical-vals">
+                <div><div class="t-k">P50</div><div class="t-v num">${fmtP(m.morningGapMin?.p50)}</div></div>
+                <div class="t-ceil"><div class="t-k">OK ceiling (P75)</div><div class="t-v num">${fmtP(m.morningGapMin?.p75)}</div></div>
+              </div>
+            </div>
+            <div class="typical-row">
+              <div class="typical-label">Afternoon gap</div>
+              <div class="typical-vals">
+                <div><div class="t-k">P50</div><div class="t-v num">${fmtP(m.afternoonGapMin?.p50)}</div></div>
+                <div class="t-ceil"><div class="t-k">OK ceiling (P75)</div><div class="t-v num">${fmtP(m.afternoonGapMin?.p75)}</div></div>
+              </div>
+            </div>
+            <div class="typical-row">
+              <div class="typical-label">Stops / hour</div>
+              <div class="typical-vals">
+                <div><div class="t-k">P50</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p50)}</div></div>
+                <div class="t-ceil"><div class="t-k">P75</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p75)}</div></div>
+              </div>
+            </div>
           </div>
         </div>
       `;
@@ -1172,16 +1333,16 @@ async function loadDriver(slug) {
     container.innerHTML = `
       <div class="driver-hero">
         <div class="driver-hero-name">${display}</div>
-        <div class="driver-hero-meta">${truck || 'driver'} · ${records.length} days analyzed · ${daysWithData} w/ data</div>
+        <div class="driver-hero-meta">${truck || 'driver'} · <span class="num">${records.length}</span> days on file · <span class="num">${daysWithData}</span> w/ data · <span class="num">${daysFlagged}</span> flagged</div>
         <div class="driver-hero-stat">
-          <div class="item"><div class="v num">${fmt$Plain(total$.toFixed(2))}</div><div class="l">Unexplained</div></div>
-          <div class="item"><div class="v num">${fmtHr(totalMin)}</div><div class="l">Unexplained hrs</div></div>
-          <div class="item"><div class="v num">${fmt$Plain(avgPerWorkDay.toFixed(2))}</div><div class="l">Avg / day</div></div>
+          <div class="item"><div class="l">Total unexplained $</div><div class="v num">${fmt$Plain(total$.toFixed(2))}</div></div>
+          <div class="item"><div class="l">Total unexplained time</div><div class="v num">${fmtDur(totalMin)}</div></div>
+          <div class="item"><div class="l">Avg per working day</div><div class="v num">${fmt$Plain(avgPerWorkDay.toFixed(2))}</div></div>
         </div>
         <div style="margin-top:var(--s-4)">
-          <div class="dh" style="margin-bottom:8px">12-Day Risk Pattern</div>
+          <div class="dh" style="margin-bottom:8px">Risk Pattern <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${fmtDate(firstDate)} → ${fmtDate(lastDate)}, ${records.length} days</span></div>
+          ${monthAxis}
           <div class="heatmap">${heatmap}</div>
-          <div class="heatmap-axis"><span>${fmtDate(firstDate)}</span><span>${fmtDate(lastDate)}</span></div>
         </div>
         <div style="margin-top:var(--s-4)">${renderDistBar(dist, records.length)}</div>
         ${typicalHtml}
