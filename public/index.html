@@ -350,20 +350,23 @@ body {
   white-space: nowrap; transform: translateX(-2px);
 }
 
-/* "Your Typical Day" grid — three rows (morning, afternoon, stops/hr),
- * each row paired with its P50 median + P75 OK ceiling so the operator
- * sees the attribution boundary alongside the typical value. */
-.typical-grid { display: flex; flex-direction: column; gap: var(--s-3); }
+/* "Your Typical Day" grid — coaching context only. As of v4.2.0 the engine
+ * judges fraud against fixed thresholds, so these per-driver percentiles do
+ * NOT affect stolen $ or flag severity. They're here so the operator can
+ * read today's gap against the driver's own usual range ("worse day than
+ * usual" coaching). Styled small + muted so they don't visually compete
+ * with the dominant fraud signals (today's gap, threshold, stolen $). */
+.typical-grid { display: flex; flex-direction: column; gap: var(--s-2); }
 .typical-row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--s-3); align-items: center;
+  font-size: var(--fs-xs); color: var(--text-3);
 }
-.typical-label { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
-.typical-vals { display: flex; gap: var(--s-4); align-items: flex-end; }
-.typical-vals .t-k { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
-.typical-vals .t-v { font-size: var(--fs-lg); font-weight: 700; }
-.typical-vals .t-ceil .t-k { color: var(--brand); }
-.typical-vals .t-ceil .t-v { color: var(--brand); }
+.typical-label { font-weight: 500; color: var(--text-3); }
+.typical-vals { display: flex; gap: var(--s-4); align-items: baseline; }
+.typical-vals .t-k { font-size: 9px; color: var(--text-4); text-transform: uppercase; letter-spacing: 0.06em; }
+.typical-vals .t-v { font-size: var(--fs-sm); font-weight: 600; color: var(--text-3); }
+.typical-foot { font-size: 10px; color: var(--text-4); margin-top: var(--s-2); font-style: italic; }
 
 /* Off-route activity, grouped by window (pre/in/post-route). In-route
  * is the one that affects scoring; pre/post are surface-only context. */
@@ -638,7 +641,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.2.2-driver-detail-redesign';
+const APP_VERSION = 'v4.2.3-static-fraud';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -800,7 +803,7 @@ async function loadOverview() {
         <div class="section">
           <div class="section-head">
             <h2>Baselines</h2>
-            <div class="aux">${d.baselines.recordsScoredAgainst} of ${total} flags vs baseline</div>
+            <div class="aux">coaching context only · not used for flag severity</div>
           </div>
           <div class="card">
             <div style="display:flex;gap:var(--s-4);flex-wrap:wrap;font-size:var(--fs-md)">
@@ -1290,42 +1293,44 @@ async function loadDriver(slug) {
     const firstDate = records[0].date;
     const lastDate = records[records.length - 1].date;
 
-    // "Your Typical Day" panel — only renders when the driver has a baseline.
-    // Shows P50 (median: their normal day) AND P75 (the attribution floor:
-    // anything above this contributes to stolen $ per PR #9). Surfacing the
-    // OK ceiling makes the dashboard explain itself — operators can see why
-    // a 1h 50m morning gap costs nothing when the driver's P75 is 2h.
+    // "Your Typical Day" panel — coaching context only. As of v4.2.0 the
+    // engine classifies fraud against fixed thresholds, NOT against these
+    // per-driver percentiles. They're surfaced here so the operator can read
+    // today's number against the driver's own range ("worse day than usual"),
+    // but they do not affect flag severity or stolen $.
     let typicalHtml = '';
     if (currentBaseline?.metrics) {
       const m = currentBaseline.metrics;
       const fmtP = v => fmtDur(v);
       const fmtSph = v => (v == null ? '—' : v.toFixed(2));
+      const fmtRange = (lo, hi, f) => `${lo == null ? '—' : f(lo)}–${hi == null ? '—' : f(hi)}`;
       typicalHtml = `
         <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
-          <div class="dh" style="margin-bottom:8px">Your Typical Day <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· baseline confidence: ${currentBaseline.confidence} (n=${currentBaseline.daysAnalyzed})</span></div>
+          <div class="dh" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-3)">For context · this driver's typical day <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· baseline confidence: ${currentBaseline.confidence} (n=${currentBaseline.daysAnalyzed})</span></div>
           <div class="typical-grid">
             <div class="typical-row">
               <div class="typical-label">Morning gap</div>
               <div class="typical-vals">
-                <div><div class="t-k">P50</div><div class="t-v num">${fmtP(m.morningGapMin?.p50)}</div></div>
-                <div class="t-ceil"><div class="t-k">OK ceiling (P75)</div><div class="t-v num">${fmtP(m.morningGapMin?.p75)}</div></div>
+                <div><div class="t-k">typical (P50)</div><div class="t-v num">${fmtP(m.morningGapMin?.p50)}</div></div>
+                <div><div class="t-k">usual range (P25–P75)</div><div class="t-v num">${fmtRange(m.morningGapMin?.p25, m.morningGapMin?.p75, fmtP)}</div></div>
               </div>
             </div>
             <div class="typical-row">
               <div class="typical-label">Afternoon gap</div>
               <div class="typical-vals">
-                <div><div class="t-k">P50</div><div class="t-v num">${fmtP(m.afternoonGapMin?.p50)}</div></div>
-                <div class="t-ceil"><div class="t-k">OK ceiling (P75)</div><div class="t-v num">${fmtP(m.afternoonGapMin?.p75)}</div></div>
+                <div><div class="t-k">typical (P50)</div><div class="t-v num">${fmtP(m.afternoonGapMin?.p50)}</div></div>
+                <div><div class="t-k">usual range (P25–P75)</div><div class="t-v num">${fmtRange(m.afternoonGapMin?.p25, m.afternoonGapMin?.p75, fmtP)}</div></div>
               </div>
             </div>
             <div class="typical-row">
               <div class="typical-label">Stops / hour</div>
               <div class="typical-vals">
-                <div><div class="t-k">P50</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p50)}</div></div>
-                <div class="t-ceil"><div class="t-k">P75</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p75)}</div></div>
+                <div><div class="t-k">typical (P50)</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p50)}</div></div>
+                <div><div class="t-k">usual range (P25–P75)</div><div class="t-v num">${fmtRange(m.stopsPerHour?.p25, m.stopsPerHour?.p75, fmtSph)}</div></div>
               </div>
             </div>
           </div>
+          <div class="typical-foot">Fraud signals (today's gap vs static threshold) are independent of these numbers.</div>
         </div>
       `;
     }

@@ -13,9 +13,13 @@
 //   DEFAULT_DEFAULTS                        → fallback when sentinelConfig/defaults missing
 //   ENGINE_VERSION                          → stamped into rescored records
 
-import { classifyAgainstBaseline, excessOverMedian, excessOverP75, percentileBucket } from './_baselines.js';
+// Static-only fraud detection (v4.2.3). Baselines remain in _baselines.js for
+// the driver-detail "Your Typical Day" context card, but the engine no longer
+// consumes them — fraud is judged against a fixed threshold the same for every
+// driver. Median / P75 / P90 are coaching context ("worse day than usual"),
+// not a moving goalpost for theft.
 
-export const ENGINE_VERSION = 'v4.1.7-hours-fmt';
+export const ENGINE_VERSION = 'v4.2.3-static-fraud';
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
@@ -72,52 +76,36 @@ function extractDetourNote(record) {
   return m ? m[0] : null;
 }
 
-function buildEvidenceMorning({ record, defaults, source, dist, gap }) {
+function buildEvidenceMorning({ record, defaults, gap }) {
   const customer = record.firstDeliveryCustomer || 'unknown';
   const timeStr = fmtTime(record.firstDeliveryTime);
   const travel = record.expectedTravelMinToFirst;
   const prep = record.loadPrepMin ?? defaults.loadPrepMin;
   const expectedTotal = (travel != null) ? travel + prep : null;
   const prefix = `clockIn ${record.clockIn} → first delivery ${customer} at ${timeStr} (${fmtDur(record.clockInToFirstMin)}).`;
-  if (source === 'baseline' && dist) {
-    const bucket = percentileBucket(gap, dist);
-    const excess = excessOverMedian(gap, dist);
-    return `${prefix} Today's morning gap: ${fmtDur(gap)}. Your baseline P50 ${fmtDur(dist.p50)} / P90 ${fmtDur(dist.p90)} — today ${bucket || '?'} / excess over median ${fmtDur(excess)}.`;
-  }
   const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)} + ${fmtDur(prep)} load prep = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
-function buildEvidenceAfternoon({ record, defaults, source, dist, gap }) {
+function buildEvidenceAfternoon({ record, defaults, gap }) {
   const customer = record.lastDeliveryCustomer || 'unknown';
   const timeStr = fmtTime(record.lastDeliveryTime);
   const travel = record.expectedTravelMinFromLast;
   const wrap = record.wrapUpMin ?? defaults.wrapUpMin;
   const expectedTotal = (travel != null) ? travel + wrap : null;
   const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${record.clockOut} (${fmtDur(record.lastToClockOutMin)}).`;
-  if (source === 'baseline' && dist) {
-    const bucket = percentileBucket(gap, dist);
-    const excess = excessOverMedian(gap, dist);
-    return `${prefix} Today's afternoon gap: ${fmtDur(gap)}. Your baseline P50 ${fmtDur(dist.p50)} / P90 ${fmtDur(dist.p90)} — today ${bucket || '?'} / excess over median ${fmtDur(excess)}.`;
-  }
   const expectedStr = expectedTotal != null ? `Expected return travel ${fmtDur(travel)} + ${fmtDur(wrap)} wrap-up = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
-function buildEvidenceInRoute({ record, source, dist, value }) {
+function buildEvidenceInRoute({ record, value }) {
   const visits = record?.motive?.offRouteVisits || [];
   const inRouteVisits = visits.filter(v => v.window === 'in_route');
   const locations = inRouteVisits
     .map(v => `${v.destZip || '?'}${v.stationaryMin > 0 ? ` (${fmtDur(v.stationaryMin)} stop)` : ''}`)
     .join(', ');
   const locStr = locations ? ` Locations: ${locations}.` : '';
-  const prefix = `${fmtDur(value)} of off-route activity between first and last delivery.${locStr}`;
-  if (source === 'baseline' && dist) {
-    const bucket = percentileBucket(value, dist);
-    const excess = excessOverMedian(value, dist);
-    return `${prefix} Your baseline P50 ${fmtDur(dist.p50)} / P90 ${fmtDur(dist.p90)} — today ${bucket || '?'} / excess over median ${fmtDur(excess)}.`;
-  }
-  return `${prefix} (static threshold)`;
+  return `${fmtDur(value)} of off-route activity between first and last delivery.${locStr} (static threshold)`;
 }
 
 // Re-score one record against its baseline + defaults. Pure: no I/O.
@@ -140,43 +128,22 @@ export function rescoreOne(record, baseline, defaults) {
   let stolen = 0;
 
   // ---------- Morning ----------
+  // Fraud is judged absolutely: anything above the static `ok` threshold is
+  // unexplained, regardless of the driver's own historical pattern.
   let morningFlag = 'no_data';
   if (record.morningGapMin != null) {
-    const dist = baseline?.metrics?.morningGapMin;
-    const baseClass = classifyAgainstBaseline(record.morningGapMin, dist);
-    if (baseClass != null) {
-      morningFlag = baseClass;
-      next.morningSeveritySource = 'baseline';
-      sourceCounts.baseline++;
-      // Anchor attribution at P75 — same boundary classifyAgainstBaseline uses
-      // to call a day "ok". Result: ok days contribute 0, only warn/flag/critical
-      // days add to stolen total.
-      stolen += excessOverP75(record.morningGapMin, dist);
-      if (morningFlag !== 'ok') {
-        next.flags.push({
-          kind: 'morning_gap',
-          severity: morningFlag,
-          severitySource: 'baseline',
-          evidence: buildEvidenceMorning({ record, defaults, source: 'baseline', dist, gap: record.morningGapMin }),
-          deltaMin: record.morningGapMin
-        });
-      }
-    } else {
-      morningFlag = classifyStatic(record.morningGapMin, morningT);
-      next.morningSeveritySource = 'static';
-      sourceCounts.static++;
-      // Static fallback also uses the warn boundary (not ok) — matches the
-      // baseline-path P75 alignment: a day classified static "ok" contributes 0.
-      stolen += Math.max(0, record.morningGapMin - morningT.warn);
-      if (morningFlag !== 'ok' && morningFlag !== 'no_data') {
-        next.flags.push({
-          kind: 'morning_gap',
-          severity: morningFlag,
-          severitySource: 'static',
-          evidence: buildEvidenceMorning({ record, defaults, source: 'static', dist: null, gap: record.morningGapMin }),
-          deltaMin: record.morningGapMin
-        });
-      }
+    morningFlag = classifyStatic(record.morningGapMin, morningT);
+    next.morningSeveritySource = 'static';
+    sourceCounts.static++;
+    stolen += Math.max(0, record.morningGapMin - morningT.ok);
+    if (morningFlag !== 'ok' && morningFlag !== 'no_data') {
+      next.flags.push({
+        kind: 'morning_gap',
+        severity: morningFlag,
+        severitySource: 'static',
+        evidence: buildEvidenceMorning({ record, defaults, gap: record.morningGapMin }),
+        deltaMin: record.morningGapMin
+      });
     }
   }
   next.morningFlag = morningFlag;
@@ -184,40 +151,20 @@ export function rescoreOne(record, baseline, defaults) {
   // ---------- Afternoon ----------
   let afternoonFlag = 'no_data';
   if (record.afternoonGapMin != null) {
-    const dist = baseline?.metrics?.afternoonGapMin;
-    const baseClass = classifyAgainstBaseline(record.afternoonGapMin, dist);
-    if (baseClass != null) {
-      afternoonFlag = baseClass;
-      next.afternoonSeveritySource = 'baseline';
-      sourceCounts.baseline++;
-      stolen += excessOverP75(record.afternoonGapMin, dist);
-      if (afternoonFlag !== 'ok') {
-        let ev = buildEvidenceAfternoon({ record, defaults, source: 'baseline', dist, gap: record.afternoonGapMin });
-        if (detourNote) ev += ' ' + detourNote;
-        next.flags.push({
-          kind: 'afternoon_gap',
-          severity: afternoonFlag,
-          severitySource: 'baseline',
-          evidence: ev,
-          deltaMin: record.afternoonGapMin
-        });
-      }
-    } else {
-      afternoonFlag = classifyStatic(record.afternoonGapMin, afternoonT);
-      next.afternoonSeveritySource = 'static';
-      sourceCounts.static++;
-      stolen += Math.max(0, record.afternoonGapMin - afternoonT.warn);
-      if (afternoonFlag !== 'ok' && afternoonFlag !== 'no_data') {
-        let ev = buildEvidenceAfternoon({ record, defaults, source: 'static', dist: null, gap: record.afternoonGapMin });
-        if (detourNote) ev += ' ' + detourNote;
-        next.flags.push({
-          kind: 'afternoon_gap',
-          severity: afternoonFlag,
-          severitySource: 'static',
-          evidence: ev,
-          deltaMin: record.afternoonGapMin
-        });
-      }
+    afternoonFlag = classifyStatic(record.afternoonGapMin, afternoonT);
+    next.afternoonSeveritySource = 'static';
+    sourceCounts.static++;
+    stolen += Math.max(0, record.afternoonGapMin - afternoonT.ok);
+    if (afternoonFlag !== 'ok' && afternoonFlag !== 'no_data') {
+      let ev = buildEvidenceAfternoon({ record, defaults, gap: record.afternoonGapMin });
+      if (detourNote) ev += ' ' + detourNote;
+      next.flags.push({
+        kind: 'afternoon_gap',
+        severity: afternoonFlag,
+        severitySource: 'static',
+        evidence: ev,
+        deltaMin: record.afternoonGapMin
+      });
     }
   }
   next.afternoonFlag = afternoonFlag;
@@ -225,36 +172,18 @@ export function rescoreOne(record, baseline, defaults) {
   // ---------- In-route ----------
   let inRouteFlag = record.inRouteFlag || 'deferred';
   if (record.inRouteOffRouteMin != null) {
-    const dist = baseline?.metrics?.inRouteOffRouteMin;
-    const baseClass = classifyAgainstBaseline(record.inRouteOffRouteMin, dist);
-    if (baseClass != null) {
-      inRouteFlag = baseClass;
-      next.inRouteSeveritySource = 'baseline';
-      sourceCounts.baseline++;
-      stolen += excessOverP75(record.inRouteOffRouteMin, dist);
-      if (inRouteFlag !== 'ok') {
-        next.flags.push({
-          kind: 'in_route_off_route',
-          severity: inRouteFlag,
-          severitySource: 'baseline',
-          evidence: buildEvidenceInRoute({ record, source: 'baseline', dist, value: record.inRouteOffRouteMin }),
-          deltaMin: record.inRouteOffRouteMin
-        });
-      }
-    } else {
-      inRouteFlag = classifyStatic(record.inRouteOffRouteMin, inRouteT);
-      next.inRouteSeveritySource = 'static';
-      sourceCounts.static++;
-      stolen += Math.max(0, record.inRouteOffRouteMin - inRouteT.warn);
-      if (inRouteFlag !== 'ok' && inRouteFlag !== 'no_data') {
-        next.flags.push({
-          kind: 'in_route_off_route',
-          severity: inRouteFlag,
-          severitySource: 'static',
-          evidence: buildEvidenceInRoute({ record, source: 'static', dist: null, value: record.inRouteOffRouteMin }),
-          deltaMin: record.inRouteOffRouteMin
-        });
-      }
+    inRouteFlag = classifyStatic(record.inRouteOffRouteMin, inRouteT);
+    next.inRouteSeveritySource = 'static';
+    sourceCounts.static++;
+    stolen += Math.max(0, record.inRouteOffRouteMin - inRouteT.ok);
+    if (inRouteFlag !== 'ok' && inRouteFlag !== 'no_data') {
+      next.flags.push({
+        kind: 'in_route_off_route',
+        severity: inRouteFlag,
+        severitySource: 'static',
+        evidence: buildEvidenceInRoute({ record, value: record.inRouteOffRouteMin }),
+        deltaMin: record.inRouteOffRouteMin
+      });
     }
   }
   next.inRouteFlag = inRouteFlag;
