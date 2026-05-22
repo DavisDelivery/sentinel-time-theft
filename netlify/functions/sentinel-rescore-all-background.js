@@ -127,7 +127,7 @@ export default async (req) => {
     db.listAllDocs('sentinelDriverDays'),
     loadAllBaselines(db),
     loadDefaults(db),
-    db.listDocs('employees', { limit: 500, fields: ['loadPrepMin', 'wrapUpMin'] })
+    db.listDocs('employees', { limit: 500, fields: ['loadPrepMin', 'wrapUpMin', 'truckType'] })
   ]);
   const employeesBySlug = {};
   for (const e of employees) {

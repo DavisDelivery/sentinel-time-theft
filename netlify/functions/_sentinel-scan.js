@@ -90,7 +90,14 @@ export async function loadOrBootstrapTruckTypeMap(db) {
   return fresh;
 }
 
-function resolveTruckType(defaultTruck, truckTypeMap) {
+function resolveTruckType(employee, truckTypeMap) {
+  // Per-driver override on /employees wins. This is the operator's manual
+  // assignment via the Driver Config UI — used for owner_ops (who carry no
+  // company truck number, so defaultTruck → truckTypeMap fails) and for any
+  // driver whose truckTypeMap entry is wrong or missing.
+  const ov = employee?.truckType;
+  if (ov === 'tractor' || ov === 'straight') return ov;
+  const defaultTruck = employee?.defaultTruck;
   if (!defaultTruck) return 'unknown';
   const key = String(defaultTruck).trim();
   const type = truckTypeMap?.trucks?.[key];
@@ -203,7 +210,7 @@ export async function scanOneDriverDay({
   const truckTypeMap = config?.truckTypeMap || await loadOrBootstrapTruckTypeMap(db);
 
   const employee = await getEmployee(db, driverSlug);
-  const truckType = resolveTruckType(employee.defaultTruck, truckTypeMap);
+  const truckType = resolveTruckType(employee, truckTypeMap);
 
   const punch = await getB600Punch(db, employee, date);
   const { matches: allStops, diag: nuvizzDiag } = await getNuvizzStops(db, employee, date);

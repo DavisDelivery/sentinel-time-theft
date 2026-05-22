@@ -17,7 +17,7 @@
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.3.0-driver-config';
+const VERSION = 'v4.3.1-truck-type-override';
 
 // Per-driver listDocs cap. Each driver has at most one record per day; after
 // the 17-month backfill ~374 working days exist per driver. 1500 is ~7 years
@@ -95,20 +95,32 @@ async function driverList(db) {
     .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
 }
 
-// Active drivers' load-prep / wrap-up config + current defaults. Backs the
-// "Driver Config" panel in Settings; `loadPrepMin` / `wrapUpMin` are null
-// when the driver is using defaults, numeric when an override is set.
-// owner_op rows are included for completeness (they don't punch B600 so the
-// overrides have no effect today, but the operator may want to mark them).
+// Active drivers' load-prep / wrap-up / truck-type config + current defaults.
+// Backs the "Driver Config" panel in Settings; `loadPrepMin` / `wrapUpMin` are
+// null when the driver is using defaults, numeric when an override is set.
+// `truckType` is the per-driver override when set; `resolvedTruckType` is the
+// effective type after falling back to the truckTypeMap (so the UI can show
+// "auto: straight" for unset rows). owner_op rows are included (they don't
+// punch B600 so loadPrep/wrapUp don't apply today, but the operator wants
+// truckType set so they group correctly in the view-all dashboard).
 async function driverConfig(db) {
-  const [rows, defaultsDoc] = await Promise.all([
+  const [rows, defaultsDoc, truckTypeMapDoc] = await Promise.all([
     db.listDocs('employees', {
       where: [{ field: 'status', op: '==', value: 'active' }],
       limit: 200,
-      fields: ['fullName', 'firstName', 'lastName', 'defaultTruck', 'role', 'loadPrepMin', 'wrapUpMin']
+      fields: ['fullName', 'firstName', 'lastName', 'defaultTruck', 'role', 'loadPrepMin', 'wrapUpMin', 'truckType']
     }),
-    db.getDoc('sentinelConfig', 'defaults').catch(() => null)
+    db.getDoc('sentinelConfig', 'defaults').catch(() => null),
+    db.getDoc('sentinelConfig', 'truckTypeMap').catch(() => null)
   ]);
+  const trucksMap = truckTypeMapDoc?.trucks || {};
+  function resolveTruckType(emp) {
+    if (emp.truckType === 'tractor' || emp.truckType === 'straight') return emp.truckType;
+    const key = emp.defaultTruck ? String(emp.defaultTruck).trim() : null;
+    const fromMap = key ? trucksMap[key] : null;
+    if (fromMap === 'tractor' || fromMap === 'straight') return fromMap;
+    return 'unknown';
+  }
   const drivers = rows
     .filter(r => r.role === 'driver' || r.role === 'owner_op')
     .map(r => ({
@@ -119,7 +131,9 @@ async function driverConfig(db) {
       defaultTruck: r.defaultTruck || null,
       role: r.role,
       loadPrepMin: typeof r.loadPrepMin === 'number' ? r.loadPrepMin : null,
-      wrapUpMin: typeof r.wrapUpMin === 'number' ? r.wrapUpMin : null
+      wrapUpMin: typeof r.wrapUpMin === 'number' ? r.wrapUpMin : null,
+      truckType: (r.truckType === 'tractor' || r.truckType === 'straight') ? r.truckType : null,
+      resolvedTruckType: resolveTruckType(r)
     }))
     .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
   return {

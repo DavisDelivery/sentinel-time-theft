@@ -544,6 +544,13 @@ body {
 }
 .dc-row .dc-truck { font-size: 10px; color: var(--text-3); font-family: 'JetBrains Mono', monospace; font-weight: 500; }
 .dc-row .dc-fields { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+.dc-row .dc-fields.dc-fields-3 { grid-template-columns: 1.1fr 1fr 1fr; }
+.dc-row select {
+  width: 100%; background: var(--bg-1); border: 1px solid var(--line); color: var(--text);
+  font-family: 'JetBrains Mono', monospace; font-size: var(--fs-base);
+  padding: 8px 10px; border-radius: 6px; min-height: 38px; appearance: none;
+  -webkit-appearance: none;
+}
 .dc-row label {
   display: block; font-size: 10px; color: var(--text-3); text-transform: uppercase;
   letter-spacing: 0.08em; font-weight: 600; margin-bottom: 4px;
@@ -674,13 +681,15 @@ body {
     <div class="field"><div class="l">Yard ZIP Variants</div><div class="v mono" id="yardZipsDisplay">30518, 30542</div></div>
     <div class="field"><div class="l">Static Thresholds (min)</div><div class="v mono" style="line-height:1.6">morn ok≤30 / warn≤60 / flag≤90<br>aft ok≤30 / warn≤60 / flag≤90<br>in-route ok≤15 / warn≤30 / flag≤60</div></div>
     <div class="field">
-      <div class="l">Driver Config — Load Prep / Wrap Up (min)</div>
+      <div class="l">Driver Config — Truck Type / Load Prep / Wrap Up</div>
       <div class="dc-help">
-        Per-driver overrides for morning load-prep and afternoon wrap-up.
+        Per-driver overrides used by the engine for fraud attribution.
         Defaults: load prep <span id="dcDefaultLoadPrep" class="mono">15</span>m,
         wrap up <span id="dcDefaultWrapUp" class="mono">15</span>m.
         Self-loaders typically need ~120m load prep; pre-loaded drivers stay at default.
-        Leave a field blank to use default. Run <em>Re-score All Records</em> after edits.
+        Truck type defaults to "auto" (resolved from truck number); set manually for
+        owner-ops and any driver without a company truck number.
+        Leave numeric fields blank to use default. Run <em>Re-score All Records</em> after edits.
       </div>
       <div id="driverConfigList" class="dc-list"><div class="loading">Loading drivers</div></div>
     </div>
@@ -689,7 +698,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.3.0-driver-config';
+const APP_VERSION = 'v4.3.1-truck-type-override';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1604,17 +1613,37 @@ async function loadDriverConfig() {
 }
 
 function renderDriverConfigRow(d) {
-  const hasOverride = (d.loadPrepMin != null) || (d.wrapUpMin != null);
+  const hasOverride = (d.loadPrepMin != null) || (d.wrapUpMin != null) || (d.truckType != null);
   const lpVal = d.loadPrepMin != null ? d.loadPrepMin : '';
   const wuVal = d.wrapUpMin != null ? d.wrapUpMin : '';
-  const truckBits = [d.role === 'owner_op' ? 'owner-op' : null, d.defaultTruck ? `truck ${d.defaultTruck}` : null].filter(Boolean).join(' · ');
+  // truckType: 'tractor' | 'straight' | null. Show resolvedTruckType as an
+  // "auto:" hint when no override is set, so the operator sees what the engine
+  // would resolve to from the truckTypeMap.
+  const ttVal = d.truckType || '';
+  const ttAutoHint = (!d.truckType && d.resolvedTruckType && d.resolvedTruckType !== 'unknown')
+    ? `auto: ${d.resolvedTruckType}`
+    : (!d.truckType && (!d.resolvedTruckType || d.resolvedTruckType === 'unknown'))
+      ? 'unknown — set manually'
+      : '';
+  const truckBits = [
+    d.role === 'owner_op' ? 'owner-op' : null,
+    d.defaultTruck ? `truck ${d.defaultTruck}` : null
+  ].filter(Boolean).join(' · ');
   return `
     <div class="dc-row ${hasOverride ? 'has-override' : ''}" data-slug="${d.slug}">
       <div class="dc-name">
         <span>${escapeHtml(d.fullName || d.slug)}</span>
         <span class="dc-truck">${escapeHtml(truckBits)}</span>
       </div>
-      <div class="dc-fields">
+      <div class="dc-fields dc-fields-3">
+        <div>
+          <label>Truck Type</label>
+          <select data-field="truckType">
+            <option value="">${escapeHtml(ttAutoHint || 'auto')}</option>
+            <option value="straight" ${ttVal === 'straight' ? 'selected' : ''}>Straight</option>
+            <option value="tractor" ${ttVal === 'tractor' ? 'selected' : ''}>Tractor</option>
+          </select>
+        </div>
         <div>
           <label>Load Prep (min)</label>
           <input type="number" min="0" max="480" step="1" data-field="loadPrepMin" value="${lpVal}" placeholder="default" inputmode="numeric">
@@ -1652,11 +1681,14 @@ async function saveDriverConfigRow(slug) {
   const clearBtn = row.querySelector('.dc-clear');
   const lpInput = row.querySelector('[data-field="loadPrepMin"]');
   const wuInput = row.querySelector('[data-field="wrapUpMin"]');
+  const ttSelect = row.querySelector('[data-field="truckType"]');
 
   const lp = readFieldValue(lpInput);
   const wu = readFieldValue(wuInput);
   if (lp && typeof lp === 'object' && lp.error) { setRowStatus(statusEl, lp.error, 'err'); return; }
   if (wu && typeof wu === 'object' && wu.error) { setRowStatus(statusEl, wu.error, 'err'); return; }
+  const ttRaw = ttSelect ? ttSelect.value : '';
+  const tt = ttRaw === '' ? null : ttRaw;
 
   saveBtn.disabled = true; clearBtn.disabled = true;
   setRowStatus(statusEl, 'Saving…', '');
@@ -1664,12 +1696,13 @@ async function saveDriverConfigRow(slug) {
     const res = await fetch('/api/sentinel-write?' + new URLSearchParams({ secret: getSecret(), action: 'setDriverConfig' }), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ driverSlug: slug, loadPrepMin: lp, wrapUpMin: wu })
+      body: JSON.stringify({ driverSlug: slug, loadPrepMin: lp, wrapUpMin: wu, truckType: tt })
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
     setRowStatus(statusEl, 'Saved', 'ok');
-    row.classList.toggle('has-override', (body.loadPrepMin != null) || (body.wrapUpMin != null));
+    row.classList.toggle('has-override',
+      (body.loadPrepMin != null) || (body.wrapUpMin != null) || (body.truckType != null));
   } catch (e) {
     setRowStatus(statusEl, e.message, 'err');
   } finally {
@@ -1682,6 +1715,8 @@ async function clearDriverConfigRow(slug) {
   if (!row) return;
   row.querySelector('[data-field="loadPrepMin"]').value = '';
   row.querySelector('[data-field="wrapUpMin"]').value = '';
+  const ttSel = row.querySelector('[data-field="truckType"]');
+  if (ttSel) ttSel.value = '';
   await saveDriverConfigRow(slug);
 }
 
