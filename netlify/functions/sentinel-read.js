@@ -65,7 +65,43 @@ async function byDriver(db, driverSlug) {
   }
   console.log(`[sentinel-read] byDriver ${driverSlug} → ${rows.length} records`);
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  return { records: rows, baseline };
+
+  // Avg clock-in + avg first-delivery time-of-day, in minutes-since-midnight,
+  // then formatted back to a 24-hr "HH:MM" string (frontend renders am/pm).
+  // Skips records missing the relevant field. Null when no records qualify.
+  const hhmmToMin = (hhmm) => {
+    const m = String(hhmm).match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    const h = +m[1], mm = +m[2];
+    if (h > 23 || mm > 59) return null;
+    return h * 60 + mm;
+  };
+  const minToHHMM = (avg) => {
+    if (avg == null) return null;
+    const h = Math.floor(avg / 60);
+    const m = Math.round(avg % 60);
+    // Round-over guard: 59.6 → 60 would yield ":60".
+    const hh = (m === 60) ? h + 1 : h;
+    const mm = (m === 60) ? 0 : m;
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  };
+  let ciSum = 0, ciN = 0, fdSum = 0, fdN = 0;
+  for (const r of rows) {
+    if (r.clockIn) {
+      const v = hhmmToMin(r.clockIn);
+      if (v != null) { ciSum += v; ciN++; }
+    }
+    if (r.firstDeliveryTime) {
+      // ISO-naive "YYYY-MM-DDTHH:MM..." → slice the time component.
+      const t = String(r.firstDeliveryTime).slice(11, 16);
+      const v = hhmmToMin(t);
+      if (v != null) { fdSum += v; fdN++; }
+    }
+  }
+  const avgClockInTime = ciN ? minToHHMM(ciSum / ciN) : null;
+  const avgFirstDeliveryTime = fdN ? minToHHMM(fdSum / fdN) : null;
+
+  return { records: rows, baseline, avgClockInTime, avgFirstDeliveryTime };
 }
 
 async function getBaseline(db, driverSlug) {
@@ -135,7 +171,7 @@ async function driverConfig(db) {
       truckType: (r.truckType === 'tractor' || r.truckType === 'straight') ? r.truckType : null,
       resolvedTruckType: resolveTruckType(r)
     }))
-    .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
+    .sort((a, b) => (a.displayName || a.fullName || a.slug || '').localeCompare(b.displayName || b.fullName || b.slug || ''));
   return {
     drivers,
     defaults: {
@@ -227,12 +263,23 @@ async function stops(db, driverSlug, date) {
   };
 }
 
-// Median of a non-empty numeric array (mutates: sorts in place).
+// Median of a non-empty numeric array (mutates: sorts in place). Integer
+// result — used for minute-valued metrics where sub-minute precision is noise.
 function median(arr) {
   if (!arr.length) return null;
   arr.sort((a, b) => a - b);
   const mid = Math.floor(arr.length / 2);
   return arr.length % 2 ? arr[mid] : Math.round((arr[mid - 1] + arr[mid]) / 2);
+}
+
+// Median preserving 2 decimals — for fractional metrics like stops/hr where
+// rounding to an integer would erase the signal (1.8/hr vs 2.4/hr).
+function medianFloat(arr) {
+  if (!arr.length) return null;
+  arr.sort((a, b) => a - b);
+  const mid = Math.floor(arr.length / 2);
+  const v = arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+  return +v.toFixed(2);
 }
 
 // Resolve effective truckType for the view-all grouping. Identical chain to
@@ -375,7 +422,7 @@ async function dashboard(db, days) {
   // table (one row per driver inside the bucket).
   const newBucket = () => ({
     c2f: [], morningGap: [], l2c: [], afternoonGap: [],
-    onRoute: [], shift: [], stops: [],
+    onRoute: [], shift: [], stops: [], stopsPerHr: [],
     drivers: new Set(),
     perDriver: {},
     days: 0
@@ -437,22 +484,31 @@ async function dashboard(db, days) {
         // On-route span: minutes between first and last delivery on this day.
         // null when there's only one stop (no last different from first); the
         // engine writes lastDeliveryTime=null in that case.
+        let onRouteMin = null;
         if (r.firstDeliveryTime && r.lastDeliveryTime) {
           const f = Date.parse(r.firstDeliveryTime);
           const l = Date.parse(r.lastDeliveryTime);
           if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
-            bucket.onRoute.push(Math.round((l - f) / 60000));
+            onRouteMin = Math.round((l - f) / 60000);
           }
         }
+        // Stops/hr on route: throughput while actively delivering. Only valid
+        // when there's a positive on-route span and at least one stop.
+        let stopsPerHr = null;
+        if (onRouteMin != null && onRouteMin > 0 && typeof r.completedStops === 'number' && r.completedStops > 0) {
+          stopsPerHr = r.completedStops / (onRouteMin / 60);
+        }
+        if (onRouteMin != null) bucket.onRoute.push(onRouteMin);
+        if (stopsPerHr != null) bucket.stopsPerHr.push(stopsPerHr);
         if (typeof r.totalShiftMin === 'number') bucket.shift.push(r.totalShiftMin);
         if (typeof r.completedStops === 'number') bucket.stops.push(r.completedStops);
         // Per-driver aggregation inside the bucket — keeps arrays per slug so
         // the drilldown table can show driver vs bucket-median deviation.
         if (!bucket.perDriver[slug]) {
           bucket.perDriver[slug] = {
-            slug, displayName: meta.displayName,
+            slug, displayName: meta.displayName, role: meta.role || 'driver',
             n_days: 0,
-            c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: []
+            c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: [], stopsPerHr: []
           };
         }
         const pd = bucket.perDriver[slug];
@@ -461,13 +517,8 @@ async function dashboard(db, days) {
         if (typeof r.morningGapMin === 'number') pd.morningGap.push(r.morningGapMin);
         if (typeof r.lastToClockOutMin === 'number') pd.l2c.push(r.lastToClockOutMin);
         if (typeof r.afternoonGapMin === 'number') pd.afternoonGap.push(r.afternoonGapMin);
-        if (r.firstDeliveryTime && r.lastDeliveryTime) {
-          const f = Date.parse(r.firstDeliveryTime);
-          const l = Date.parse(r.lastDeliveryTime);
-          if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
-            pd.onRoute.push(Math.round((l - f) / 60000));
-          }
-        }
+        if (onRouteMin != null) pd.onRoute.push(onRouteMin);
+        if (stopsPerHr != null) pd.stopsPerHr.push(stopsPerHr);
       }
     }
   }
@@ -538,12 +589,14 @@ async function dashboard(db, days) {
       .map(pd => ({
         slug: pd.slug,
         displayName: pd.displayName,
+        role: pd.role || 'driver',
         n_days: pd.n_days,
         medianC2F: median(pd.c2f.slice()),
         medianMorningGap: median(pd.morningGap.slice()),
         medianL2C: median(pd.l2c.slice()),
         medianAfternoonGap: median(pd.afternoonGap.slice()),
-        medianOnRouteMin: median(pd.onRoute.slice())
+        medianOnRouteMin: median(pd.onRoute.slice()),
+        medianStopsPerHourOnRoute: medianFloat(pd.stopsPerHr.slice())
       }))
       .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
     refMetricsOut[key] = {
@@ -556,6 +609,7 @@ async function dashboard(db, days) {
       medianOnRouteMin: median(b.onRoute),
       medianShiftMin: median(b.shift),
       medianStopsPerDay: median(b.stops),
+      medianStopsPerHourOnRoute: medianFloat(b.stopsPerHr),
       representativeLoadPrep,
       representativeWrapUp: defaultsDoc?.wrapUpMin ?? 15,
       morningOkThreshold: morningOk,
@@ -613,8 +667,8 @@ export default async (req) => {
       case 'byDriver': {
         const driverSlug = url.searchParams.get('driverSlug');
         if (!driverSlug) return new Response(JSON.stringify({ error: 'driverSlug required' }), { status: 400, headers: CORS });
-        const { records, baseline } = await byDriver(db, driverSlug);
-        body = { action, driverSlug, records, baseline };
+        const { records, baseline, avgClockInTime, avgFirstDeliveryTime } = await byDriver(db, driverSlug);
+        body = { action, driverSlug, records, baseline, avgClockInTime, avgFirstDeliveryTime };
         break;
       }
       case 'getBaseline': {
