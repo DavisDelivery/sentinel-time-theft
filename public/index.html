@@ -278,6 +278,16 @@ body {
   align-items: center;
 }
 .stop-row:last-child { border-bottom: 0; }
+.stop-row.stop-anchor {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  padding: 6px var(--s-2);
+}
+.stop-row.stop-anchor .stop-name {
+  font-size: 10px; font-weight: 700; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.stop-row.stop-anchor .stop-t { color: var(--text-3); font-weight: 600; }
 .stop-t { color: var(--text-2); font-size: var(--fs-sm); }
 .stop-mid { min-width: 0; }
 .stop-name { font-weight: 600; font-size: var(--fs-base); color: var(--text); overflow: hidden; text-overflow: ellipsis; }
@@ -504,6 +514,20 @@ body {
   padding: var(--s-3); border-radius: 8px; margin-bottom: var(--s-3); font-size: var(--fs-md);
 }
 
+/* ============ Profiles tab — roster list + search (v4.5.0) ============ */
+.profiles-search {
+  padding: var(--s-3) var(--s-4) 0;
+}
+.profiles-search input {
+  width: 100%; background: var(--bg-2); border: 1px solid var(--line);
+  color: var(--text); font-family: inherit; font-size: var(--fs-base);
+  padding: 10px 14px; border-radius: 999px; min-height: 44px;
+}
+.profiles-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none; appearance: none;
+}
+.profiles-list { /* reuses .viewall-row rows, just no truck-type group headers */ }
+
 /* ============ Overview range chips + view-all + reference grid (v4.4.0) ============ */
 .range-chips {
   display: flex; gap: var(--s-2); margin-bottom: var(--s-4);
@@ -583,6 +607,57 @@ body {
 .ref-cell .ref-foot {
   font-size: 10px; color: var(--text-4); margin-top: var(--s-2);
 }
+.ref-cell:not(.empty) { cursor: pointer; }
+.ref-cell:not(.empty):active { background: var(--bg-3); }
+.ref-cell h4 .ref-tap {
+  display: block; font-size: 9px; color: var(--brand); font-weight: 600;
+  margin-top: 2px; text-transform: none; letter-spacing: 0;
+}
+
+.ref-detail-summary { margin-bottom: var(--s-4); }
+.ref-detail-headline {
+  font-size: var(--fs-md); font-weight: 700; color: var(--text);
+  margin-bottom: var(--s-3);
+}
+.ref-detail-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+.ref-detail-grid > div {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: var(--s-2);
+}
+.ref-detail-grid .k { font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+.ref-detail-grid .v { font-size: var(--fs-base); font-weight: 700; color: var(--text); font-feature-settings: 'tnum'; }
+.ref-detail-foot { font-size: 10px; color: var(--text-4); }
+
+.ref-detail-table-wrap {
+  overflow-x: auto;
+  margin: 0 calc(-1 * var(--s-3));
+  padding: 0 var(--s-3);
+}
+.ref-detail-table {
+  width: 100%; border-collapse: collapse; font-size: var(--fs-xs);
+  font-feature-settings: 'tnum';
+}
+.ref-detail-table thead th {
+  text-align: left; font-weight: 600; color: var(--text-3);
+  padding: 6px 6px; border-bottom: 1px solid var(--line);
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  cursor: pointer; user-select: none; white-space: nowrap;
+}
+.ref-detail-table thead th.active { color: var(--brand); }
+.ref-detail-table tbody td {
+  padding: 8px 6px; border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.ref-detail-table tbody tr { cursor: pointer; }
+.ref-detail-table tbody tr:active { background: var(--bg-2); }
+.ref-detail-table .rd-name { font-weight: 600; color: var(--text); white-space: normal; }
+.ref-detail-table .rd-n { color: var(--text-3); }
+.ref-detail-table .rd-dev { font-weight: 700; }
+.ref-detail-table .rd-dev.good { color: var(--clean); }
+.ref-detail-table .rd-dev.bad { color: var(--crit); }
 
 /* ============ Settings modal ============ */
 .modal {
@@ -660,6 +735,15 @@ body {
 .dc-row .dc-status { font-size: 11px; color: var(--text-3); min-width: 60px; text-align: right; }
 .dc-row .dc-status.ok { color: var(--clean); }
 .dc-row .dc-status.err { color: var(--crit); }
+.dc-row .dc-status.unsaved { color: var(--med); }
+.dc-row .dc-status.saving { color: var(--text-3); }
+.dc-save-all {
+  background: var(--bg-2); border: 1px solid var(--brand); color: var(--brand);
+  padding: 10px 14px; border-radius: 8px; font-size: var(--fs-sm); font-weight: 600;
+  width: 100%; min-height: 40px; cursor: pointer; font-family: inherit;
+  margin-bottom: var(--s-2);
+}
+.dc-save-all:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -705,18 +789,11 @@ body {
 </div>
 
 <div class="page" id="page-profile">
-  <div class="picker">
-    <select id="profileSelect" aria-label="Driver"></select>
-    <button class="refresh" id="refreshProfile" aria-label="Refresh">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-    </button>
+  <div class="profiles-search">
+    <input type="search" id="profilesSearch" placeholder="Search drivers…" inputmode="search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false">
   </div>
   <div id="profileContent">
-    <div class="empty">
-      <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <h3>Pick a driver</h3>
-      <p>Their baseline profile — percentiles, typical shift, regular customers — will load here.</p>
-    </div>
+    <div class="loading">Loading roster</div>
   </div>
 </div>
 
@@ -738,6 +815,19 @@ body {
     Profiles
   </button>
 </nav>
+
+<div class="modal" id="refDetailModal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">
+      Reference detail
+      <button class="close" id="closeRefDetail" aria-label="Close">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="refDetailBody"></div>
+  </div>
+</div>
 
 <div class="modal" id="settingsModal">
   <div class="modal-sheet">
@@ -776,8 +866,10 @@ body {
         Self-loaders typically need ~120m load prep; pre-loaded drivers stay at default.
         Truck type defaults to "auto" (resolved from truck number); set manually for
         owner-ops and any driver without a company truck number.
-        Leave numeric fields blank to use default. Run <em>Re-score All Records</em> after edits.
+        Edits autosave on blur (Tab away or tap outside the field). Run
+        <em>Re-score All Records</em> after edits.
       </div>
+      <button class="dc-save-all" id="dcSaveAll" type="button" disabled>Save all unsaved changes</button>
       <div id="driverConfigList" class="dc-list"><div class="loading">Loading drivers</div></div>
     </div>
     <div class="field"><div class="l">Data Scope</div><div class="v mono" id="dataScopeDisplay">Loading…</div></div>
@@ -785,7 +877,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.4.0-overview';
+const APP_VERSION = 'v4.5.0-driver-detail-polish';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -840,7 +932,49 @@ const fmtDur = m => {
 // but every existing usage now routes through fmtDur for the "1h 40m" format.
 const fmtMin = fmtDur;
 const fmtHr = fmtDur;
-const fmtTime = iso => iso ? iso.slice(11, 16) : '—';
+// Operator-facing clock-time formatter — always 12-hour with lowercase am/pm.
+// Accepts:
+//   - 24-hr "HH:MM" string ("05:54" → "5:54am", "16:10" → "4:10pm")
+//   - ISO-naive "YYYY-MM-DDTHH:MM(:SS)(Z)" — slices the time component
+//   - Raw NuVizz "M/D/YY HH:MM AM|PM" string — preserves the AM/PM suffix
+//     (this is the line that previously stripped am/pm and made every
+//     afternoon delivery render as a morning time)
+// Edge cases: "00:00" → "12:00am", "12:00" → "12:00pm", null → "—".
+// Engine math stays in minutes/24-hr internally; this is display-only.
+function fmtClockTime(input) {
+  if (input == null) return '—';
+  const s = String(input).trim();
+  if (!s) return '—';
+
+  // NuVizz raw format: "5/8/26 01:01 PM" — preserve the AM/PM suffix the
+  // old regex was throwing away.
+  const nuvizz = s.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)\b/i);
+  if (nuvizz) {
+    let hh = parseInt(nuvizz[1], 10);
+    const mm = nuvizz[2];
+    const suf = nuvizz[3].toUpperCase() === 'PM' ? 'pm' : 'am';
+    if (hh === 0) hh = 12; // defensive — shouldn't happen for "PM/AM" data
+    return `${hh}:${mm}${suf}`;
+  }
+
+  // ISO-naive: slice the time component.
+  let hhmm = s;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) hhmm = s.slice(11, 16);
+
+  // 24-hr HH:MM or H:MM
+  const m = hhmm.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return '—';
+  const h24 = parseInt(m[1], 10);
+  const mm = m[2];
+  if (!Number.isFinite(h24) || h24 < 0 || h24 > 23) return '—';
+  const suf = h24 >= 12 ? 'pm' : 'am';
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  return `${h12}:${mm}${suf}`;
+}
+// fmtTime kept as an alias so any unaudited call site keeps working — but
+// every existing usage now routes through fmtClockTime for am/pm format.
+const fmtTime = fmtClockTime;
 const fmtDate = d => {
   if (!d) return '';
   const [y, mo, da] = d.split('-');
@@ -915,7 +1049,7 @@ function renderTrendIndicator(t30) {
 function renderReferenceCell(key, label, ref) {
   if (!ref) {
     return `
-      <div class="ref-cell empty">
+      <div class="ref-cell empty" data-ref-key="${key}" data-ref-label="${escapeHtml(label)}">
         <h4>${label}</h4>
         <div class="ref-row"><span class="k">Configure self-loaders to populate</span></div>
         <div class="ref-foot">Driver Config in Settings · set Load Prep ≥ 60m</div>
@@ -932,15 +1066,133 @@ function renderReferenceCell(key, label, ref) {
     gapClass = obsGap <= okThr ? 'ok' : 'bad';
   }
   return `
-    <div class="ref-cell">
-      <h4>${label}</h4>
+    <div class="ref-cell" data-ref-key="${key}" data-ref-label="${escapeHtml(label)}">
+      <h4>${label} <span class="ref-tap">tap for detail →</span></h4>
       <div class="ref-row"><span class="k">Drivers</span><span class="v">${ref.n_drivers}</span></div>
       <div class="ref-row"><span class="k">Days observed</span><span class="v">${ref.n_days}</span></div>
       <div class="ref-row"><span class="k">Median clockIn→1st</span><span class="v">${fmtDur(ref.medianC2F)}</span></div>
       <div class="ref-row"><span class="k">Median morning gap</span><span class="v ${gapClass}">${fmtDur(obsGap)}</span></div>
+      <div class="ref-row"><span class="k">Median on-route (1st→last)</span><span class="v">${fmtDur(ref.medianOnRouteMin)}</span></div>
       <div class="ref-row"><span class="k">Median last→clockOut</span><span class="v">${fmtDur(ref.medianL2C)}</span></div>
       <div class="ref-foot">model: travel + ${ref.representativeLoadPrep}m prep + ${okThr}m ok floor</div>
     </div>`;
+}
+
+// Reference-metrics drilldown state — tracks which cell is open and the
+// per-driver table sort.
+const refDetailState = { sort: 'alpha', refKey: null, refLabel: null };
+
+function openReferenceDetailModal(refKey, refLabel, ref) {
+  if (!ref) return; // empty bucket — nothing to drill into
+  refDetailState.refKey = refKey;
+  refDetailState.refLabel = refLabel;
+  refDetailState.sort = 'alpha';
+  const modal = document.getElementById('refDetailModal');
+  const body = document.getElementById('refDetailBody');
+  modal.classList.add('open');
+  renderReferenceDetailBody(body, ref);
+}
+
+function closeReferenceDetailModal() {
+  document.getElementById('refDetailModal').classList.remove('open');
+}
+
+function renderReferenceDetailBody(container, ref) {
+  const bucketMedianGap = ref.medianMorningGap;
+  // Sort the per-driver rows. Default alpha by displayName; other sorts pull
+  // numeric medians (treat null as +Infinity so unset drivers sink).
+  const safe = (v) => (typeof v === 'number' ? v : Number.POSITIVE_INFINITY);
+  const sortFn = {
+    alpha: (a, b) => (a.displayName || '').localeCompare(b.displayName || ''),
+    c2f: (a, b) => safe(a.medianC2F) - safe(b.medianC2F),
+    morning: (a, b) => safe(a.medianMorningGap) - safe(b.medianMorningGap),
+    onRoute: (a, b) => safe(a.medianOnRouteMin) - safe(b.medianOnRouteMin),
+    l2c: (a, b) => safe(a.medianL2C) - safe(b.medianL2C),
+    deviation: (a, b) => {
+      // Sort by signed deviation from bucket median, worst (highest +%) first.
+      const da = devPctVsMedian(a.medianMorningGap, bucketMedianGap);
+      const db = devPctVsMedian(b.medianMorningGap, bucketMedianGap);
+      return (db ?? -Infinity) - (da ?? -Infinity);
+    }
+  }[refDetailState.sort] || ((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+
+  const rows = [...(ref.perDriverBreakdown || [])].sort(sortFn);
+
+  const headerClick = (col, label) => `<th data-sort="${col}" class="${refDetailState.sort === col ? 'active' : ''}">${label}</th>`;
+
+  container.innerHTML = `
+    <div class="ref-detail-summary">
+      <div class="ref-detail-headline">
+        ${refDetailState.refLabel} · ${ref.n_drivers} drivers · ${ref.n_days} days observed
+      </div>
+      <div class="ref-detail-grid">
+        <div><div class="k">Median clockIn → 1st</div><div class="v">${fmtDur(ref.medianC2F)}</div></div>
+        <div><div class="k">Median morning gap</div><div class="v">${fmtDur(ref.medianMorningGap)}</div></div>
+        <div><div class="k">Median on-route (1st → last)</div><div class="v">${fmtDur(ref.medianOnRouteMin)}</div></div>
+        <div><div class="k">Median last → clockOut</div><div class="v">${fmtDur(ref.medianL2C)}</div></div>
+        <div><div class="k">Median afternoon gap</div><div class="v">${fmtDur(ref.medianAfternoonGap)}</div></div>
+        <div><div class="k">Median shift</div><div class="v">${fmtDur(ref.medianShiftMin)}</div></div>
+        <div><div class="k">Median stops/day</div><div class="v">${ref.medianStopsPerDay != null ? ref.medianStopsPerDay : '—'}</div></div>
+      </div>
+      <div class="ref-detail-foot">model: travel + ${ref.representativeLoadPrep}m prep + ${ref.morningOkThreshold}m ok floor</div>
+    </div>
+    <div class="ref-detail-table-wrap">
+      <table class="ref-detail-table">
+        <thead>
+          <tr>
+            ${headerClick('alpha', 'Driver')}
+            <th>n days</th>
+            ${headerClick('c2f', 'c2f')}
+            ${headerClick('morning', 'morning')}
+            ${headerClick('onRoute', 'on-route')}
+            ${headerClick('l2c', 'l2c')}
+            ${headerClick('deviation', 'Δ vs bucket')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(p => {
+            const dev = devPctVsMedian(p.medianMorningGap, bucketMedianGap);
+            let devCls = '';
+            if (typeof dev === 'number') {
+              if (dev <= -15) devCls = 'good';
+              else if (dev >= 15) devCls = 'bad';
+            }
+            const devStr = typeof dev === 'number' ? `${dev > 0 ? '+' : ''}${dev.toFixed(0)}%` : '—';
+            return `
+              <tr data-slug="${escapeHtml(p.slug)}">
+                <td class="rd-name">${escapeHtml(p.displayName || p.slug)}</td>
+                <td class="rd-n">${p.n_days}</td>
+                <td>${fmtDur(p.medianC2F)}</td>
+                <td>${fmtDur(p.medianMorningGap)}</td>
+                <td>${fmtDur(p.medianOnRouteMin)}</td>
+                <td>${fmtDur(p.medianL2C)}</td>
+                <td class="rd-dev ${devCls}">${devStr}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Re-sort handlers.
+  container.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      refDetailState.sort = th.dataset.sort;
+      renderReferenceDetailBody(container, ref);
+    });
+  });
+  // Per-driver row tap → navigate.
+  container.querySelectorAll('tr[data-slug]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      closeReferenceDetailModal();
+      navigateToDriver(tr.dataset.slug);
+    });
+  });
+}
+
+function devPctVsMedian(driverMedian, bucketMedian) {
+  if (typeof driverMedian !== 'number' || typeof bucketMedian !== 'number' || bucketMedian === 0) return null;
+  return ((driverMedian - bucketMedian) / Math.abs(bucketMedian)) * 100;
 }
 
 function rangeLabel(days) {
@@ -1082,6 +1334,17 @@ async function loadOverview() {
       });
     });
 
+    // Ref-cell drilldown taps. Cells with no bucket data (empty class) are
+    // non-interactive — the operator gets the "Configure self-loaders" hint.
+    container.querySelectorAll('.ref-cell[data-ref-key]').forEach(cell => {
+      if (cell.classList.contains('empty')) return;
+      cell.addEventListener('click', () => {
+        const key = cell.dataset.refKey;
+        const ref = d.referenceMetrics?.[key];
+        if (ref) openReferenceDetailModal(key, cell.dataset.refLabel, ref);
+      });
+    });
+
     // View-all toggle.
     document.getElementById('viewAllToggle').addEventListener('click', () => {
       overviewState.viewAllOpen = !overviewState.viewAllOpen;
@@ -1209,7 +1472,7 @@ function renderDriverDayRow(r, context) {
   const metaParts = [];
   metaParts.push(r.truckType || '?');
   if (r.completedStops != null) metaParts.push(`${r.completedStops} stops`);
-  if (r.clockIn) metaParts.push(`${r.clockIn}–${r.clockOut || '?'}`);
+  if (r.clockIn) metaParts.push(`${fmtClockTime(r.clockIn)}–${r.clockOut ? fmtClockTime(r.clockOut) : '?'}`);
   const stolenCls = (r.stolenDollars > 0) ? '' : 'zero';
   div.innerHTML = `
     <div class="dd-head">
@@ -1272,7 +1535,7 @@ function renderDetail(r) {
   }
 
   // Shift + bookends combined
-  const shift = r.clockIn ? `${r.clockIn} → ${r.clockOut || '?'} (${r.totalShiftMin ? (r.totalShiftMin/60).toFixed(2) + 'hr' : '?'})` : 'No B600 punch';
+  const shift = r.clockIn ? `${fmtClockTime(r.clockIn)} → ${r.clockOut ? fmtClockTime(r.clockOut) : '?'} (${r.totalShiftMin ? (r.totalShiftMin/60).toFixed(2) + 'hr' : '?'})` : 'No B600 punch';
   const bookends = [];
   if (r.firstDeliveryTime) bookends.push(`<span class="k">First</span><span class="v">${fmtTime(r.firstDeliveryTime)}${r.firstDeliveryCustomer ? ' · ' + r.firstDeliveryCustomer : ''}</span>${r.firstDeliveryAddr ? `<span class="k"></span><span class="v dim">${r.firstDeliveryAddr}</span>` : ''}`);
   if (r.lastDeliveryTime) bookends.push(`<span class="k">Last</span><span class="v">${fmtTime(r.lastDeliveryTime)}${r.lastDeliveryCustomer ? ' · ' + r.lastDeliveryCustomer : ''}</span>${r.lastDeliveryAddr ? `<span class="k"></span><span class="v dim">${r.lastDeliveryAddr}</span>` : ''}`);
@@ -1367,7 +1630,7 @@ function renderDetail(r) {
   // resolve which (driverSlug, date) to fetch without re-parsing the DOM.
   parts.push(`
     <div class="dd-sec" data-stops-section>
-      <button class="stops-btn" data-stops-toggle data-driver-slug="${r.driverSlug}" data-date="${r.date}">
+      <button class="stops-btn" data-stops-toggle data-driver-slug="${r.driverSlug}" data-date="${r.date}" data-clock-in="${r.clockIn || ''}" data-clock-out="${r.clockOut || ''}">
         Show all deliveries for this day →
       </button>
       <div class="stops-list" data-stops-body></div>
@@ -1397,6 +1660,8 @@ document.addEventListener('click', async (ev) => {
   }
   const slug = btn.dataset.driverSlug;
   const date = btn.dataset.date;
+  const clockIn = btn.dataset.clockIn || null;
+  const clockOut = btn.dataset.clockOut || null;
   btn.disabled = true;
   btn.textContent = 'Loading deliveries…';
   try {
@@ -1404,7 +1669,7 @@ document.addEventListener('click', async (ev) => {
     const res = await fetch('/api/sentinel-read?' + qs);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    body.innerHTML = renderStops(data.stops || [], data.diag || {});
+    body.innerHTML = renderStops(data.stops || [], data.diag || {}, { clockIn, clockOut });
     body.dataset.loaded = '1';
     btn.textContent = 'Hide deliveries ↑';
   } catch (e) {
@@ -1415,18 +1680,17 @@ document.addEventListener('click', async (ev) => {
   }
 });
 
-// Parse a NuVizz "delivery end" string like "05/10/2026 13:42:00" to "HH:MM".
+// Parse a NuVizz "delivery end" string like "5/8/26 01:01 PM" → "1:01pm".
 // Returns "—" on unparseable input so the row still renders cleanly.
 function fmtNuvizzTime(s) {
-  if (!s) return '—';
-  const m = String(s).match(/(\d{1,2}):(\d{2})/);
-  return m ? `${m[1].padStart(2,'0')}:${m[2]}` : '—';
+  return fmtClockTime(s);
 }
 
-function renderStops(stops, diag) {
+function renderStops(stops, diag, opts = {}) {
   if (!stops.length) {
     return `<div class="stops-empty">No NuVizz stops found for this driver/date. ${diag.reason || ''}</div>`;
   }
+  const { clockIn, clockOut } = opts;
   // Group by status so the operator immediately sees completed vs failed vs other.
   const byStatus = {};
   for (const s of stops) {
@@ -1442,7 +1706,21 @@ function renderStops(stops, diag) {
     if (!/complet/i.test(a) && /complet/i.test(b)) return 1;
     return a.localeCompare(b);
   });
+  // Anchor rows wrap the completed-deliveries group so every delivery reads
+  // against the shift boundaries — operator sees "first delivery was 2h41m
+  // after clock in" without arithmetic. Omitted when the underlying time is
+  // null (off day, contractor without B600).
+  const anchorRow = (when, label) => `
+    <div class="stop-row stop-anchor">
+      <div class="stop-t mono">${fmtClockTime(when)}</div>
+      <div class="stop-mid">
+        <div class="stop-name">${label}</div>
+      </div>
+      <div class="stop-pro mono"></div>
+    </div>
+  `;
   const sections = statusOrder.map(status => {
+    const isCompleted = /^completed$/i.test(status) || /complet/i.test(status);
     const rows = byStatus[status].map(s => `
       <div class="stop-row">
         <div class="stop-t mono">${fmtNuvizzTime(s.deliveryEnd)}</div>
@@ -1454,10 +1732,14 @@ function renderStops(stops, diag) {
       </div>
     `).join('');
     const statusCls = /^completed$/i.test(status) ? 'completed' : /complet/i.test(status) ? 'manual' : 'other';
+    const inAnchor = (isCompleted && clockIn) ? anchorRow(clockIn, 'CLOCK IN') : '';
+    const outAnchor = (isCompleted && clockOut) ? anchorRow(clockOut, 'CLOCK OUT') : '';
     return `
       <div class="stops-group">
         <div class="stops-group-h"><span class="stops-status ${statusCls}">${status}</span> <span class="stops-count">${byStatus[status].length}</span></div>
+        ${inAnchor}
         ${rows}
+        ${outAnchor}
       </div>
     `;
   }).join('');
@@ -1702,125 +1984,83 @@ document.getElementById('refreshDriver').addEventListener('click', () => {
 });
 
 // ============ Profile ============
-// Read-only view of the per-driver baseline doc. Picker on top, content below.
-// Pulls from /api/sentinel-read?action=getBaseline so the load is one Firestore
-// read per driver — no scan, no history fetch.
+// Profiles tab is the roster directory: alphabetical list + search. Tapping
+// a row routes to the per-driver detail view in Investigate (reusing the
+// existing loadDriver flow). Backed by api('dashboard', {days:'all'}) so the
+// full active roster appears, including drivers with no recent records.
+const profilesState = { search: '', dashCache: null };
+
 async function loadProfileInit() {
+  const container = document.getElementById('profileContent');
+  container.innerHTML = '<div class="loading">Loading roster</div>';
   try {
-    const r = await api('driverList');
-    const sel = document.getElementById('profileSelect');
-    sel.innerHTML = '<option value="">— pick a driver —</option>' +
-      r.drivers.map(d => `<option value="${d.slug}">${d.fullName || d.slug}${d.defaultTruck ? ' · #' + d.defaultTruck : ''}</option>`).join('');
-    sel.addEventListener('change', () => sel.value && loadProfile(sel.value));
+    const d = await api('dashboard', { days: 'all' });
+    profilesState.dashCache = d;
+    renderProfilesList();
+    const input = document.getElementById('profilesSearch');
+    let debounceTimer = null;
+    input.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        profilesState.search = input.value.trim().toLowerCase();
+        renderProfilesList();
+      }, 150);
+    });
   } catch (e) {
-    document.getElementById('profileContent').innerHTML =
-      `<div class="empty"><h3>Couldn't load drivers</h3><p>${e.message}</p></div>`;
-  }
-}
-async function loadProfile(slug) {
-  const c = document.getElementById('profileContent');
-  c.innerHTML = '<div class="loading">Loading baseline</div>';
-  try {
-    const r = await api('getBaseline', { driverSlug: slug });
-    c.innerHTML = renderProfile(slug, r.baseline);
-  } catch (e) {
-    c.innerHTML = `<div class="empty"><h3>Couldn't load baseline</h3><p>${e.message}</p></div>`;
+    if (e.message !== 'unauthorized') {
+      container.innerHTML = `<div class="error-banner">${e.message}</div>`;
+    }
   }
 }
 
-// Render one metric row: label · P50 / P75 / P90 (formatted via formatter).
-// Each baseline doc carries {n, min, max, mean, p25, p50, p75, p90} per metric.
-function metricRow(label, dist, fmt) {
-  if (!dist || dist.n == null || dist.n === 0) {
-    return `
-      <div class="prof-row">
-        <div class="prof-label">${label}</div>
-        <div class="prof-vals"><span class="prof-empty">no data</span></div>
-      </div>
-    `;
+function renderProfilesList() {
+  const container = document.getElementById('profileContent');
+  const d = profilesState.dashCache;
+  if (!d) return;
+  // Combine ranked offenders + rest-of-roster into a single keyed-by-slug map
+  // (same approach as renderViewAll), then merge stolenDollars / trend30d /
+  // truckType / role from whichever side has them.
+  const all = [...(d.offendersRanked || []), ...(d.restRoster || [])];
+  const bySlug = {};
+  for (const o of all) { if (!bySlug[o.slug]) bySlug[o.slug] = o; }
+  let drivers = Object.values(bySlug);
+  const q = profilesState.search;
+  if (q) {
+    drivers = drivers.filter(o => String(o.displayName || o.slug || '').toLowerCase().includes(q));
   }
-  return `
-    <div class="prof-row">
-      <div class="prof-label">${label}<span class="prof-n">n=${dist.n}</span></div>
-      <div class="prof-vals">
-        <div class="prof-cell"><div class="prof-k">P50</div><div class="prof-v num">${fmt(dist.p50)}</div></div>
-        <div class="prof-cell"><div class="prof-k">P75</div><div class="prof-v num">${fmt(dist.p75)}</div></div>
-        <div class="prof-cell"><div class="prof-k">P90</div><div class="prof-v num">${fmt(dist.p90)}</div></div>
-        <div class="prof-cell wide"><div class="prof-k">Range</div><div class="prof-v num">${fmt(dist.min)} – ${fmt(dist.max)}</div></div>
-      </div>
+  drivers.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+  if (drivers.length === 0) {
+    container.innerHTML = `<div class="empty" style="padding:var(--s-6)"><h3>No drivers match "${escapeHtml(q)}"</h3></div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="profiles-list">
+      ${drivers.map(o => `
+        <div class="viewall-row" data-slug="${escapeHtml(o.slug)}">
+          <div>
+            <div class="viewall-name">${escapeHtml(o.displayName || o.slug)}</div>
+            <div class="viewall-meta">
+              ${o.truckType && o.truckType !== 'unknown' ? `<span class="off-truck">${o.truckType}</span>` : ''}
+              ${o.criticalDays || 0} crit · ${o.highDays || 0} high · ${o.days || 0}d
+              ${o.role === 'owner_op' ? ' · owner-op' : ''}
+              ${o.isSelfLoader ? ' · self-load' : ''}
+            </div>
+          </div>
+          ${renderTrendIndicator(o.trend30d)}
+          <div class="viewall-amount">${fmt$Plain(o.stolenDollars || 0)}</div>
+        </div>
+      `).join('')}
     </div>
   `;
+  container.querySelectorAll('.viewall-row').forEach(row => {
+    row.addEventListener('click', () => navigateToDriver(row.dataset.slug));
+  });
 }
 
-function renderProfile(slug, baseline) {
-  if (!baseline) {
-    return `
-      <div class="empty">
-        <h3>No baseline yet</h3>
-        <p>This driver doesn't have a baseline doc. Run Recompute Baselines (Settings) to generate one if they have any driver-days on record.</p>
-      </div>
-    `;
-  }
-  const m = baseline.metrics || {};
-  const fmtInt = v => v == null ? '—' : String(Math.round(v));
-  const fmtFloat = v => v == null ? '—' : (+v).toFixed(2);
-
-  const confBadge = `<span class="prof-conf prof-conf-${baseline.confidence}">${baseline.confidence}</span>`;
-  const computed = baseline.computedAt ? baseline.computedAt.slice(0, 10) : '—';
-
-  const zipsHtml = (baseline.typicalCustomerZips || []).slice(0, 12).map(z =>
-    `<div class="prof-zip-row"><span class="mono">${z.zip}</span><span class="prof-zip-n num">${z.count} visits</span></div>`
-  ).join('');
-
-  return `
-    <div class="prof-hero">
-      <div class="prof-name">${baseline.displayName || slug}</div>
-      <div class="prof-sub">
-        ${baseline.truckType || 'driver'} ·
-        <span class="num">${baseline.daysAnalyzed}</span> days analyzed ·
-        ${confBadge} confidence ·
-        baseline ${computed}
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-head"><h2>Shift Timing</h2><div class="aux">P50 / P75 / P90 of their own days</div></div>
-      <div class="card">
-        ${metricRow('Morning gap (clockIn → first delivery)', m.morningGapMin, fmtDur)}
-        ${metricRow('Afternoon gap (last delivery → clockOut)', m.afternoonGapMin, fmtDur)}
-        ${metricRow('ClockIn → first delivery (full)', m.clockInToFirstMin, fmtDur)}
-        ${metricRow('Last delivery → clockOut (full)', m.lastToClockOutMin, fmtDur)}
-        ${metricRow('Total shift', m.totalShiftMin, fmtDur)}
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-head"><h2>Off-route Activity</h2><div class="aux">Motive in-route deviations</div></div>
-      <div class="card">
-        ${metricRow('In-route off-route time', m.inRouteOffRouteMin, fmtDur)}
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-head"><h2>Volume</h2><div class="aux">Per-day throughput</div></div>
-      <div class="card">
-        ${metricRow('Completed stops', m.completedStops, fmtInt)}
-        ${metricRow('Stops per hour', m.stopsPerHour, fmtFloat)}
-      </div>
-    </div>
-
-    ${zipsHtml ? `
-      <div class="section">
-        <div class="section-head"><h2>Typical Customer ZIPs</h2><div class="aux">top 12 by visit count</div></div>
-        <div class="card"><div class="prof-zip-list">${zipsHtml}</div></div>
-      </div>
-    ` : ''}
-  `;
-}
-document.getElementById('refreshProfile').addEventListener('click', () => {
-  const sel = document.getElementById('profileSelect');
-  if (sel.value) loadProfile(sel.value);
-});
+// Per-driver baseline detail moved to Investigate's driver-detail flow. The
+// old getBaseline-backed renderer (Shift Timing / Off-route / Volume / typical
+// ZIPs) is no longer wired here — Profiles tab now routes taps into Investigate
+// which already surfaces the same data on the driver-day cards.
 
 // ============ Tab navigation ============
 const pages = {
@@ -1862,6 +2102,7 @@ document.getElementById('openSettings').addEventListener('click', () => {
     });
   }
 });
+document.getElementById('dcSaveAll').addEventListener('click', () => saveAllDirtyDriverConfigRows());
 
 // ============ Driver Config (per-driver loadPrep / wrapUp) ============
 // One row per active driver. Inputs default to the override value when set,
@@ -1879,11 +2120,91 @@ async function loadDriverConfig() {
     return;
   }
   listEl.innerHTML = body.drivers.map(d => renderDriverConfigRow(d)).join('');
+  dirtyRows.clear();
+  pendingSaveBySlug = {};
+  updateSaveAllButton();
   for (const row of listEl.querySelectorAll('.dc-row')) {
-    const slug = row.dataset.slug;
-    row.querySelector('.dc-save').addEventListener('click', () => saveDriverConfigRow(slug));
-    row.querySelector('.dc-clear').addEventListener('click', () => clearDriverConfigRow(slug));
+    wireDriverConfigRow(row);
   }
+}
+
+// Per-slug save queue. Each entry is the in-flight Promise for that slug, or
+// undefined when idle. Chains save N+1 behind save N so two blurs in a row
+// against the same driver doc never overlap.
+let pendingSaveBySlug = {};
+// Slugs with un-saved field edits. Powers the "Save all (N unsaved)" button.
+const dirtyRows = new Set();
+
+function wireDriverConfigRow(row) {
+  const slug = row.dataset.slug;
+  const lpInput = row.querySelector('[data-field="loadPrepMin"]');
+  const wuInput = row.querySelector('[data-field="wrapUpMin"]');
+  const ttSelect = row.querySelector('[data-field="truckType"]');
+  const clearBtn = row.querySelector('.dc-clear');
+
+  // Capture pristine values on focus so we can tell whether a blur fires a
+  // save (changed) or is a no-op (operator tabbed in then out without typing).
+  const markUnsaved = () => {
+    setRowStatus(row.querySelector('[data-status]'), 'Unsaved', 'unsaved');
+    dirtyRows.add(slug);
+    updateSaveAllButton();
+  };
+  const blurSave = (input) => {
+    if (input.dataset.original === input.value) return;     // no change → skip
+    if (!dirtyRows.has(slug)) return;                       // status reset
+    queueDriverConfigSave(slug);
+  };
+
+  for (const input of [lpInput, wuInput]) {
+    if (!input) continue;
+    input.addEventListener('focus', () => { input.dataset.original = input.value; });
+    input.addEventListener('input', () => {
+      if (input.dataset.original !== input.value) markUnsaved();
+    });
+    input.addEventListener('blur', () => blurSave(input));
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+    });
+  }
+  if (ttSelect) {
+    ttSelect.addEventListener('focus', () => { ttSelect.dataset.original = ttSelect.value; });
+    ttSelect.addEventListener('change', () => {
+      if (ttSelect.dataset.original !== ttSelect.value) {
+        markUnsaved();
+        queueDriverConfigSave(slug);
+      }
+    });
+  }
+  if (clearBtn) clearBtn.addEventListener('click', () => clearDriverConfigRow(slug));
+}
+
+function updateSaveAllButton() {
+  const btn = document.getElementById('dcSaveAll');
+  if (!btn) return;
+  const n = dirtyRows.size;
+  btn.disabled = n === 0;
+  btn.textContent = n > 0 ? `Save all (${n} unsaved)` : 'Save all unsaved changes';
+}
+
+async function saveAllDirtyDriverConfigRows() {
+  const slugs = [...dirtyRows];
+  for (const slug of slugs) {
+    queueDriverConfigSave(slug);
+  }
+}
+
+// Serialize saves per slug: if a save is already in flight for this driver,
+// queue the next one to fire after it resolves. Guarantees two rapid blurs
+// against the same row never produce overlapping writes that could clobber
+// each other's field values.
+function queueDriverConfigSave(slug) {
+  const prev = pendingSaveBySlug[slug] || Promise.resolve();
+  const next = prev.then(() => doSaveDriverConfigRow(slug)).catch(() => {});
+  pendingSaveBySlug[slug] = next;
+  next.finally(() => {
+    if (pendingSaveBySlug[slug] === next) delete pendingSaveBySlug[slug];
+  });
+  return next;
 }
 
 function renderDriverConfigRow(d) {
@@ -1928,7 +2249,6 @@ function renderDriverConfigRow(d) {
         </div>
       </div>
       <div class="dc-actions">
-        <button class="dc-save" type="button">Save</button>
         <button class="dc-clear" type="button">Clear</button>
         <div class="dc-status" data-status></div>
       </div>
@@ -1947,11 +2267,10 @@ function readFieldValue(input) {
   return Math.round(n);
 }
 
-async function saveDriverConfigRow(slug) {
+async function doSaveDriverConfigRow(slug) {
   const row = document.querySelector(`.dc-row[data-slug="${slug}"]`);
   if (!row) return;
   const statusEl = row.querySelector('[data-status]');
-  const saveBtn = row.querySelector('.dc-save');
   const clearBtn = row.querySelector('.dc-clear');
   const lpInput = row.querySelector('[data-field="loadPrepMin"]');
   const wuInput = row.querySelector('[data-field="wrapUpMin"]');
@@ -1959,13 +2278,19 @@ async function saveDriverConfigRow(slug) {
 
   const lp = readFieldValue(lpInput);
   const wu = readFieldValue(wuInput);
-  if (lp && typeof lp === 'object' && lp.error) { setRowStatus(statusEl, lp.error, 'err'); return; }
-  if (wu && typeof wu === 'object' && wu.error) { setRowStatus(statusEl, wu.error, 'err'); return; }
+  if (lp && typeof lp === 'object' && lp.error) {
+    setRowStatus(statusEl, `Error: loadPrep ${lp.error}`, 'err');
+    return;
+  }
+  if (wu && typeof wu === 'object' && wu.error) {
+    setRowStatus(statusEl, `Error: wrapUp ${wu.error}`, 'err');
+    return;
+  }
   const ttRaw = ttSelect ? ttSelect.value : '';
   const tt = ttRaw === '' ? null : ttRaw;
 
-  saveBtn.disabled = true; clearBtn.disabled = true;
-  setRowStatus(statusEl, 'Saving…', '');
+  clearBtn.disabled = true;
+  setRowStatus(statusEl, 'Saving…', 'saving');
   try {
     const res = await fetch('/api/sentinel-write?' + new URLSearchParams({ secret: getSecret(), action: 'setDriverConfig' }), {
       method: 'POST',
@@ -1974,32 +2299,54 @@ async function saveDriverConfigRow(slug) {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    // Stamp the new pristine values so a subsequent blur without changes
+    // doesn't fire another save.
+    if (lpInput) lpInput.dataset.original = lpInput.value;
+    if (wuInput) wuInput.dataset.original = wuInput.value;
+    if (ttSelect) ttSelect.dataset.original = ttSelect.value;
+    dirtyRows.delete(slug);
+    updateSaveAllButton();
     setRowStatus(statusEl, 'Saved', 'ok');
     row.classList.toggle('has-override',
       (body.loadPrepMin != null) || (body.wrapUpMin != null) || (body.truckType != null));
+    // Fade Saved → idle after 2s if no new edit interrupts.
+    setTimeout(() => {
+      if (statusEl.dataset.cls === 'ok') setRowStatus(statusEl, '', '');
+    }, 2000);
   } catch (e) {
-    setRowStatus(statusEl, e.message, 'err');
+    setRowStatus(statusEl, 'Error: ' + e.message, 'err');
   } finally {
-    saveBtn.disabled = false; clearBtn.disabled = false;
+    clearBtn.disabled = false;
   }
 }
 
 async function clearDriverConfigRow(slug) {
   const row = document.querySelector(`.dc-row[data-slug="${slug}"]`);
   if (!row) return;
-  row.querySelector('[data-field="loadPrepMin"]').value = '';
-  row.querySelector('[data-field="wrapUpMin"]').value = '';
+  const lpInput = row.querySelector('[data-field="loadPrepMin"]');
+  const wuInput = row.querySelector('[data-field="wrapUpMin"]');
   const ttSel = row.querySelector('[data-field="truckType"]');
+  if (lpInput) lpInput.value = '';
+  if (wuInput) wuInput.value = '';
   if (ttSel) ttSel.value = '';
-  await saveDriverConfigRow(slug);
+  dirtyRows.add(slug);
+  updateSaveAllButton();
+  await queueDriverConfigSave(slug);
 }
 
 function setRowStatus(el, text, cls) {
   el.textContent = text;
+  el.dataset.cls = cls || '';
   el.className = 'dc-status' + (cls ? ' ' + cls : '');
 }
 document.getElementById('closeSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
+});
+document.getElementById('closeRefDetail').addEventListener('click', closeReferenceDetailModal);
+document.getElementById('refDetailModal').addEventListener('click', (ev) => {
+  // Tap on the backdrop (the .modal element itself) closes; taps inside the
+  // .modal-sheet bubble through but ignore.
+  if (ev.target === ev.currentTarget) closeReferenceDetailModal();
 });
 async function runMaintenance(endpoint, statusId, btnId, doneLabel) {
   const statusEl = document.getElementById(statusId);

@@ -13,23 +13,21 @@
 //   DEFAULT_DEFAULTS                        → fallback when sentinelConfig/defaults missing
 //   ENGINE_VERSION                          → stamped into rescored records
 
-// Static-only fraud detection (v4.3.1). Baselines remain in _baselines.js for
+// Static-only fraud detection (v4.5.0). Baselines remain in _baselines.js for
 // the driver-detail "Your Typical Day" context card, but the engine no longer
 // consumes them — fraud is judged against a fixed threshold the same for every
 // driver. Median / P75 / P90 are coaching context ("worse day than usual"),
 // not a moving goalpost for theft.
 //
 // v4.3.0 added per-driver loadPrepMin / wrapUpMin overrides sourced from
-// /employees/{slug}. v4.3.1 extends the same per-employee override path to
-// truckType — operator-set via Driver Config. Rescore re-derives
-// morningGapMin / afternoonGapMin from raw clockInToFirstMin /
-// lastToClockOutMin + expectedTravelMin* + the current employee override
-// (falling back to defaults). That way changing a driver's loadPrepMin from
-// 15 → 120, or their truckType from 'unknown' → 'tractor', in the UI then
-// running Re-score All Records updates every historical record without
-// re-running the scan.
+// /employees/{slug}. v4.3.1 extended the override path to truckType. v4.5.0
+// only changes the cosmetics — evidence-string clock times now render in
+// 12-hour am/pm format ("clockIn 5:54am → first delivery at 8:35am") instead
+// of the 24-hour HH:MM that previously matched the silently-stripped UI
+// output. Math is unchanged; rescore restamps every record so historical
+// evidence picks up the new format.
 
-export const ENGINE_VERSION = 'v4.3.1-truck-type-override';
+export const ENGINE_VERSION = 'v4.5.0-driver-detail-polish';
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
@@ -73,8 +71,33 @@ function riskLevelOf(score) {
   return 'clean';
 }
 
-function fmtTime(iso) {
-  return iso ? String(iso).slice(11, 16) : '—';
+// 12-hour clock formatter for evidence strings. Same conversion as the UI's
+// fmtClockTime — kept local to the engine so this module stays self-contained
+// and doesn't need to import a shared helper. Engine math is unchanged; this
+// is display-only formatting baked into the persisted evidence string.
+function fmtTime(input) {
+  if (input == null) return '—';
+  const s = String(input).trim();
+  if (!s) return '—';
+  const nuvizz = s.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)\b/i);
+  if (nuvizz) {
+    let hh = parseInt(nuvizz[1], 10);
+    const mm = nuvizz[2];
+    const suf = nuvizz[3].toUpperCase() === 'PM' ? 'pm' : 'am';
+    if (hh === 0) hh = 12;
+    return `${hh}:${mm}${suf}`;
+  }
+  let hhmm = s;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) hhmm = s.slice(11, 16);
+  const m = hhmm.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return '—';
+  const h24 = parseInt(m[1], 10);
+  const mm = m[2];
+  if (!Number.isFinite(h24) || h24 < 0 || h24 > 23) return '—';
+  const suf = h24 >= 12 ? 'pm' : 'am';
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  return `${h12}:${mm}${suf}`;
 }
 
 // Preserve any "Motive shows detour ... ." sentence from the prior
@@ -91,7 +114,7 @@ function buildEvidenceMorning({ record, prep, gap }) {
   const timeStr = fmtTime(record.firstDeliveryTime);
   const travel = record.expectedTravelMinToFirst;
   const expectedTotal = (travel != null) ? travel + prep : null;
-  const prefix = `clockIn ${record.clockIn} → first delivery ${customer} at ${timeStr} (${fmtDur(record.clockInToFirstMin)}).`;
+  const prefix = `clockIn ${fmtTime(record.clockIn)} → first delivery ${customer} at ${timeStr} (${fmtDur(record.clockInToFirstMin)}).`;
   const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)} + ${fmtDur(prep)} load prep = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
@@ -101,7 +124,7 @@ function buildEvidenceAfternoon({ record, wrap, gap }) {
   const timeStr = fmtTime(record.lastDeliveryTime);
   const travel = record.expectedTravelMinFromLast;
   const expectedTotal = (travel != null) ? travel + wrap : null;
-  const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${record.clockOut} (${fmtDur(record.lastToClockOutMin)}).`;
+  const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${fmtTime(record.clockOut)} (${fmtDur(record.lastToClockOutMin)}).`;
   const expectedStr = expectedTotal != null ? `Expected return travel ${fmtDur(travel)} + ${fmtDur(wrap)} wrap-up = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
