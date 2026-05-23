@@ -282,6 +282,8 @@ async function dashboard(db, days) {
         'clockInToFirstMin', 'morningGapMin',
         'lastToClockOutMin', 'afternoonGapMin',
         'expectedTravelMinToFirst', 'expectedTravelMinFromLast',
+        'firstDeliveryTime', 'lastDeliveryTime',
+        'totalShiftMin', 'completedStops',
         'truckType'
       ]
     }),
@@ -368,12 +370,21 @@ async function dashboard(db, days) {
   const trendStolen = {};   // slug → { current, prior }
 
   // Reference-metrics buckets: [truckType_isSelfLoader] → arrays of values
-  // from records in the selected range. Medians computed at the end.
+  // from records in the selected range. Medians computed at the end. The
+  // perDriver sub-map powers the drilldown modal's per-driver breakdown
+  // table (one row per driver inside the bucket).
+  const newBucket = () => ({
+    c2f: [], morningGap: [], l2c: [], afternoonGap: [],
+    onRoute: [], shift: [], stops: [],
+    drivers: new Set(),
+    perDriver: {},
+    days: 0
+  });
   const refBuckets = {
-    straight_preload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 },
-    straight_selfload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 },
-    tractor_preload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 },
-    tractor_selfload: { c2f: [], morningGap: [], l2c: [], afternoonGap: [], drivers: new Set(), days: 0 }
+    straight_preload: newBucket(),
+    straight_selfload: newBucket(),
+    tractor_preload: newBucket(),
+    tractor_selfload: newBucket()
   };
 
   for (const r of rows) {
@@ -423,6 +434,40 @@ async function dashboard(db, days) {
         if (typeof r.morningGapMin === 'number') bucket.morningGap.push(r.morningGapMin);
         if (typeof r.lastToClockOutMin === 'number') bucket.l2c.push(r.lastToClockOutMin);
         if (typeof r.afternoonGapMin === 'number') bucket.afternoonGap.push(r.afternoonGapMin);
+        // On-route span: minutes between first and last delivery on this day.
+        // null when there's only one stop (no last different from first); the
+        // engine writes lastDeliveryTime=null in that case.
+        if (r.firstDeliveryTime && r.lastDeliveryTime) {
+          const f = Date.parse(r.firstDeliveryTime);
+          const l = Date.parse(r.lastDeliveryTime);
+          if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
+            bucket.onRoute.push(Math.round((l - f) / 60000));
+          }
+        }
+        if (typeof r.totalShiftMin === 'number') bucket.shift.push(r.totalShiftMin);
+        if (typeof r.completedStops === 'number') bucket.stops.push(r.completedStops);
+        // Per-driver aggregation inside the bucket — keeps arrays per slug so
+        // the drilldown table can show driver vs bucket-median deviation.
+        if (!bucket.perDriver[slug]) {
+          bucket.perDriver[slug] = {
+            slug, displayName: meta.displayName,
+            n_days: 0,
+            c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: []
+          };
+        }
+        const pd = bucket.perDriver[slug];
+        pd.n_days++;
+        if (typeof r.clockInToFirstMin === 'number') pd.c2f.push(r.clockInToFirstMin);
+        if (typeof r.morningGapMin === 'number') pd.morningGap.push(r.morningGapMin);
+        if (typeof r.lastToClockOutMin === 'number') pd.l2c.push(r.lastToClockOutMin);
+        if (typeof r.afternoonGapMin === 'number') pd.afternoonGap.push(r.afternoonGapMin);
+        if (r.firstDeliveryTime && r.lastDeliveryTime) {
+          const f = Date.parse(r.firstDeliveryTime);
+          const l = Date.parse(r.lastDeliveryTime);
+          if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
+            pd.onRoute.push(Math.round((l - f) / 60000));
+          }
+        }
       }
     }
   }
@@ -486,6 +531,21 @@ async function dashboard(db, days) {
     const representativeLoadPrep = bucketLoadPreps.length
       ? bucketLoadPreps[Math.floor(bucketLoadPreps.length / 2)]
       : (isSelfLoader ? 120 : defaultLoadPrep);
+    // Per-driver breakdown: median per metric for each driver in this bucket.
+    // Sorted alpha by displayName from the server; frontend handles re-sort.
+    const perDriverBreakdown = Object.values(b.perDriver)
+      .filter(pd => pd.n_days > 0)
+      .map(pd => ({
+        slug: pd.slug,
+        displayName: pd.displayName,
+        n_days: pd.n_days,
+        medianC2F: median(pd.c2f.slice()),
+        medianMorningGap: median(pd.morningGap.slice()),
+        medianL2C: median(pd.l2c.slice()),
+        medianAfternoonGap: median(pd.afternoonGap.slice()),
+        medianOnRouteMin: median(pd.onRoute.slice())
+      }))
+      .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
     refMetricsOut[key] = {
       n_drivers: b.drivers.size,
       n_days: b.days,
@@ -493,10 +553,14 @@ async function dashboard(db, days) {
       medianMorningGap: median(b.morningGap),
       medianL2C: median(b.l2c),
       medianAfternoonGap: median(b.afternoonGap),
+      medianOnRouteMin: median(b.onRoute),
+      medianShiftMin: median(b.shift),
+      medianStopsPerDay: median(b.stops),
       representativeLoadPrep,
       representativeWrapUp: defaultsDoc?.wrapUpMin ?? 15,
       morningOkThreshold: morningOk,
-      afternoonOkThreshold: afternoonOk
+      afternoonOkThreshold: afternoonOk,
+      perDriverBreakdown
     };
   }
 
