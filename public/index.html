@@ -384,6 +384,7 @@ body {
 .typical-vals .t-k { font-size: 9px; color: var(--text-4); text-transform: uppercase; letter-spacing: 0.06em; }
 .typical-vals .t-v { font-size: var(--fs-sm); font-weight: 600; color: var(--text-3); }
 .typical-foot { font-size: 10px; color: var(--text-4); margin-top: var(--s-2); font-style: italic; }
+.typical-caption { font-size: 10px; color: var(--text-3); margin-top: var(--s-2); }
 
 /* Off-route activity, grouped by window (pre/in/post-route). In-route
  * is the one that affects scoring; pre/post are surface-only context. */
@@ -514,6 +515,19 @@ body {
   padding: var(--s-3); border-radius: 8px; margin-bottom: var(--s-3); font-size: var(--fs-md);
 }
 
+/* ============ Refreshed toast (v4.6.0 cache) ============ */
+.refreshed-toast {
+  position: fixed; left: 50%; bottom: calc(72px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(8px);
+  background: var(--bg-1); border: 1px solid var(--line); color: var(--text-2);
+  font-size: var(--fs-xs); font-weight: 600;
+  padding: 6px 14px; border-radius: 999px;
+  opacity: 0; pointer-events: none; z-index: 200;
+  transition: opacity 0.2s, transform 0.2s;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+.refreshed-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
 /* ============ Profiles tab — roster list + search (v4.5.0) ============ */
 .profiles-search {
   padding: var(--s-3) var(--s-4) 0;
@@ -630,6 +644,7 @@ body {
 .ref-detail-grid .k { font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
 .ref-detail-grid .v { font-size: var(--fs-base); font-weight: 700; color: var(--text); font-feature-settings: 'tnum'; }
 .ref-detail-foot { font-size: 10px; color: var(--text-4); }
+.ref-detail-caption { font-size: 10px; color: var(--text-3); margin-bottom: var(--s-2); }
 
 .ref-detail-table-wrap {
   overflow-x: auto;
@@ -877,7 +892,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.5.0-driver-detail-polish';
+const APP_VERSION = 'v4.6.0-plain-language';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -899,6 +914,53 @@ async function api(action, params = {}) {
   }
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
+}
+
+// ============ Dashboard cache (stale-while-revalidate) ============
+// The Overview dashboard endpoint runs a 14k-record Firestore aggregation —
+// 1-3s per call. Cache the payload in localStorage keyed by (days, version)
+// so reopening the app renders instantly from cache while a fresh fetch
+// revalidates in the background. Only the dashboard endpoint is cached.
+const DASH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour soft cap
+const dashCacheKey = (days) => `sentinel-cache-dashboard-${days}-${APP_VERSION}`;
+
+function readDashCache(days) {
+  try {
+    const raw = localStorage.getItem(dashCacheKey(days));
+    if (!raw) return null;
+    const { payload, cachedAt } = JSON.parse(raw);
+    if (!payload || !cachedAt) return null;
+    if (Date.now() - cachedAt > DASH_CACHE_TTL_MS) return null; // expired
+    return payload;
+  } catch (_) { return null; }
+}
+
+function writeDashCache(days, payload) {
+  try {
+    localStorage.setItem(dashCacheKey(days), JSON.stringify({ payload, cachedAt: Date.now() }));
+  } catch (_) { /* quota or serialization failure — non-fatal, just skip cache */ }
+}
+
+// Clear every dashboard cache entry (all time-range keys + version variants).
+// Called on any state mutation that could change the dashboard response.
+function invalidateDashCache() {
+  try {
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('sentinel-cache-dashboard-')) toRemove.push(k);
+    }
+    for (const k of toRemove) localStorage.removeItem(k);
+  } catch (_) {}
+}
+
+// Returns { cached: payload|null, fresh: Promise<payload> }. Caller renders
+// from `cached` immediately if present, then re-renders when `fresh` resolves.
+function cachedFetchDashboard(days) {
+  const cached = readDashCache(days);
+  const fresh = api('dashboard', { days: days === 'all' ? 'all' : String(days) })
+    .then(d => { writeDashCache(days, d); return d; });
+  return { cached, fresh };
 }
 
 // ============ Formatting ============
@@ -1078,15 +1140,16 @@ function renderReferenceCell(key, label, ref) {
     </div>`;
 }
 
-// Reference-metrics drilldown state — tracks which cell is open and the
-// per-driver table sort.
-const refDetailState = { sort: 'alpha', refKey: null, refLabel: null };
+// Reference-metrics drilldown state — tracks which cell is open, the
+// per-driver table sort, and the company/owner-op filter.
+const refDetailState = { sort: 'alpha', refKey: null, refLabel: null, driverTypeFilter: 'all' };
 
 function openReferenceDetailModal(refKey, refLabel, ref) {
   if (!ref) return; // empty bucket — nothing to drill into
   refDetailState.refKey = refKey;
   refDetailState.refLabel = refLabel;
   refDetailState.sort = 'alpha';
+  refDetailState.driverTypeFilter = 'all';
   const modal = document.getElementById('refDetailModal');
   const body = document.getElementById('refDetailBody');
   modal.classList.add('open');
@@ -1096,6 +1159,8 @@ function openReferenceDetailModal(refKey, refLabel, ref) {
 function closeReferenceDetailModal() {
   document.getElementById('refDetailModal').classList.remove('open');
 }
+
+const fmtSphRef = (v) => (typeof v === 'number' ? `${v.toFixed(2)}/hr` : '—');
 
 function renderReferenceDetailBody(container, ref) {
   const bucketMedianGap = ref.medianMorningGap;
@@ -1107,6 +1172,7 @@ function renderReferenceDetailBody(container, ref) {
     c2f: (a, b) => safe(a.medianC2F) - safe(b.medianC2F),
     morning: (a, b) => safe(a.medianMorningGap) - safe(b.medianMorningGap),
     onRoute: (a, b) => safe(a.medianOnRouteMin) - safe(b.medianOnRouteMin),
+    stopsPerHr: (a, b) => safe(a.medianStopsPerHourOnRoute) - safe(b.medianStopsPerHourOnRoute),
     l2c: (a, b) => safe(a.medianL2C) - safe(b.medianL2C),
     deviation: (a, b) => {
       // Sort by signed deviation from bucket median, worst (highest +%) first.
@@ -1116,9 +1182,19 @@ function renderReferenceDetailBody(container, ref) {
     }
   }[refDetailState.sort] || ((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
 
-  const rows = [...(ref.perDriverBreakdown || [])].sort(sortFn);
+  // Driver-type filter: company (role !== owner_op) vs owner-op. Missing role
+  // defaults to company so legacy rows aren't filtered out.
+  const filt = refDetailState.driverTypeFilter;
+  const passesFilter = (p) => {
+    const role = p.role || 'driver';
+    if (filt === 'company') return role !== 'owner_op';
+    if (filt === 'owner_op') return role === 'owner_op';
+    return true;
+  };
+  const rows = [...(ref.perDriverBreakdown || [])].filter(passesFilter).sort(sortFn);
 
   const headerClick = (col, label) => `<th data-sort="${col}" class="${refDetailState.sort === col ? 'active' : ''}">${label}</th>`;
+  const filterChip = (val, label) => `<button class="range-chip ${filt === val ? 'active' : ''}" data-dtfilter="${val}">${label}</button>`;
 
   container.innerHTML = `
     <div class="ref-detail-summary">
@@ -1126,27 +1202,35 @@ function renderReferenceDetailBody(container, ref) {
         ${refDetailState.refLabel} · ${ref.n_drivers} drivers · ${ref.n_days} days observed
       </div>
       <div class="ref-detail-grid">
-        <div><div class="k">Median clockIn → 1st</div><div class="v">${fmtDur(ref.medianC2F)}</div></div>
-        <div><div class="k">Median morning gap</div><div class="v">${fmtDur(ref.medianMorningGap)}</div></div>
-        <div><div class="k">Median on-route (1st → last)</div><div class="v">${fmtDur(ref.medianOnRouteMin)}</div></div>
-        <div><div class="k">Median last → clockOut</div><div class="v">${fmtDur(ref.medianL2C)}</div></div>
-        <div><div class="k">Median afternoon gap</div><div class="v">${fmtDur(ref.medianAfternoonGap)}</div></div>
-        <div><div class="k">Median shift</div><div class="v">${fmtDur(ref.medianShiftMin)}</div></div>
-        <div><div class="k">Median stops/day</div><div class="v">${ref.medianStopsPerDay != null ? ref.medianStopsPerDay : '—'}</div></div>
+        <div><div class="k">Typical clock-in to 1st</div><div class="v">${fmtDur(ref.medianC2F)}</div></div>
+        <div><div class="k">Typical morning gap</div><div class="v">${fmtDur(ref.medianMorningGap)}</div></div>
+        <div><div class="k">Typical on route (1st → last)</div><div class="v">${fmtDur(ref.medianOnRouteMin)}</div></div>
+        <div><div class="k">Typical last → clock-out</div><div class="v">${fmtDur(ref.medianL2C)}</div></div>
+        <div><div class="k">Typical afternoon gap</div><div class="v">${fmtDur(ref.medianAfternoonGap)}</div></div>
+        <div><div class="k">Typical shift</div><div class="v">${fmtDur(ref.medianShiftMin)}</div></div>
+        <div><div class="k">Typical stops/day</div><div class="v">${ref.medianStopsPerDay != null ? ref.medianStopsPerDay : '—'}</div></div>
+        <div><div class="k">Typical stops/hr on route</div><div class="v">${fmtSphRef(ref.medianStopsPerHourOnRoute)}</div></div>
       </div>
-      <div class="ref-detail-foot">model: travel + ${ref.representativeLoadPrep}m prep + ${ref.morningOkThreshold}m ok floor</div>
+      <div class="ref-detail-foot">Expected: drive time + ${ref.representativeLoadPrep}m loading + ${ref.morningOkThreshold}m acceptable buffer</div>
     </div>
+    <div class="range-chips" style="margin-bottom:var(--s-2)">
+      ${filterChip('all', 'All')}
+      ${filterChip('company', 'Company')}
+      ${filterChip('owner_op', 'Owner-op')}
+    </div>
+    <div class="ref-detail-caption">Typical-day values cover all drivers in this bucket; filter affects per-driver list below.</div>
     <div class="ref-detail-table-wrap">
       <table class="ref-detail-table">
         <thead>
           <tr>
             ${headerClick('alpha', 'Driver')}
-            <th>n days</th>
-            ${headerClick('c2f', 'c2f')}
-            ${headerClick('morning', 'morning')}
-            ${headerClick('onRoute', 'on-route')}
-            ${headerClick('l2c', 'l2c')}
-            ${headerClick('deviation', 'Δ vs bucket')}
+            <th>Days w/ data</th>
+            ${headerClick('c2f', 'Clock-in to 1st')}
+            ${headerClick('morning', 'Morning gap')}
+            ${headerClick('onRoute', 'On route')}
+            ${headerClick('stopsPerHr', 'Stops/hr')}
+            ${headerClick('l2c', 'Last → clock-out')}
+            ${headerClick('deviation', 'vs typical')}
           </tr>
         </thead>
         <tbody>
@@ -1165,10 +1249,12 @@ function renderReferenceDetailBody(container, ref) {
                 <td>${fmtDur(p.medianC2F)}</td>
                 <td>${fmtDur(p.medianMorningGap)}</td>
                 <td>${fmtDur(p.medianOnRouteMin)}</td>
+                <td>${fmtSphRef(p.medianStopsPerHourOnRoute)}</td>
                 <td>${fmtDur(p.medianL2C)}</td>
                 <td class="rd-dev ${devCls}">${devStr}</td>
               </tr>`;
           }).join('')}
+          ${rows.length === 0 ? `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:var(--s-4)">No drivers match this filter.</td></tr>` : ''}
         </tbody>
       </table>
     </div>
@@ -1178,6 +1264,13 @@ function renderReferenceDetailBody(container, ref) {
   container.querySelectorAll('th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
       refDetailState.sort = th.dataset.sort;
+      renderReferenceDetailBody(container, ref);
+    });
+  });
+  // Driver-type filter chips — re-render table only (aggregates unchanged).
+  container.querySelectorAll('[data-dtfilter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      refDetailState.driverTypeFilter = btn.dataset.dtfilter;
       renderReferenceDetailBody(container, ref);
     });
   });
@@ -1204,12 +1297,30 @@ function rangeLabel(days) {
   return `${days}d`;
 }
 
-async function loadOverview() {
+// Orchestrates the stale-while-revalidate flow: render cached payload instantly
+// if present, then re-render when the fresh fetch resolves. renderOverviewFrom
+// Payload is idempotent (full innerHTML replace + rewire), so calling it twice
+// (cached then fresh) is safe.
+function loadOverview() {
   const container = document.getElementById('overviewContent');
-  container.innerHTML = '<div class="loading">Loading fleet snapshot</div>';
+  const { cached, fresh } = cachedFetchDashboard(overviewState.days);
+  if (cached) {
+    renderOverviewFromPayload(cached);
+  } else {
+    container.innerHTML = '<div class="loading">Loading fleet snapshot</div>';
+  }
+  fresh.then(d => {
+    renderOverviewFromPayload(d, !!cached);
+  }).catch(e => {
+    if (e.message !== 'unauthorized' && !cached) {
+      container.innerHTML = `<div class="error-banner">${e.message}</div>`;
+    }
+  });
+}
+
+function renderOverviewFromPayload(d, wasCached = false) {
+  const container = document.getElementById('overviewContent');
   try {
-    const daysParam = overviewState.days === 'all' ? 'all' : String(overviewState.days);
-    const d = await api('dashboard', { days: daysParam });
     const dist = d.dist;
     const total = d.totalDriverDays;
     const rangeDays = d.datesPresent.length || 0;
@@ -1363,9 +1474,27 @@ async function loadOverview() {
     if (overviewState.viewAllOpen) {
       renderViewAll(document.getElementById('viewAllSection'), d);
     }
+
+    // Subtle "refreshed" indicator when fresh data replaced a cached render.
+    if (wasCached) showRefreshedToast();
   } catch (e) {
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
   }
+}
+
+let _refreshToastTimer = null;
+function showRefreshedToast() {
+  let el = document.getElementById('refreshedToast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'refreshedToast';
+    el.className = 'refreshed-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = 'Refreshed just now';
+  el.classList.add('show');
+  clearTimeout(_refreshToastTimer);
+  _refreshToastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
 function navigateToDriver(slug) {
@@ -1859,12 +1988,14 @@ async function loadDriver(slug) {
       container.innerHTML = `<div class="empty"><h3>No data</h3><p>No records found for this driver</p></div>`;
       return;
     }
-    const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
+    // $ / time / data-day totals cover ALL records (weekend deliveries, if a
+    // driver actually worked one, still count toward stolen $). The risk-
+    // pattern grid + its distribution bar, however, are workday-only so a
+    // missing square unambiguously means "missed a workday" not "weekend off."
     let total$ = 0, totalMin = 0, daysWithData = 0, daysFlagged = 0;
     const display = records[0].displayName;
     const truck = records[0].truckType;
     for (const rec of records) {
-      dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
       total$ += rec.stolenDollars || 0;
       totalMin += rec.stolenMinutes || 0;
       if (rec.b600Matched || rec.nuvizzMatched) daysWithData++;
@@ -1872,8 +2003,21 @@ async function loadDriver(slug) {
     }
     const avgPerWorkDay = daysWithData ? total$ / daysWithData : 0;
 
-    // Heatmap: one square per day in chronological order
-    const heatmap = records.map(rec => {
+    // Davis Delivery doesn't run Sat/Sun routes. Drop weekend dates from the
+    // grid axis so every gap is a missed workday. getDay(): 0=Sun, 6=Sat.
+    const isWeekend = (dateStr) => {
+      const d = new Date(dateStr + 'T00:00:00');
+      const wd = d.getDay();
+      return wd === 0 || wd === 6;
+    };
+    const workdayRecords = records.filter(rec => rec.date && !isWeekend(rec.date));
+    const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
+    for (const rec of workdayRecords) {
+      dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
+    }
+
+    // Heatmap: one square per WORKING day in chronological order
+    const heatmap = workdayRecords.map(rec => {
       const cls = riskCls(rec.riskLevel);
       const day = parseInt(rec.date.split('-')[2]);
       return `<div class="heatmap-day ${cls}" title="${rec.date}: ${rec.riskLevel} · $${rec.stolenDollars || 0}">${day}</div>`;
@@ -1886,21 +2030,21 @@ async function loadDriver(slug) {
     // sits above the run of days belonging to that month.
     const monthLabels = [];
     let lastYM = null;
-    records.forEach((rec, i) => {
+    workdayRecords.forEach((rec, i) => {
       const ym = rec.date.slice(0, 7); // "YYYY-MM"
       if (ym !== lastYM) {
         const [y, m] = ym.split('-');
         const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m,10) - 1];
-        const left = (i / records.length) * 100;
+        const left = (i / Math.max(1, workdayRecords.length)) * 100;
         monthLabels.push(`<span class="hm-month" style="left:${left}%">${monthName} ${y.slice(2)}</span>`);
         lastYM = ym;
       }
     });
     const monthAxis = `<div class="heatmap-months">${monthLabels.join('')}</div>`;
 
-    // Find first and last date labels for the axis
-    const firstDate = records[0].date;
-    const lastDate = records[records.length - 1].date;
+    // Find first and last WORKING date labels for the axis
+    const firstDate = workdayRecords.length ? workdayRecords[0].date : records[0].date;
+    const lastDate = workdayRecords.length ? workdayRecords[workdayRecords.length - 1].date : records[records.length - 1].date;
 
     // "Your Typical Day" panel — coaching context only. As of v4.2.0 the
     // engine classifies fraud against fixed thresholds, NOT against these
@@ -1915,30 +2059,31 @@ async function loadDriver(slug) {
       const fmtRange = (lo, hi, f) => `${lo == null ? '—' : f(lo)}–${hi == null ? '—' : f(hi)}`;
       typicalHtml = `
         <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
-          <div class="dh" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-3)">For context · this driver's typical day <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· baseline confidence: ${currentBaseline.confidence} (n=${currentBaseline.daysAnalyzed})</span></div>
+          <div class="dh" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-3)">For context · this driver's typical day <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· based on ${currentBaseline.daysAnalyzed} of his past days · confidence ${currentBaseline.confidence}</span></div>
           <div class="typical-grid">
             <div class="typical-row">
               <div class="typical-label">Morning gap</div>
               <div class="typical-vals">
-                <div><div class="t-k">typical (P50)</div><div class="t-v num">${fmtP(m.morningGapMin?.p50)}</div></div>
-                <div><div class="t-k">usual range (P25–P75)</div><div class="t-v num">${fmtRange(m.morningGapMin?.p25, m.morningGapMin?.p75, fmtP)}</div></div>
+                <div><div class="t-k">typical day</div><div class="t-v num">${fmtP(m.morningGapMin?.p50)}</div></div>
+                <div><div class="t-k">normal range</div><div class="t-v num">${fmtRange(m.morningGapMin?.p25, m.morningGapMin?.p75, fmtP)}</div></div>
               </div>
             </div>
             <div class="typical-row">
               <div class="typical-label">Afternoon gap</div>
               <div class="typical-vals">
-                <div><div class="t-k">typical (P50)</div><div class="t-v num">${fmtP(m.afternoonGapMin?.p50)}</div></div>
-                <div><div class="t-k">usual range (P25–P75)</div><div class="t-v num">${fmtRange(m.afternoonGapMin?.p25, m.afternoonGapMin?.p75, fmtP)}</div></div>
+                <div><div class="t-k">typical day</div><div class="t-v num">${fmtP(m.afternoonGapMin?.p50)}</div></div>
+                <div><div class="t-k">normal range</div><div class="t-v num">${fmtRange(m.afternoonGapMin?.p25, m.afternoonGapMin?.p75, fmtP)}</div></div>
               </div>
             </div>
             <div class="typical-row">
               <div class="typical-label">Stops / hour</div>
               <div class="typical-vals">
-                <div><div class="t-k">typical (P50)</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p50)}</div></div>
-                <div><div class="t-k">usual range (P25–P75)</div><div class="t-v num">${fmtRange(m.stopsPerHour?.p25, m.stopsPerHour?.p75, fmtSph)}</div></div>
+                <div><div class="t-k">typical day</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p50)}</div></div>
+                <div><div class="t-k">normal range</div><div class="t-v num">${fmtRange(m.stopsPerHour?.p25, m.stopsPerHour?.p75, fmtSph)}</div></div>
               </div>
             </div>
           </div>
+          <div class="typical-caption">(normal range = the middle 50% of his days)</div>
           <div class="typical-foot">Fraud signals (today's gap vs static threshold) are independent of these numbers.</div>
         </div>
       `;
@@ -1953,12 +2098,17 @@ async function loadDriver(slug) {
           <div class="item"><div class="l">Total unexplained time</div><div class="v num">${fmtDur(totalMin)}</div></div>
           <div class="item"><div class="l">Avg per working day</div><div class="v num">${fmt$Plain(avgPerWorkDay.toFixed(2))}</div></div>
         </div>
+        <div class="driver-hero-stat" style="margin-top:var(--s-3)">
+          <div class="item"><div class="l">Avg clock-in</div><div class="v num">${r.avgClockInTime ? fmtClockTime(r.avgClockInTime) : '—'}</div></div>
+          <div class="item"><div class="l">Avg 1st delivery</div><div class="v num">${r.avgFirstDeliveryTime ? fmtClockTime(r.avgFirstDeliveryTime) : '—'}</div></div>
+          <div class="item"></div>
+        </div>
         <div style="margin-top:var(--s-4)">
-          <div class="dh" style="margin-bottom:8px">Risk Pattern <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${fmtDate(firstDate)} → ${fmtDate(lastDate)}, ${records.length} days</span></div>
+          <div class="dh" style="margin-bottom:8px">Risk Pattern <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${fmtDate(firstDate)} → ${fmtDate(lastDate)}, ${workdayRecords.length} working days</span></div>
           ${monthAxis}
           <div class="heatmap">${heatmap}</div>
         </div>
-        <div style="margin-top:var(--s-4)">${renderDistBar(dist, records.length)}</div>
+        <div style="margin-top:var(--s-4)">${renderDistBar(dist, workdayRecords.length)}</div>
         ${typicalHtml}
       </div>
 
@@ -2299,6 +2449,8 @@ async function doSaveDriverConfigRow(slug) {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    // A successful config write changes the dashboard response — drop caches.
+    invalidateDashCache();
     // Stamp the new pristine values so a subsequent blur without changes
     // doesn't fire another save.
     if (lpInput) lpInput.dataset.original = lpInput.value;
@@ -2341,6 +2493,9 @@ function setRowStatus(el, text, cls) {
 }
 document.getElementById('closeSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
+  // Any setting could have changed driver config / defaults — drop dashboard
+  // caches so the next Overview open refetches.
+  invalidateDashCache();
 });
 document.getElementById('closeRefDetail').addEventListener('click', closeReferenceDetailModal);
 document.getElementById('refDetailModal').addEventListener('click', (ev) => {
@@ -2413,6 +2568,7 @@ async function runRescoreAll() {
         statusEl.style.color = 'var(--clean)';
         statusEl.textContent = done(b);
         Object.values(pages).forEach(p => p.loaded = false);
+        invalidateDashCache(); // rescore rewrote stolen $ on every record
         return;
       }
       if (b.state === 'error') {
