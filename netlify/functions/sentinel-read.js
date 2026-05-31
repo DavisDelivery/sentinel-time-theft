@@ -639,14 +639,17 @@ async function dashboard(db, days) {
     refMetricsOut[key] = {
       n_drivers: b.drivers.size,
       n_days: b.days,
-      medianC2F: median(b.c2f),
-      medianMorningGap: median(b.morningGap),
-      medianL2C: median(b.l2c),
-      medianAfternoonGap: median(b.afternoonGap),
-      medianOnRouteMin: median(b.onRoute),
-      medianShiftMin: median(b.shift),
-      medianStopsPerDay: median(b.stops),
-      medianStopsPerHourOnRoute: medianFloat(b.stopsPerHr),
+      // All median calls slice first so the bucket arrays remain in insertion
+      // order — matches the per-driver branch above and avoids the future-
+      // reader trap of seeing sorted-instead-of-insertion data. PR #19 #14.
+      medianC2F: median(b.c2f.slice()),
+      medianMorningGap: median(b.morningGap.slice()),
+      medianL2C: median(b.l2c.slice()),
+      medianAfternoonGap: median(b.afternoonGap.slice()),
+      medianOnRouteMin: median(b.onRoute.slice()),
+      medianShiftMin: median(b.shift.slice()),
+      medianStopsPerDay: median(b.stops.slice()),
+      medianStopsPerHourOnRoute: medianFloat(b.stopsPerHr.slice()),
       representativeLoadPrep,
       representativeWrapUp: defaultsDoc?.wrapUpMin ?? 15,
       morningOkThreshold: morningOk,
