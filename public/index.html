@@ -1214,6 +1214,24 @@ function renderReferenceDetailBody(container, ref) {
     }
   }[refDetailState.sort] || ((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
 
+  // The "vs typical" deviation column compares each driver to the bucket on
+  // whichever metric is currently the active sort. Without this the column
+  // silently kept showing morningGap deviation even when the user sorted by
+  // Stops/hr — calling a fast driver "red" because their morning gap is
+  // elevated. PR #19 review #8.
+  // For gap/time metrics, lower = better → red when above bucket median.
+  // For stops/hr, higher = better → red when below bucket median (sign flipped).
+  const devMetric = {
+    alpha:      { driverKey: 'medianMorningGap',           bucketKey: 'medianMorningGap',           higherIsBetter: false },
+    deviation:  { driverKey: 'medianMorningGap',           bucketKey: 'medianMorningGap',           higherIsBetter: false },
+    c2f:        { driverKey: 'medianC2F',                  bucketKey: 'medianC2F',                  higherIsBetter: false },
+    morning:    { driverKey: 'medianMorningGap',           bucketKey: 'medianMorningGap',           higherIsBetter: false },
+    onRoute:    { driverKey: 'medianOnRouteMin',           bucketKey: 'medianOnRouteMin',           higherIsBetter: false },
+    stopsPerHr: { driverKey: 'medianStopsPerHourOnRoute',  bucketKey: 'medianStopsPerHourOnRoute',  higherIsBetter: true },
+    l2c:        { driverKey: 'medianL2C',                  bucketKey: 'medianL2C',                  higherIsBetter: false }
+  }[refDetailState.sort] || { driverKey: 'medianMorningGap', bucketKey: 'medianMorningGap', higherIsBetter: false };
+  const devBucketRef = ref[devMetric.bucketKey];
+
   // Driver-type filter: company (role !== owner_op) vs owner-op. Missing role
   // defaults to company so legacy rows aren't filtered out.
   const filt = refDetailState.driverTypeFilter;
@@ -1267,11 +1285,19 @@ function renderReferenceDetailBody(container, ref) {
         </thead>
         <tbody>
           ${rows.map(p => {
-            const dev = devPctVsMedian(p.medianMorningGap, bucketMedianGap);
+            // Deviation column tracks the active sort metric (PR #19 #8).
+            const dev = devPctVsMedian(p[devMetric.driverKey], devBucketRef);
             let devCls = '';
             if (typeof dev === 'number') {
-              if (dev <= -15) devCls = 'good';
-              else if (dev >= 15) devCls = 'bad';
+              // Sign of "better" flips for stops/hr where higher = faster.
+              const goodWhenNegative = !devMetric.higherIsBetter;
+              if (goodWhenNegative) {
+                if (dev <= -15) devCls = 'good';
+                else if (dev >= 15) devCls = 'bad';
+              } else {
+                if (dev >= 15) devCls = 'good';
+                else if (dev <= -15) devCls = 'bad';
+              }
             }
             const devStr = typeof dev === 'number' ? `${dev > 0 ? '+' : ''}${dev.toFixed(0)}%` : '—';
             return `
@@ -2070,14 +2096,13 @@ async function loadDriver(slug) {
     // driver actually worked one, still count toward stolen $). The risk-
     // pattern grid + its distribution bar, however, are workday-only so a
     // missing square unambiguously means "missed a workday" not "weekend off."
-    let total$ = 0, totalMin = 0, daysWithData = 0, daysFlagged = 0;
+    let total$ = 0, totalMin = 0, daysWithData = 0;
     const display = records[0].displayName;
     const truck = records[0].truckType;
     for (const rec of records) {
       total$ += rec.stolenDollars || 0;
       totalMin += rec.stolenMinutes || 0;
       if (rec.b600Matched || rec.nuvizzMatched) daysWithData++;
-      if (['critical','high','medium'].includes(rec.riskLevel)) daysFlagged++;
     }
     const avgPerWorkDay = daysWithData ? total$ / daysWithData : 0;
 
@@ -2089,9 +2114,13 @@ async function loadDriver(slug) {
       return wd === 0 || wd === 6;
     };
     const workdayRecords = records.filter(rec => rec.date && !isWeekend(rec.date));
+    // daysFlagged counts only WORKDAY records so the hero "X flagged" matches
+    // the heatmap + dist bar, both of which are workday-scoped. PR #19 #7.
+    let daysFlagged = 0;
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
     for (const rec of workdayRecords) {
       dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
+      if (['critical','high','medium'].includes(rec.riskLevel)) daysFlagged++;
     }
 
     // Heatmap: one square per WORKING day in chronological order

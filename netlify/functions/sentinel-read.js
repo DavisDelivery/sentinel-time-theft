@@ -171,7 +171,11 @@ async function driverConfig(db) {
       truckType: (r.truckType === 'tractor' || r.truckType === 'straight') ? r.truckType : null,
       resolvedTruckType: resolveTruckType(r)
     }))
-    .sort((a, b) => (a.displayName || a.fullName || a.slug || '').localeCompare(b.displayName || b.fullName || b.slug || ''));
+    // Sort by what's actually rendered in the row template: fullName, with
+    // slug as last-resort fallback for rows where the /employees doc is
+    // missing a fullName entirely. The earlier `displayName || fullName`
+    // chain referenced a field this mapped object never carries.
+    .sort((a, b) => (a.fullName || a.slug || '').localeCompare(b.fullName || b.slug || ''));
   return {
     drivers,
     defaults: {
