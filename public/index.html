@@ -516,6 +516,11 @@ body {
 }
 
 /* ============ Refreshed toast (v4.6.0 cache) ============ */
+.stale-banner {
+  background: var(--crit-bg); border: 1px solid rgba(239,68,68,0.3); color: var(--crit);
+  padding: 8px var(--s-3); border-radius: 6px; margin-bottom: var(--s-3);
+  font-size: var(--fs-xs); font-weight: 600;
+}
 .refreshed-toast {
   position: fixed; left: 50%; bottom: calc(72px + env(safe-area-inset-bottom));
   transform: translateX(-50%) translateY(8px);
@@ -892,7 +897,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.6.0-plain-language';
+const APP_VERSION = 'v4.6.1-review-fixes';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -916,13 +921,29 @@ async function api(action, params = {}) {
   return res.json();
 }
 
+// TODO (PR #19 review #15): generalize this cache into cachedFetch(action,
+// params) so byDriver (the dominant per-click latency in Investigate) and
+// driverConfig can share the same stale-while-revalidate path. Scope: parameterize
+// the key + read/write helpers, refactor loadDriver into loadDriver +
+// renderDriverFromPayload (mirror of the Overview split), apply the same gen
+// guard. Deferred from this fix PR because the rename + idempotent re-render
+// is substantial and risks regressing the working Investigate render.
+
 // ============ Dashboard cache (stale-while-revalidate) ============
 // The Overview dashboard endpoint runs a 14k-record Firestore aggregation —
 // 1-3s per call. Cache the payload in localStorage keyed by (days, version)
 // so reopening the app renders instantly from cache while a fresh fetch
 // revalidates in the background. Only the dashboard endpoint is cached.
+//
+// `dashFetchGen` is a monotonic generation token. Every caller that wants a
+// fresh render captures the current value at fetch-kickoff time; only fetches
+// whose captured token still equals `dashFetchGen` at resolve time are allowed
+// to render and to write the cache. invalidateDashCache bumps the token so any
+// fetch started before the invalidation cannot repopulate the cleared cache
+// after — that's PR #19 review finding #5.
 const DASH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour soft cap
 const dashCacheKey = (days) => `sentinel-cache-dashboard-${days}-${APP_VERSION}`;
+let dashFetchGen = 0;
 
 function readDashCache(days) {
   try {
@@ -931,7 +952,7 @@ function readDashCache(days) {
     const { payload, cachedAt } = JSON.parse(raw);
     if (!payload || !cachedAt) return null;
     if (Date.now() - cachedAt > DASH_CACHE_TTL_MS) return null; // expired
-    return payload;
+    return { payload, cachedAt };
   } catch (_) { return null; }
 }
 
@@ -942,8 +963,10 @@ function writeDashCache(days, payload) {
 }
 
 // Clear every dashboard cache entry (all time-range keys + version variants).
-// Called on any state mutation that could change the dashboard response.
+// Bumping `dashFetchGen` invalidates any in-flight fetches kicked off before
+// this call, so a stale fetch can't writeDashCache after we just cleared it.
 function invalidateDashCache() {
+  dashFetchGen++;
   try {
     const toRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -954,13 +977,30 @@ function invalidateDashCache() {
   } catch (_) {}
 }
 
-// Returns { cached: payload|null, fresh: Promise<payload> }. Caller renders
-// from `cached` immediately if present, then re-renders when `fresh` resolves.
+// Returns { cached, cachedAt, fresh, gen }. Caller captures `gen` and renders
+// from `cached` immediately if present; the `fresh` promise resolves to the
+// new payload but the caller must check gen matches before rendering. Fetches
+// whose gen no longer matches are silently discarded (race + post-invalidate
+// guard, PR #19 review findings #1 + #5).
 function cachedFetchDashboard(days) {
-  const cached = readDashCache(days);
+  const cachedEntry = readDashCache(days);
+  const myGen = ++dashFetchGen;
   const fresh = api('dashboard', { days: days === 'all' ? 'all' : String(days) })
-    .then(d => { writeDashCache(days, d); return d; });
-  return { cached, fresh };
+    .then(d => {
+      if (myGen !== dashFetchGen) {
+        const e = new Error('superseded');
+        e.superseded = true;
+        throw e;
+      }
+      writeDashCache(days, d);
+      return d;
+    });
+  return {
+    cached: cachedEntry?.payload || null,
+    cachedAt: cachedEntry?.cachedAt || null,
+    fresh,
+    gen: myGen
+  };
 }
 
 // ============ Formatting ============
@@ -1182,6 +1222,24 @@ function renderReferenceDetailBody(container, ref) {
     }
   }[refDetailState.sort] || ((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
 
+  // The "vs typical" deviation column compares each driver to the bucket on
+  // whichever metric is currently the active sort. Without this the column
+  // silently kept showing morningGap deviation even when the user sorted by
+  // Stops/hr — calling a fast driver "red" because their morning gap is
+  // elevated. PR #19 review #8.
+  // For gap/time metrics, lower = better → red when above bucket median.
+  // For stops/hr, higher = better → red when below bucket median (sign flipped).
+  const devMetric = {
+    alpha:      { driverKey: 'medianMorningGap',           bucketKey: 'medianMorningGap',           higherIsBetter: false },
+    deviation:  { driverKey: 'medianMorningGap',           bucketKey: 'medianMorningGap',           higherIsBetter: false },
+    c2f:        { driverKey: 'medianC2F',                  bucketKey: 'medianC2F',                  higherIsBetter: false },
+    morning:    { driverKey: 'medianMorningGap',           bucketKey: 'medianMorningGap',           higherIsBetter: false },
+    onRoute:    { driverKey: 'medianOnRouteMin',           bucketKey: 'medianOnRouteMin',           higherIsBetter: false },
+    stopsPerHr: { driverKey: 'medianStopsPerHourOnRoute',  bucketKey: 'medianStopsPerHourOnRoute',  higherIsBetter: true },
+    l2c:        { driverKey: 'medianL2C',                  bucketKey: 'medianL2C',                  higherIsBetter: false }
+  }[refDetailState.sort] || { driverKey: 'medianMorningGap', bucketKey: 'medianMorningGap', higherIsBetter: false };
+  const devBucketRef = ref[devMetric.bucketKey];
+
   // Driver-type filter: company (role !== owner_op) vs owner-op. Missing role
   // defaults to company so legacy rows aren't filtered out.
   const filt = refDetailState.driverTypeFilter;
@@ -1235,11 +1293,19 @@ function renderReferenceDetailBody(container, ref) {
         </thead>
         <tbody>
           ${rows.map(p => {
-            const dev = devPctVsMedian(p.medianMorningGap, bucketMedianGap);
+            // Deviation column tracks the active sort metric (PR #19 #8).
+            const dev = devPctVsMedian(p[devMetric.driverKey], devBucketRef);
             let devCls = '';
             if (typeof dev === 'number') {
-              if (dev <= -15) devCls = 'good';
-              else if (dev >= 15) devCls = 'bad';
+              // Sign of "better" flips for stops/hr where higher = faster.
+              const goodWhenNegative = !devMetric.higherIsBetter;
+              if (goodWhenNegative) {
+                if (dev <= -15) devCls = 'good';
+                else if (dev >= 15) devCls = 'bad';
+              } else {
+                if (dev >= 15) devCls = 'good';
+                else if (dev <= -15) devCls = 'bad';
+              }
             }
             const devStr = typeof dev === 'number' ? `${dev > 0 ? '+' : ''}${dev.toFixed(0)}%` : '—';
             return `
@@ -1298,27 +1364,65 @@ function rangeLabel(days) {
 }
 
 // Orchestrates the stale-while-revalidate flow: render cached payload instantly
-// if present, then re-render when the fresh fetch resolves. renderOverviewFrom
-// Payload is idempotent (full innerHTML replace + rewire), so calling it twice
-// (cached then fresh) is safe.
+// if present, then re-render when the fresh fetch resolves. The render function
+// is idempotent (full innerHTML replace + rewire), so a cached-then-fresh call
+// sequence is safe. The generation token from cachedFetchDashboard guards
+// against (a) range chips clicked mid-fetch and (b) the operator editing config
+// while a fetch is in flight — both cases produce a stale resolve we discard.
+let overviewLastSnapshotAt = null;   // ms timestamp of last successful render
+let overviewStaleSince = null;       // ms timestamp of first error after success
+let overviewCurrentGen = 0;          // active gen — renders compare against this
+
 function loadOverview() {
   const container = document.getElementById('overviewContent');
-  const { cached, fresh } = cachedFetchDashboard(overviewState.days);
+  const { cached, cachedAt, fresh, gen } = cachedFetchDashboard(overviewState.days);
+  overviewCurrentGen = gen;
   if (cached) {
-    renderOverviewFromPayload(cached);
+    renderOverviewFromPayload(cached, false, gen, { fromCache: true, cachedAt });
   } else {
     container.innerHTML = '<div class="loading">Loading fleet snapshot</div>';
   }
   fresh.then(d => {
-    renderOverviewFromPayload(d, !!cached);
+    if (gen !== overviewCurrentGen) return; // superseded by a newer fetch
+    renderOverviewFromPayload(d, !!cached, gen, { fromCache: false });
+    overviewLastSnapshotAt = Date.now();
+    overviewStaleSince = null;
   }).catch(e => {
-    if (e.message !== 'unauthorized' && !cached) {
+    if (gen !== overviewCurrentGen) return;
+    if (e.superseded) return;
+    if (e.message === 'unauthorized') return;
+    // Always surface fresh-fetch failures, even when a cached render is on
+    // screen — the operator must know they're looking at old data. PR #19
+    // review finding #2.
+    if (!cached) {
       container.innerHTML = `<div class="error-banner">${e.message}</div>`;
+    } else {
+      overviewStaleSince = overviewStaleSince || Date.now();
+      showStaleBanner(cachedAt, e.message);
     }
   });
 }
 
-function renderOverviewFromPayload(d, wasCached = false) {
+function showStaleBanner(cachedAt, message) {
+  // Inject (or update) a stale-data banner at the top of #overviewContent.
+  const container = document.getElementById('overviewContent');
+  if (!container) return;
+  let banner = container.querySelector('.stale-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.className = 'stale-banner';
+    container.insertBefore(banner, container.firstChild);
+  }
+  const ts = cachedAt ? new Date(cachedAt) : null;
+  const tsStr = ts ? fmtClockTime(`${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`) : '—';
+  banner.innerHTML = `Stale — last updated ${tsStr}. Refresh failed: ${escapeHtml(message || 'fetch error')}`;
+}
+
+function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) {
+  // Generation guard: a fetch that started before invalidate / range change
+  // is no longer authoritative — discard silently. PR #19 review findings
+  // #1 (race) + #5 (post-invalidate fetch repopulating cleared cache).
+  if (gen != null && gen !== overviewCurrentGen) return;
   const container = document.getElementById('overviewContent');
   try {
     const dist = d.dist;
@@ -1476,10 +1580,18 @@ function renderOverviewFromPayload(d, wasCached = false) {
     }
 
     // Subtle "refreshed" indicator when fresh data replaced a cached render.
-    if (wasCached) showRefreshedToast();
+    // Only fire when Overview is the visible tab — a fresh that lands while
+    // the operator is on Audit/Investigate has nothing to refresh on screen
+    // (PR #19 review finding #6).
+    if (wasCached && !opts.fromCache && isOverviewTabVisible()) showRefreshedToast();
   } catch (e) {
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
   }
+}
+
+function isOverviewTabVisible() {
+  const tab = document.querySelector('.tab[data-page="overview"]');
+  return !!tab && tab.classList.contains('active');
 }
 
 let _refreshToastTimer = null;
@@ -1992,14 +2104,13 @@ async function loadDriver(slug) {
     // driver actually worked one, still count toward stolen $). The risk-
     // pattern grid + its distribution bar, however, are workday-only so a
     // missing square unambiguously means "missed a workday" not "weekend off."
-    let total$ = 0, totalMin = 0, daysWithData = 0, daysFlagged = 0;
+    let total$ = 0, totalMin = 0, daysWithData = 0;
     const display = records[0].displayName;
     const truck = records[0].truckType;
     for (const rec of records) {
       total$ += rec.stolenDollars || 0;
       totalMin += rec.stolenMinutes || 0;
       if (rec.b600Matched || rec.nuvizzMatched) daysWithData++;
-      if (['critical','high','medium'].includes(rec.riskLevel)) daysFlagged++;
     }
     const avgPerWorkDay = daysWithData ? total$ / daysWithData : 0;
 
@@ -2011,9 +2122,13 @@ async function loadDriver(slug) {
       return wd === 0 || wd === 6;
     };
     const workdayRecords = records.filter(rec => rec.date && !isWeekend(rec.date));
+    // daysFlagged counts only WORKDAY records so the hero "X flagged" matches
+    // the heatmap + dist bar, both of which are workday-scoped. PR #19 #7.
+    let daysFlagged = 0;
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
     for (const rec of workdayRecords) {
       dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
+      if (['critical','high','medium'].includes(rec.riskLevel)) daysFlagged++;
     }
 
     // Heatmap: one square per WORKING day in chronological order
@@ -2493,9 +2608,13 @@ function setRowStatus(el, text, cls) {
 }
 document.getElementById('closeSettings').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
-  // Any setting could have changed driver config / defaults — drop dashboard
-  // caches so the next Overview open refetches.
-  invalidateDashCache();
+  // Per PR #19 review #13: every Settings-panel action that mutates a
+  // dashboard-affecting field already calls invalidateDashCache on success —
+  // setDriverConfig (doSaveDriverConfigRow), runMaintenance (Recompute
+  // Baselines), runRescoreAll (Re-score All Records), and saveSecret. There
+  // is no Settings interaction reachable from this close button that mutates
+  // dashboard state without already invalidating; an unconditional invalidate
+  // here just wipes the cache after a no-op "glance at Data Scope" close.
 });
 document.getElementById('closeRefDetail').addEventListener('click', closeReferenceDetailModal);
 document.getElementById('refDetailModal').addEventListener('click', (ev) => {
@@ -2516,8 +2635,11 @@ async function runMaintenance(endpoint, statusId, btnId, doneLabel) {
     if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
     statusEl.style.color = 'var(--clean)';
     statusEl.textContent = doneLabel(body);
-    // Invalidate cached UI state so reopening pages refetches
+    // Invalidate cached UI state so reopening pages refetches. Also drop the
+    // dashboard cache — Recompute Baselines changes the `baselines` block
+    // (counts + byConfidence) on the dashboard response. PR #19 review #4.
     Object.values(pages).forEach(p => p.loaded = false);
+    invalidateDashCache();
   } catch (e) {
     statusEl.style.color = 'var(--crit)';
     statusEl.textContent = 'Failed: ' + e.message;
@@ -2609,6 +2731,9 @@ document.getElementById('saveSecret').addEventListener('click', async () => {
       errEl.style.display = 'block';
     } else {
       setSecret(entered);
+      // Drop any cached dashboard payload authed under the old secret before
+      // we kick the new Overview load. PR #19 review finding #12.
+      invalidateDashCache();
       document.getElementById('settingsModal').classList.remove('open');
       Object.values(pages).forEach(p => p.loaded = false);
       cachedDates = null; cachedDrivers = null;
