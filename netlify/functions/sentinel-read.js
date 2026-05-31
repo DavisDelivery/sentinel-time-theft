@@ -66,9 +66,13 @@ async function byDriver(db, driverSlug) {
   console.log(`[sentinel-read] byDriver ${driverSlug} → ${rows.length} records`);
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
-  // Avg clock-in + avg first-delivery time-of-day, in minutes-since-midnight,
-  // then formatted back to a 24-hr "HH:MM" string (frontend renders am/pm).
-  // Skips records missing the relevant field. Null when no records qualify.
+  // Avg clock-in + avg first-delivery time-of-day. We use a CIRCULAR mean
+  // (convert minutes-since-midnight to an angle, average sin/cos, convert
+  // back) so a driver whose shifts straddle midnight doesn't average to noon.
+  // A linear arithmetic mean of {23:50, 00:10} would give 12:00 — wrong by
+  // 12 hours; the circular mean gives 00:00. minToHHMM wraps `hh % 24` so
+  // round-over and any negative residue both land in [00:00, 23:59].
+  // PR #19 review findings #11 (circular mean) + #12 (24:00 wrap).
   const hhmmToMin = (hhmm) => {
     const m = String(hhmm).match(/^(\d{1,2}):(\d{2})/);
     if (!m) return null;
@@ -76,30 +80,49 @@ async function byDriver(db, driverSlug) {
     if (h > 23 || mm > 59) return null;
     return h * 60 + mm;
   };
+  const TWO_PI = Math.PI * 2;
+  const MINS_PER_DAY = 24 * 60;
   const minToHHMM = (avg) => {
-    if (avg == null) return null;
-    const h = Math.floor(avg / 60);
-    const m = Math.round(avg % 60);
-    // Round-over guard: 59.6 → 60 would yield ":60".
-    const hh = (m === 60) ? h + 1 : h;
-    const mm = (m === 60) ? 0 : m;
-    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    if (avg == null || !Number.isFinite(avg)) return null;
+    // Normalize to [0, 1440) then split. `%` keeps negatives negative, so add
+    // MINS_PER_DAY before the second `%` to land in the positive range.
+    let total = ((avg % MINS_PER_DAY) + MINS_PER_DAY) % MINS_PER_DAY;
+    let h = Math.floor(total / 60);
+    let m = Math.round(total - h * 60);
+    if (m === 60) { h += 1; m = 0; }
+    h = h % 24; // 24:00 → 00:00; pure round-over wraparound guard
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
-  let ciSum = 0, ciN = 0, fdSum = 0, fdN = 0;
+  // Circular mean: accumulate sin/cos, atan2 back to an angle, scale to minutes.
+  const circularMean = (sumSin, sumCos, n) => {
+    if (!n) return null;
+    if (sumSin === 0 && sumCos === 0) return null; // exact antipodal cancel
+    let theta = Math.atan2(sumSin / n, sumCos / n); // -π..π
+    if (theta < 0) theta += TWO_PI;                 // 0..2π
+    return (theta / TWO_PI) * MINS_PER_DAY;
+  };
+  let ciSumSin = 0, ciSumCos = 0, ciN = 0;
+  let fdSumSin = 0, fdSumCos = 0, fdN = 0;
   for (const r of rows) {
     if (r.clockIn) {
       const v = hhmmToMin(r.clockIn);
-      if (v != null) { ciSum += v; ciN++; }
+      if (v != null) {
+        const a = (v / MINS_PER_DAY) * TWO_PI;
+        ciSumSin += Math.sin(a); ciSumCos += Math.cos(a); ciN++;
+      }
     }
     if (r.firstDeliveryTime) {
       // ISO-naive "YYYY-MM-DDTHH:MM..." → slice the time component.
       const t = String(r.firstDeliveryTime).slice(11, 16);
       const v = hhmmToMin(t);
-      if (v != null) { fdSum += v; fdN++; }
+      if (v != null) {
+        const a = (v / MINS_PER_DAY) * TWO_PI;
+        fdSumSin += Math.sin(a); fdSumCos += Math.cos(a); fdN++;
+      }
     }
   }
-  const avgClockInTime = ciN ? minToHHMM(ciSum / ciN) : null;
-  const avgFirstDeliveryTime = fdN ? minToHHMM(fdSum / fdN) : null;
+  const avgClockInTime = minToHHMM(circularMean(ciSumSin, ciSumCos, ciN));
+  const avgFirstDeliveryTime = minToHHMM(circularMean(fdSumSin, fdSumCos, fdN));
 
   return { records: rows, baseline, avgClockInTime, avgFirstDeliveryTime };
 }
@@ -487,20 +510,30 @@ async function dashboard(db, days) {
         if (typeof r.afternoonGapMin === 'number') bucket.afternoonGap.push(r.afternoonGapMin);
         // On-route span: minutes between first and last delivery on this day.
         // null when there's only one stop (no last different from first); the
-        // engine writes lastDeliveryTime=null in that case.
+        // engine writes lastDeliveryTime=null in that case. Keep both the
+        // raw-millisecond span (for stops/hr division — see below) and the
+        // minute-rounded value (for the on-route median, which is displayed
+        // in "Xh Ym" form and gains nothing from sub-minute precision).
         let onRouteMin = null;
+        let onRouteMs = null;
         if (r.firstDeliveryTime && r.lastDeliveryTime) {
           const f = Date.parse(r.firstDeliveryTime);
           const l = Date.parse(r.lastDeliveryTime);
           if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
-            onRouteMin = Math.round((l - f) / 60000);
+            onRouteMs = l - f;
+            onRouteMin = Math.round(onRouteMs / 60000);
           }
         }
-        // Stops/hr on route: throughput while actively delivering. Only valid
-        // when there's a positive on-route span and at least one stop.
+        // Stops/hr on route: throughput while actively delivering. Divide by
+        // the raw elapsed time (not the minute-rounded value, which inflated
+        // tight clusters into 60-120/hr outliers — PR #19 review #10). Also
+        // require ≥2 stops and a 15-minute floor on the route span so
+        // single-cluster days can't drive medians.
+        const MIN_ROUTE_SPAN_MS = 15 * 60 * 1000;
         let stopsPerHr = null;
-        if (onRouteMin != null && onRouteMin > 0 && typeof r.completedStops === 'number' && r.completedStops > 0) {
-          stopsPerHr = r.completedStops / (onRouteMin / 60);
+        if (onRouteMs != null && onRouteMs >= MIN_ROUTE_SPAN_MS
+            && typeof r.completedStops === 'number' && r.completedStops >= 2) {
+          stopsPerHr = r.completedStops / (onRouteMs / 3600000);
         }
         if (onRouteMin != null) bucket.onRoute.push(onRouteMin);
         if (stopsPerHr != null) bucket.stopsPerHr.push(stopsPerHr);
