@@ -148,6 +148,8 @@ body {
 .dist-legend .dot.medium { background: var(--med); }
 .dist-legend .dot.low { background: var(--low); }
 .dist-legend .dot.clean { background: var(--clean); }
+.dist-legend .dot.no_data { background: var(--bg-3); border: 1px solid var(--line); }
+.dist-legend .item.no-data-swatch { color: var(--text-3); }
 .dist-legend .n { color: var(--text); font-weight: 600; }
 .dist-legend .pct { color: var(--text-3); }
 
@@ -897,7 +899,7 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.6.1-review-fixes';
+const APP_VERSION = 'v4.6.2-heatmap-integrity';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1087,8 +1089,8 @@ const flagCls = f => ({critical:'critical',flag:'flag',warn:'warn',ok:'ok'}[f] |
 const flagLabel = f => ({critical:'CRIT',flag:'FLAG',warn:'WARN',ok:'OK',no_data:'—',deferred:'DEF'}[f] || '·');
 
 // ============ Risk distribution bar ============
-function renderDistBar(dist, total) {
-  if (!total) return '';
+function renderDistBar(dist, total, opts = {}) {
+  if (!total && !opts.noDataCount) return '';
   const order = ['critical','high','medium','low','clean'];
   const segs = order.map(k => {
     const n = dist[k] || 0;
@@ -1098,19 +1100,26 @@ function renderDistBar(dist, total) {
   }).join('');
   // Show absolute counts inline next to the percentage so the operator gets
   // both the raw "1 critical" and the share-of-total at a glance.
-  const legend = order.map(k => {
+  const legendItems = order.map(k => {
     const n = dist[k] || 0;
     if (n === 0) return '';
     const pct = ((n / total) * 100).toFixed(0);
     return `<div class="item"><span class="dot ${k}"></span><span class="n num">${n}</span> ${k} <span class="pct">(${pct}%)</span></div>`;
   }).join('');
+  // "no data" swatch — not a percentage of `total` (total is scored days),
+  // just a count alongside so the operator sees the neutral squares the
+  // heatmap drew but the bar does not. Heatmap integrity PR.
+  const noData = opts.noDataCount > 0
+    ? `<div class="item no-data-swatch"><span class="dot no_data"></span><span class="n num">${opts.noDataCount}</span> no data / not on roster</div>`
+    : '';
+  const legend = legendItems + noData;
   // Header line: "319 days · 1 critical · 52 medium · 71 low · 194 clean"
   const headerCounts = order
     .filter(k => (dist[k] || 0) > 0)
     .map(k => `<span class="num">${dist[k]}</span> ${k}`)
     .join(' · ');
   return `
-    <div class="dist-header"><span class="num">${total}</span> days · ${headerCounts}</div>
+    <div class="dist-header"><span class="num">${total}</span> scored days · ${headerCounts}${opts.noDataCount > 0 ? ` · <span class="num">${opts.noDataCount}</span> no data` : ''}</div>
     <div class="dist-bar">${segs}</div>
     <div class="dist-legend">${legend}</div>
   `;
@@ -2100,17 +2109,36 @@ async function loadDriver(slug) {
       container.innerHTML = `<div class="empty"><h3>No data</h3><p>No records found for this driver</p></div>`;
       return;
     }
-    // $ / time / data-day totals cover ALL records (weekend deliveries, if a
-    // driver actually worked one, still count toward stolen $). The risk-
-    // pattern grid + its distribution bar, however, are workday-only so a
-    // missing square unambiguously means "missed a workday" not "weekend off."
+    // Helper: a record only counts as "has data" when B600 punched OR NuVizz
+    // matched. The engine writes records for every (driver, date) pair the
+    // backfill iterated, with riskLevel='clean' as the initial value — so an
+    // employee who didn't exist yet, was on leave, or simply had no data
+    // shows up in the array as riskLevel='clean' too. Treat those as no-data
+    // (neutral) instead of green; otherwise the heatmap fabricates a clean
+    // period out of pre-employment noise.
+    const recHasData = (rec) => !!(rec.b600Matched || rec.nuvizzMatched);
+
+    // Tenure clamp: drop every record before the driver's first real working
+    // day. /employees has no hire-date field today, so we derive tenure from
+    // the earliest record with data — that is the operationally authoritative
+    // anchor.
+    const firstDataRec = records.find(recHasData);
+    const firstDataDate = firstDataRec ? firstDataRec.date : null;
+    const tenureRecords = firstDataDate
+      ? records.filter(rec => rec.date && rec.date >= firstDataDate)
+      : [];
+
+    // $ / time / data-day totals cover the tenure window (still all days,
+    // including any weekend a driver actually worked one). Pre-tenure noise
+    // is excluded — no stolen $ ever accrues from records before someone
+    // started.
     let total$ = 0, totalMin = 0, daysWithData = 0;
     const display = records[0].displayName;
     const truck = records[0].truckType;
-    for (const rec of records) {
+    for (const rec of tenureRecords) {
       total$ += rec.stolenDollars || 0;
       totalMin += rec.stolenMinutes || 0;
-      if (rec.b600Matched || rec.nuvizzMatched) daysWithData++;
+      if (recHasData(rec)) daysWithData++;
     }
     const avgPerWorkDay = daysWithData ? total$ / daysWithData : 0;
 
@@ -2121,28 +2149,36 @@ async function loadDriver(slug) {
       const wd = d.getDay();
       return wd === 0 || wd === 6;
     };
-    const workdayRecords = records.filter(rec => rec.date && !isWeekend(rec.date));
-    // daysFlagged counts only WORKDAY records so the hero "X flagged" matches
-    // the heatmap + dist bar, both of which are workday-scoped. PR #19 #7.
+    const workdayRecords = tenureRecords.filter(rec => rec.date && !isWeekend(rec.date));
+    // Distribution counts SCORED-WITH-DATA workdays only. A no-data workday
+    // is rendered as a neutral square below and never folded into the clean
+    // bucket. Hero "X flagged" matches the heatmap by construction.
     let daysFlagged = 0;
+    let noDataWorkdays = 0;
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
     for (const rec of workdayRecords) {
+      if (!recHasData(rec)) { noDataWorkdays++; continue; }
       dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
       if (['critical','high','medium'].includes(rec.riskLevel)) daysFlagged++;
     }
+    const scoredWorkdays = workdayRecords.length - noDataWorkdays;
 
-    // Heatmap: one square per WORKING day in chronological order
+    // Heatmap: one square per WORKING day in the tenure window. Class is the
+    // record's risk level — but ONLY if the day has data. No-data days render
+    // as neutral grey ('no_data'), never as 'clean', even though the engine
+    // wrote 'clean' as a default initial value.
     const heatmap = workdayRecords.map(rec => {
-      const cls = riskCls(rec.riskLevel);
+      const hasData = recHasData(rec);
+      const cls = hasData ? riskCls(rec.riskLevel) : 'no_data';
       const day = parseInt(rec.date.split('-')[2]);
-      return `<div class="heatmap-day ${cls}" title="${rec.date}: ${rec.riskLevel} · $${rec.stolenDollars || 0}">${day}</div>`;
+      const titleSuffix = hasData
+        ? `: ${rec.riskLevel} · $${rec.stolenDollars || 0}`
+        : ': no data (not on roster / no punch / no manifest)';
+      return `<div class="heatmap-day ${cls}" title="${rec.date}${titleSuffix}">${day}</div>`;
     }).join('');
 
-    // Month markers above the heatmap. The 17-month backfill makes plain
-    // day numbers unreadable — there's no way to tell "is this April or
-    // November?". Walk the records in order and emit a label every time
-    // the year-month changes. Positioned proportionally so each label
-    // sits above the run of days belonging to that month.
+    // Month markers above the heatmap, computed against the same tenure-
+    // clamped workdayRecords set so the labels line up with the squares.
     const monthLabels = [];
     let lastYM = null;
     workdayRecords.forEach((rec, i) => {
@@ -2157,9 +2193,9 @@ async function loadDriver(slug) {
     });
     const monthAxis = `<div class="heatmap-months">${monthLabels.join('')}</div>`;
 
-    // Find first and last WORKING date labels for the axis
-    const firstDate = workdayRecords.length ? workdayRecords[0].date : records[0].date;
-    const lastDate = workdayRecords.length ? workdayRecords[workdayRecords.length - 1].date : records[records.length - 1].date;
+    // Find first and last WORKING date labels for the axis (tenure-clamped).
+    const firstDate = workdayRecords.length ? workdayRecords[0].date : (firstDataDate || records[0].date);
+    const lastDate = workdayRecords.length ? workdayRecords[workdayRecords.length - 1].date : (firstDataDate || records[records.length - 1].date);
 
     // "Your Typical Day" panel — coaching context only. As of v4.2.0 the
     // engine classifies fraud against fixed thresholds, NOT against these
@@ -2207,7 +2243,7 @@ async function loadDriver(slug) {
     container.innerHTML = `
       <div class="driver-hero">
         <div class="driver-hero-name">${display}</div>
-        <div class="driver-hero-meta">${truck || 'driver'} · <span class="num">${records.length}</span> days on file · <span class="num">${daysWithData}</span> w/ data · <span class="num">${daysFlagged}</span> flagged</div>
+        <div class="driver-hero-meta">${truck || 'driver'} · <span class="num">${workdayRecords.length}</span> working days · <span class="num">${daysWithData}</span> w/ data · <span class="num">${daysFlagged}</span> flagged${firstDataDate ? ` · since <span class="num">${firstDataDate}</span>` : ''}</div>
         <div class="driver-hero-stat">
           <div class="item"><div class="l">Total unexplained $</div><div class="v num">${fmt$Plain(total$.toFixed(2))}</div></div>
           <div class="item"><div class="l">Total unexplained time</div><div class="v num">${fmtDur(totalMin)}</div></div>
@@ -2219,11 +2255,11 @@ async function loadDriver(slug) {
           <div class="item"></div>
         </div>
         <div style="margin-top:var(--s-4)">
-          <div class="dh" style="margin-bottom:8px">Risk Pattern <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${fmtDate(firstDate)} → ${fmtDate(lastDate)}, ${workdayRecords.length} working days</span></div>
+          <div class="dh" style="margin-bottom:8px">Risk Pattern <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${fmtDate(firstDate)} → ${fmtDate(lastDate)}, ${workdayRecords.length} working days${noDataWorkdays > 0 ? ` (${noDataWorkdays} neutral)` : ''}</span></div>
           ${monthAxis}
           <div class="heatmap">${heatmap}</div>
         </div>
-        <div style="margin-top:var(--s-4)">${renderDistBar(dist, workdayRecords.length)}</div>
+        <div style="margin-top:var(--s-4)">${renderDistBar(dist, scoredWorkdays, { noDataCount: noDataWorkdays })}</div>
         ${typicalHtml}
       </div>
 
