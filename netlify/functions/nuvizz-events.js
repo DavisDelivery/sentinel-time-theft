@@ -4,6 +4,7 @@
 // Used by: SENTINEL (timeline cross-ref), MarginIQ (dwell/service time analysis)
 
 const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
+const FETCH_TIMEOUT_MS = 20000;
 
 function getAuth(env) {
   const u = env.get('NUVIZZ_USERNAME');
@@ -17,16 +18,28 @@ function getCompany(env) {
 
 async function fetchNuVizz(path, env) {
   const url = `${NUVIZZ_BASE}${path}`;
-  const res = await fetch(url, {
-    headers: {
-      'Authorization': getAuth(env),
-      'Content-Type': 'application/json',
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        'Authorization': getAuth(env),
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`NuVizz upstream timeout for ${path}`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`NuVizz ${res.status} for ${path}: ${text}`);
+    // Truncate upstream body to avoid leaking large/sensitive responses to clients.
+    throw new Error(`NuVizz ${res.status} for ${path}: ${text.substring(0, 200)}`);
   }
 
   return res.json();
@@ -158,6 +171,6 @@ export default async (req) => {
 
   } catch (err) {
     console.error('nuvizz-events error:', err.message);
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: 'Upstream request failed' }), { status: 500, headers: CORS });
   }
 };

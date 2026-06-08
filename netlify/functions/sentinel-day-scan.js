@@ -134,8 +134,8 @@ export default async (req) => {
   } catch (err) {
     console.error('[sentinel-day-scan]', err);
     return new Response(JSON.stringify({
-      error: err.message,
-      stack: err.stack?.slice(0, 800)
+      error: 'Internal error',
+      message: err.message
     }), { status: 500, headers: CORS });
   }
 };

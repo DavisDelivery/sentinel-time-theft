@@ -4,6 +4,7 @@
 
 const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
 const COMPANY_CODE = Netlify.env.get('NUVIZZ_COMPANY_CODE') || 'davis';
+const FETCH_TIMEOUT_MS = 20000;
 
 function getAuthHeader() {
   const u = Netlify.env.get('NUVIZZ_USERNAME');
@@ -13,9 +14,20 @@ function getAuthHeader() {
 }
 
 async function fetchNuVizz(path) {
-  const res = await fetch(`${NUVIZZ_BASE}${path}`, {
-    headers: { Authorization: getAuthHeader(), 'Content-Type': 'application/json' },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${NUVIZZ_BASE}${path}`, {
+      headers: { Authorization: getAuthHeader(), 'Content-Type': 'application/json' },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`NuVizz upstream timeout for ${path}`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`NuVizz ${res.status} for ${path}: ${(await res.text()).substring(0,200)}`);
   return res.json();
 }

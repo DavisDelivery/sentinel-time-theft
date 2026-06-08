@@ -26,6 +26,22 @@ const CORS = {
   'Content-Type': 'application/json'
 };
 
+const FETCH_TIMEOUT_MS = 20000;
+
+// fetch wrapper with an AbortController timeout
+async function fetchWithTimeout(resource, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(resource, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('B600 upstream timeout');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Convert YYYY-MM-DD → MM/DD/YY (TotalPass requires 2-digit year format)
 function toClockDate(isoDate) {
   const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -45,7 +61,12 @@ function parseCSV(text) {
     let cur = '', inQuote = false;
     for (let i = 0; i < line.length; i++) {
       const c = line[i];
-      if (c === '"') { inQuote = !inQuote; continue; }
+      if (c === '"') {
+        // A doubled "" inside a quoted field is a literal quote character.
+        if (inQuote && line[i + 1] === '"') { cur += '"'; i++; continue; }
+        inQuote = !inQuote;
+        continue;
+      }
       if (c === ',' && !inQuote) { cells.push(cur); cur = ''; continue; }
       cur += c;
     }
@@ -124,7 +145,7 @@ async function fetchTimeclockData(startDate, endDate, env) {
   let cookie = '';
   try {
     const body = `username=${encodeURIComponent(CLOCK_USERNAME)}&password=${encodeURIComponent(CLOCK_PASSWORD)}&buttonClicked=Submit`;
-    const loginResp = await fetch(`${BASE}/login.html`, {
+    const loginResp = await fetchWithTimeout(`${BASE}/login.html`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
@@ -163,7 +184,7 @@ async function fetchTimeclockData(startDate, endDate, env) {
   log(`Fetching CSV: ${fromMD} → ${toMD} (eid=0 / all employees, type=7 / custom range)`);
   let csvText = '';
   try {
-    const resp = await fetch(exportUrl, {
+    const resp = await fetchWithTimeout(exportUrl, {
       headers: {
         'Cookie': cookie,
         'Referer': reportUrl,

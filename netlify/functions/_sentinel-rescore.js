@@ -186,14 +186,15 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
 
   // Re-derive gaps from raw inputs. If the raw inputs aren't present
   // (e.g. no first-delivery time → clockInToFirstMin null), gap is null and
-  // the flag stays no_data. Negative values are NOT clamped here — engine
-  // handles the data-integrity edge cases at scan time, and rescore is meant
-  // to be a pure recompute of the same math with potentially-different
-  // loadPrep / wrapUp inputs.
-  const reMorningGap = (record.clockInToFirstMin != null && record.expectedTravelMinToFirst != null)
+  // the flag stays no_data. A NEGATIVE anchor delta (first delivery before
+  // clock-in, or last delivery after clock-out) is a data-integrity case the
+  // engine deliberately suppresses to no_data at scan time — mirror that here
+  // so a rescore doesn't resurrect it as a bogus "ok" and lose the dataHealth
+  // signal.
+  const reMorningGap = (record.clockInToFirstMin != null && record.clockInToFirstMin >= 0 && record.expectedTravelMinToFirst != null)
     ? record.clockInToFirstMin - record.expectedTravelMinToFirst - loadPrep
     : null;
-  const reAfternoonGap = (record.lastToClockOutMin != null && record.expectedTravelMinFromLast != null)
+  const reAfternoonGap = (record.lastToClockOutMin != null && record.lastToClockOutMin >= 0 && record.expectedTravelMinFromLast != null)
     ? record.lastToClockOutMin - record.expectedTravelMinFromLast - wrapUp
     : null;
   next.morningGapMin = reMorningGap;
@@ -293,10 +294,25 @@ export async function loadAllBaselines(db) {
   return bySlug;
 }
 
+// Deep-merge an operator-edited defaults doc over DEFAULT_DEFAULTS so a partial
+// nested object (e.g. wageRates with only `tractor`) keeps the default sub-keys
+// instead of replacing the whole object — a missing wage would otherwise make
+// stolenDollars NaN for the affected truck type.
+function mergeDefaults(doc) {
+  const merged = { ...DEFAULT_DEFAULTS, ...doc };
+  for (const [key, value] of Object.entries(DEFAULT_DEFAULTS)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)
+        && doc[key] && typeof doc[key] === 'object' && !Array.isArray(doc[key])) {
+      merged[key] = { ...value, ...doc[key] };
+    }
+  }
+  return merged;
+}
+
 export async function loadDefaults(db) {
   try {
     const doc = await db.getDoc('sentinelConfig', 'defaults');
-    if (doc) return { ...DEFAULT_DEFAULTS, ...doc };
+    if (doc) return mergeDefaults(doc);
   } catch (_) {}
   return DEFAULT_DEFAULTS;
 }

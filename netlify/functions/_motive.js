@@ -23,41 +23,33 @@ function readEnv(key) {
   return null;
 }
 
-// EDT/EST offset for a given date string YYYY-MM-DD.
-// Davis Delivery is in GA (Eastern). DST runs second Sunday of March to first Sunday of November.
-// Returns hours-to-subtract-from-UTC to get ET wall-clock.
-function etOffsetForDate(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  // Find second Sunday of March (DST start)
-  const marchSecondSunday = (() => {
-    for (let day = 8; day <= 14; day++) {
-      const d = new Date(Date.UTC(y, 2, day));
-      if (d.getUTCDay() === 0) return d;
-    }
-  })();
-  // First Sunday of November (DST end)
-  const novFirstSunday = (() => {
-    for (let day = 1; day <= 7; day++) {
-      const d = new Date(Date.UTC(y, 10, day));
-      if (d.getUTCDay() === 0) return d;
-    }
-  })();
-  return (dt >= marchSecondSunday && dt < novFirstSunday) ? 4 : 5; // EDT=4, EST=5
-}
+// America/New_York wall-clock formatter. Using the IANA zone (rather than a
+// hand-rolled DST offset keyed off the query date) keeps the conversion correct
+// across DST-transition days and for any instant within the day — the previous
+// date-granularity offset could be an hour off near the spring/fall transition.
+const ET_PARTS = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hourCycle: 'h23',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit'
+});
 
 /**
  * Convert a Motive UTC ISO timestamp to a naive-ET Date (treating ET wall-clock as UTC).
  * This makes Motive times directly comparable to B600/NuVizz times in our codebase.
+ * DST is resolved per-instant via the America/New_York zone.
  */
-function motiveUtcToNaiveET(isoStr, etOffset) {
+function motiveUtcToNaiveET(isoStr) {
   if (!isoStr) return null;
-  // "2026-04-27T12:12:57Z" → parse to true UTC, subtract offset to get ET wall-clock,
-  // then re-encode as naive-UTC so arithmetic with our other timestamps works.
   const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
   if (!m) return null;
   const trueUtc = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
-  return new Date(trueUtc.getTime() - etOffset * 3600 * 1000);
+  if (isNaN(trueUtc.getTime())) return null;
+  const parts = ET_PARTS.formatToParts(trueUtc);
+  const g = (t) => parts.find(p => p.type === t)?.value;
+  // Re-encode the ET wall-clock components as naive-UTC so arithmetic with our
+  // other (also naive-ET-as-UTC) timestamps works.
+  return new Date(Date.UTC(+g('year'), +g('month') - 1, +g('day'), +g('hour'), +g('minute'), +g('second')));
 }
 
 // Parse ZIP from a Motive address string like "Josh Pirkle Rd, Braselton, GA 30548"
@@ -90,7 +82,6 @@ export async function getDrivingPeriods(driverMotiveId, date) {
   if (!apiKey) throw new Error('MOTIVE_API_KEY env var not set');
   if (!driverMotiveId || !date) return { periods: [], raw: { total: 0, fetched: 0 } };
 
-  const etOff = etOffsetForDate(date);
   const periods = [];
   let totalReported = null;
   let page = 1;
@@ -112,17 +103,17 @@ export async function getDrivingPeriods(driverMotiveId, date) {
     if (totalReported == null) totalReported = data?.pagination?.total ?? rows.length;
     for (const row of rows) {
       const p = row.driving_period || row;
-      const startDt = motiveUtcToNaiveET(p.start_time, etOff);
-      const endDt = motiveUtcToNaiveET(p.end_time, etOff);
+      const startDt = motiveUtcToNaiveET(p.start_time);
+      const endDt = motiveUtcToNaiveET(p.end_time);
       // duration is in seconds when numeric; sometimes returned as string like "1h 20m"
       let durSec = 0;
       if (typeof p.duration === 'number') durSec = p.duration;
       else if (typeof p.duration === 'string') {
         const parts = p.duration.split(/\s+/);
         for (const part of parts) {
-          if (part.endsWith('h')) durSec += parseInt(part) * 3600;
-          else if (part.endsWith('m')) durSec += parseInt(part) * 60;
-          else if (part.endsWith('s')) durSec += parseInt(part);
+          if (part.endsWith('h')) durSec += parseInt(part, 10) * 3600;
+          else if (part.endsWith('m')) durSec += parseInt(part, 10) * 60;
+          else if (part.endsWith('s')) durSec += parseInt(part, 10);
         }
       }
       if (!durSec && startDt && endDt) durSec = Math.round((endDt - startDt) / 1000);

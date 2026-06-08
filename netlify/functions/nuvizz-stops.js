@@ -3,14 +3,26 @@
 
 const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
 const COMPANY_CODE = Netlify.env.get('NUVIZZ_COMPANY_CODE') || 'davis';
+const FETCH_TIMEOUT_MS = 20000;
 
 function auth() {
   const u = Netlify.env.get('NUVIZZ_USERNAME'), p = Netlify.env.get('NUVIZZ_PASSWORD');
+  if (!u || !p) throw new Error('NuVizz credentials not configured');
   return 'Basic ' + btoa(`${u}:${p}`);
 }
 
 async function nv(path) {
-  const res = await fetch(`${NUVIZZ_BASE}${path}`, { headers: { Authorization: auth() } });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${NUVIZZ_BASE}${path}`, { headers: { Authorization: auth() }, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`NuVizz upstream timeout for ${path}`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`NuVizz ${res.status}: ${(await res.text()).substring(0,150)}`);
   return res.json();
 }

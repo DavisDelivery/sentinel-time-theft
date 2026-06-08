@@ -37,8 +37,11 @@ export function parseB600DateTime(date, hhmm) {
   if (!date || !hhmm || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
   const [y, m, d] = date.split('-').map(Number);
   const [hh, mm] = hhmm.split(':').map(Number);
-  if (hh > 23 || mm > 59) return null;
-  return new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
+  if (m < 1 || m > 12 || d < 1 || d > 31 || hh > 23 || mm > 59) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
+  // Reject impossible dates that silently roll over (e.g. Feb 30 → Mar 2).
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return dt;
 }
 
 /**
@@ -58,7 +61,10 @@ export function parseNuvizzDeliveryEnd(str) {
   if (ampm.toUpperCase() === 'PM' && hh < 12) hh += 12;
   if (ampm.toUpperCase() === 'AM' && hh === 12) hh = 0;
   if (mon < 1 || mon > 12 || day < 1 || day > 31 || hh > 23 || mm > 59) return null;
-  return new Date(Date.UTC(yr, mon - 1, day, hh, mm, 0));
+  const dt = new Date(Date.UTC(yr, mon - 1, day, hh, mm, 0));
+  // Reject impossible dates that silently roll over (e.g. 2/30 → 3/2, 4/31 → 5/1).
+  if (dt.getUTCFullYear() !== yr || dt.getUTCMonth() !== mon - 1 || dt.getUTCDate() !== day) return null;
+  return dt;
 }
 
 /**

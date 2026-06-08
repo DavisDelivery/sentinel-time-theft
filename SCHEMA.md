@@ -209,7 +209,7 @@ Operator can edit either doc directly in Firestore console; SENTINEL never overw
 
 ### `/distanceMatrixCache/{cacheKey}` — Google Maps cache
 
-`cacheKey = sha1(normalize(fromAddr) + '|' + normalize(toAddr))` where `normalize` = lowercase + collapse whitespace.
+`cacheKey = sha1(normalize(fromAddr) + '|' + normalize(toAddr))` where `normalize` = trim + lowercase + collapse whitespace + normalize comma spacing (`,\s*` → `, `). Any component computing this key must match `_distance.js:normalize()` exactly, or it will miss the existing cache and re-bill Google.
 
 ```ts
 {

@@ -22,6 +22,14 @@ function addDays(ymd, n) {
   return easternYMD(dt);
 }
 
+// Day-of-week (0=Sun .. 6=Sat) for a YYYY-MM-DD string, computed in UTC so it
+// can't drift across a TZ boundary. The ymd is a calendar date with no time,
+// so anchoring it at UTC midnight is exact.
+function dayOfWeekUTC(ymd) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
 function siteOrigin(req) {
   // Scheduled functions get a synthetic request whose URL may be a localhost
   // sentinel ("http://localhost/.netlify/functions/..."). Prefer Netlify's
@@ -47,6 +55,23 @@ export default async (req, context) => {
   const todayET = easternYMD(new Date());
   const targetDate = addDays(todayET, -T_MINUS_DAYS);
   const bgUrl = bgUrlFromReq(req);
+
+  // The fleet doesn't run on weekends, so a Sat/Sun target would always come
+  // back as a fully-empty day — indistinguishable from a real pipeline outage.
+  // Skip those targets explicitly with a clear status instead of scanning.
+  const dow = dayOfWeekUTC(targetDate);
+  if (dow === 0 || dow === 6) {
+    const weekday = dow === 0 ? 'Sunday' : 'Saturday';
+    console.log(`[nightly-scan] target date=${targetDate} is ${weekday} — skipping weekend scan (todayET=${todayET})`);
+    return new Response(JSON.stringify({
+      version: VERSION,
+      ok: true,
+      skipped: 'weekend',
+      weekday,
+      targetDate,
+      todayET
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
 
   console.log(`[nightly-scan] firing background for date=${targetDate} (todayET=${todayET})`);
 

@@ -52,6 +52,16 @@ export async function loadOrBootstrapDefaults(db) {
     if (merged[key] == null) {
       merged[key] = value;
       needsUpdate = true;
+    } else if (value && typeof value === 'object' && !Array.isArray(value)
+               && merged[key] && typeof merged[key] === 'object') {
+      // Deep-backfill nested config (wageRates, *StaticThresholds): a partial
+      // operator-edited object must not drop the default sub-keys, otherwise a
+      // missing wage rate yields NaN stolenDollars.
+      const sub = { ...merged[key] };
+      for (const [k2, v2] of Object.entries(value)) {
+        if (sub[k2] == null) { sub[k2] = v2; needsUpdate = true; }
+      }
+      merged[key] = sub;
     }
   }
   if (needsUpdate) {
@@ -169,7 +179,9 @@ async function getNuvizzStops(db, employee, date) {
     const status = raw['stop status'] || '(none)';
     diag.statusBreakdown[status] = (diag.statusBreakdown[status] || 0) + 1;
 
-    if (!status.toLowerCase().includes('complet')) continue;
+    // SCHEMA: "Completed only." Accept "Completed" and manual-completion variants
+    // ("Completed - Manual"), but NOT "Incomplete" (which contains "complet").
+    if (!status.trim().toLowerCase().startsWith('complet')) continue;
 
     const deliveryEnd = parseNuvizzDeliveryEnd(raw['delivery end']);
     if (!deliveryEnd) {
@@ -190,7 +202,7 @@ async function getNuvizzStops(db, employee, date) {
       status
     });
   }
-  matches.sort((a, b) => a.deliveryEnd - b.deliveryEnd);
+  matches.sort((a, b) => a.deliveryEnd.getTime() - b.deliveryEnd.getTime());
   return { matches, diag };
 }
 
@@ -267,9 +279,12 @@ export async function scanOneDriverDay({
     firstDeliveryTime: firstStop?.deliveryEnd || null,
     firstDeliveryAddr: firstStop?.shipTo || null,
     firstDeliveryCustomer: firstStop?.shipToName || null,
-    lastDeliveryTime: (lastStop && lastStop !== firstStop) ? lastStop.deliveryEnd : null,
-    lastDeliveryAddr: (lastStop && lastStop !== firstStop) ? lastStop.shipTo : null,
-    lastDeliveryCustomer: (lastStop && lastStop !== firstStop) ? lastStop.shipToName : null,
+    // A single completed stop is still a valid afternoon (return-trip) anchor.
+    // Morning charges clockIn→delivery; afternoon charges delivery→clockOut —
+    // disjoint windows, so a one-stop day is not double-counted.
+    lastDeliveryTime: lastStop ? lastStop.deliveryEnd : null,
+    lastDeliveryAddr: lastStop ? lastStop.shipTo : null,
+    lastDeliveryCustomer: lastStop ? lastStop.shipToName : null,
     completedStops: allStops.length,
     nuvizzMatched: allStops.length > 0,
 
@@ -333,7 +348,7 @@ export async function scanOneDriverDay({
         const summary = summarizePeriods(classified);
 
         const firstDeliveryDt = firstStop?.deliveryEnd || null;
-        const lastDeliveryDt = (lastStop && lastStop !== firstStop) ? lastStop.deliveryEnd : firstDeliveryDt;
+        const lastDeliveryDt = lastStop ? lastStop.deliveryEnd : firstDeliveryDt;
         const partitionVisit = (v) => {
           if (!firstDeliveryDt || !lastDeliveryDt) return 'unknown';
           const visitStart = v._startDt;
@@ -388,6 +403,10 @@ export async function scanOneDriverDay({
         const FLAG_TO_SCORE = { ok: 0, warn: 10, flag: 25, critical: 40, no_data: 0 };
         const class3Contribution = FLAG_TO_SCORE[inRouteFlag] || 0;
         result.riskScore = (result.riskScore || 0) + class3Contribution;
+        // Clamp to 100 so the scan path and the rescore path agree on the same
+        // record (rescore caps at 100); otherwise a re-score would silently
+        // change a persisted riskScore from e.g. 120 → 100 with no data change.
+        if (result.riskScore > 100) result.riskScore = 100;
         if (result.riskScore >= 70) result.riskLevel = 'critical';
         else if (result.riskScore >= 45) result.riskLevel = 'high';
         else if (result.riskScore >= 25) result.riskLevel = 'medium';
@@ -485,7 +504,7 @@ export async function scanOneDriverDay({
       },
       anchors: {
         firstUsedForAnchor: firstStop ? { pro: firstStop.pro, time: firstStop.deliveryEnd.toISOString().slice(11, 16), customer: firstStop.shipToName } : null,
-        lastUsedForAnchor: (lastStop && lastStop !== firstStop) ? { pro: lastStop.pro, time: lastStop.deliveryEnd.toISOString().slice(11, 16), customer: lastStop.shipToName } : null
+        lastUsedForAnchor: lastStop ? { pro: lastStop.pro, time: lastStop.deliveryEnd.toISOString().slice(11, 16), customer: lastStop.shipToName, sameAsFirst: lastStop === firstStop } : null
       },
       travelToFirst,
       travelFromLast,
