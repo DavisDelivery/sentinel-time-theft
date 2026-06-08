@@ -7,6 +7,13 @@
 
 const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
 const COMPANY_CODE = Netlify.env.get('NUVIZZ_COMPANY_CODE') || 'davis';
+const FETCH_TIMEOUT_MS = 20000;
+
+// NuVizz times are naive US-Eastern — format/parse them in that zone.
+const NUVIZZ_TZ = 'America/New_York';
+
+// Per-truck-type hourly rate used to value stolen (unaccounted) time.
+const STOLEN_RATE_BY_TYPE = { tractor: 27.50, straight: 23.00, unknown: 25.00 };
 
 function auth() {
   const u = Netlify.env.get('NUVIZZ_USERNAME');
@@ -16,9 +23,20 @@ function auth() {
 }
 
 async function nv(path) {
-  const res = await fetch(`${NUVIZZ_BASE}${path}`, {
-    headers: { Authorization: auth(), 'Content-Type': 'application/json' }
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${NUVIZZ_BASE}${path}`, {
+      headers: { Authorization: auth(), 'Content-Type': 'application/json' },
+      signal: controller.signal
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`NuVizz upstream timeout for ${path}`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`NuVizz ${res.status} ${path}: ${txt.substring(0, 200)}`);
@@ -26,10 +44,19 @@ async function nv(path) {
   return res.json();
 }
 
+// Resolve a stolen-time rate from a truck-type-ish value.
+function stolenRate(truckType) {
+  const t = (truckType || '').toString().toLowerCase();
+  if (t.includes('tractor')) return STOLEN_RATE_BY_TYPE.tractor;
+  if (t.includes('straight') || t.includes('box')) return STOLEN_RATE_BY_TYPE.straight;
+  return STOLEN_RATE_BY_TYPE.unknown;
+}
+
 // ── Time helpers ──────────────────────────────────────────────────────────────
 function fmtTime(dttm) {
   if (!dttm) return null;
-  return new Date(dttm).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  // NuVizz timestamps are naive US-Eastern; format in that zone.
+  return new Date(dttm).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: NUVIZZ_TZ });
 }
 
 function diffMins(a, b) {
@@ -114,6 +141,7 @@ function scoreLoad(load) {
     load.stops.filter(s => s.dwellMins).reduce((a, s) => a + s.dwellMins, 0);
   const unaccountedMins = routeSpanMins != null ? Math.max(0, routeSpanMins - accountedMins) : null;
   const stolenH = unaccountedMins != null ? unaccountedMins / 60 : null;
+  const rate = stolenRate(load.vehicleType);
   const risk = score >= 150 ? 'critical' : score >= 80 ? 'high' : score >= 40 ? 'medium' : 'low';
   const mph = (load.actualDistMiles && engineH && engineH > 0) ? parseFloat((load.actualDistMiles / engineH).toFixed(1)) : null;
 
@@ -138,7 +166,7 @@ function scoreLoad(load) {
     flagList: flags,
     flagCount: flags.length,
     stolenH: stolenH != null ? parseFloat(stolenH.toFixed(2)) : null,
-    stolenD: stolenH != null ? parseFloat((stolenH * 23).toFixed(2)) : null,
+    stolenD: stolenH != null ? parseFloat((stolenH * rate).toFixed(2)) : null,
     firstDeliveryTime: fmtTime(firstDelivery?.actualArrival),
     firstDeliveryDttm: firstDelivery?.actualArrival || null,
     firstDeliveryCity: firstDelivery ? `${firstDelivery.city}, ${firstDelivery.state}` : null,
@@ -195,6 +223,7 @@ async function fetchAndScoreLoad(loadNbr) {
     driverName: assign.driverName, driverEmail: assign.driverEmail,
     driverUserName: assign.driverUserName,
     tractorNbr: h.tractorNbr, trailerNbr: h.trailerNbr,
+    vehicleType: h.vehicleType,
     loadStatus: exec.loadStatus,
     plannedStartDttm: h.earliestStartDttm,
     actualStartDttm: exec.actualStartDTTM,
@@ -220,6 +249,13 @@ async function fetchAndScoreLoad(loadNbr) {
 // Best available: GET /stop/info/{companyCode} with date filters,
 // then extract unique loadNbrs from the stop results.
 async function getLoadNbrsByDate(date) {
+  // NuVizz exposes no documented pagination/total field on these endpoints that we
+  // can verify from the code, so rather than guess an API contract we detect *likely*
+  // truncation: a raw record count at or above a common server page cap (100 here)
+  // strongly suggests more pages exist. We surface that via a `truncated` flag.
+  const PAGE_CAP = 100;
+  const errors = [];
+
   // Try fetching loads scheduled for the date
   // NuVizz static route info gives recurring route numbers
   // Use event activity to find all routes active on date
@@ -228,26 +264,39 @@ async function getLoadNbrsByDate(date) {
     const raw = await nv(path);
     const events = raw?.eventActivity || [];
     const loadNbrs = [...new Set(events.map(e => e.entityNbr).filter(Boolean))];
-    if (loadNbrs.length > 0) return { loadNbrs, method: 'eventActivity' };
-  } catch (_) {}
+    if (loadNbrs.length > 0) {
+      const truncated = events.length >= PAGE_CAP;
+      if (truncated) console.warn(`[nuvizz-loads-by-date] eventActivity returned ${events.length} rows (>= ${PAGE_CAP}); results may be truncated for ${date}`);
+      return { loadNbrs, method: 'eventActivity', truncated, errors };
+    }
+  } catch (err) { errors.push({ method: 'eventActivity', error: err.message }); }
 
   // Fallback: try static route info for the date
   try {
     const raw = await nv(`/load/static/info/${COMPANY_CODE}?routeDate=${encodeURIComponent(date)}`);
     const routes = raw?.routes || raw?.loads || [];
     const loadNbrs = routes.map(r => r.loadNbr || r.routeNbr).filter(Boolean);
-    if (loadNbrs.length > 0) return { loadNbrs, method: 'staticRoute' };
-  } catch (_) {}
+    if (loadNbrs.length > 0) {
+      const truncated = routes.length >= PAGE_CAP;
+      if (truncated) console.warn(`[nuvizz-loads-by-date] staticRoute returned ${routes.length} rows (>= ${PAGE_CAP}); results may be truncated for ${date}`);
+      return { loadNbrs, method: 'staticRoute', truncated, errors };
+    }
+  } catch (err) { errors.push({ method: 'staticRoute', error: err.message }); }
 
   // Fallback 2: stop eventinfo by date — extract loadNbrs from stop data
   try {
     const raw = await nv(`/stop/eventinfo/${COMPANY_CODE}?eventDate=${encodeURIComponent(date)}`);
     const stops = raw?.stops || raw?.stopList || [];
     const loadNbrs = [...new Set(stops.map(s => s.loadNbr || s.routeNbr).filter(Boolean))];
-    if (loadNbrs.length > 0) return { loadNbrs, method: 'stopEventInfo' };
-  } catch (_) {}
+    if (loadNbrs.length > 0) {
+      const truncated = stops.length >= PAGE_CAP;
+      if (truncated) console.warn(`[nuvizz-loads-by-date] stopEventInfo returned ${stops.length} rows (>= ${PAGE_CAP}); results may be truncated for ${date}`);
+      return { loadNbrs, method: 'stopEventInfo', truncated, errors };
+    }
+  } catch (err) { errors.push({ method: 'stopEventInfo', error: err.message }); }
 
-  return { loadNbrs: [], method: 'none' };
+  // No strategy produced loads. Distinguish "genuinely empty" from "all strategies errored".
+  return { loadNbrs: [], method: 'none', truncated: false, errors };
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -276,9 +325,21 @@ export default async (req) => {
 
   try {
     // Step 1: Get all load numbers for the date
-    const { loadNbrs, method } = await getLoadNbrsByDate(date);
+    const { loadNbrs, method, truncated, errors: lookupErrors } = await getLoadNbrsByDate(date);
 
     if (loadNbrs.length === 0) {
+      // If every strategy threw (e.g. 401 bad creds), this is NOT "no loads" — surface it.
+      if (lookupErrors && lookupErrors.length > 0) {
+        console.warn('[nuvizz-loads-by-date] all lookup strategies failed:', JSON.stringify(lookupErrors));
+        return new Response(
+          JSON.stringify({
+            success: false, date, loadCount: 0, auditRecords: [],
+            error: `Load lookup failed for ${date} — all strategies errored (possible auth/upstream issue).`,
+            method, lookupErrors
+          }),
+          { status: 502, headers: CORS }
+        );
+      }
       return new Response(
         JSON.stringify({
           success: true, date, loadCount: 0, auditRecords: [],
@@ -309,6 +370,7 @@ export default async (req) => {
     // Fleet summary
     const summary = {
       date,
+      truncated: !!truncated,
       totalRoutes: auditRecords.length,
       critical: auditRecords.filter(r => r.risk === 'critical').length,
       high: auditRecords.filter(r => r.risk === 'high').length,
@@ -323,7 +385,7 @@ export default async (req) => {
     };
 
     return new Response(
-      JSON.stringify({ success: true, date, method, summary, auditRecords, errors }),
+      JSON.stringify({ success: true, date, method, truncated: !!truncated, summary, auditRecords, errors, lookupErrors }),
       { status: 200, headers: CORS }
     );
 

@@ -11,6 +11,9 @@ export default async (req) => {
     const body = await req.json();
     const { scanId, startDate, endDate, results, meta } = body;
     if (!scanId || !results) return new Response(JSON.stringify({ error: 'scanId and results required' }), { status: 400, headers: CORS });
+    // scanId is concatenated into a Firestore doc path — constrain to a safe charset.
+    if (!/^[A-Za-z0-9_\-]+$/.test(scanId)) return new Response(JSON.stringify({ error: 'scanId must match ^[A-Za-z0-9_\\-]+$' }), { status: 400, headers: CORS });
+    if (!Array.isArray(results)) return new Response(JSON.stringify({ error: 'results must be an array' }), { status: 400, headers: CORS });
 
     const db = getDb();
     const flagged = results.filter(r => r.risk && r.risk !== 'low' && r.risk !== 'nodata');
@@ -110,7 +113,7 @@ export default async (req) => {
     return new Response(JSON.stringify({ success: true, scanId, driverCount: results.length, flaggedCount: flagged.length }), { status: 200, headers: CORS });
   } catch (err) {
     console.error('[sentinel-scan-save]', err);
-    return new Response(JSON.stringify({ error: err.message, stack: err.stack?.substring(0, 300) }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: 'Internal error', message: err.message }), { status: 500, headers: CORS });
   }
 };
 

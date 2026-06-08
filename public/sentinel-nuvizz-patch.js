@@ -14,6 +14,19 @@
 
   const RC = { critical: '#ff4444', high: '#ff8800', medium: '#ffcc00', low: '#00ff88' };
 
+  // Escape API-sourced strings before interpolating into innerHTML / attributes.
+  // Mirrors the helper in index.html — this file had none, so every business
+  // name, address, driver, etc. was injected raw.
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  // Numeric formatters used at render time. The summary now carries raw NUMBERS
+  // (buildSummary stopped pre-stringifying via .toFixed), so format here. Coerce
+  // defensively so a string from the server path still renders cleanly.
+  const fmt1 = v => Number(v ?? 0).toFixed(1);
+  const fmt2 = v => Number(v ?? 0).toFixed(2);
+
   function waitForApp(cb) {
     if (document.getElementById('root')?.children?.length > 0) { cb(); return; }
     const obs = new MutationObserver(() => {
@@ -70,13 +83,16 @@
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
 
-      if (data.auditRecords.length === 0) {
+      const auditRecords = Array.isArray(data.auditRecords) ? data.auditRecords : [];
+      if (auditRecords.length === 0) {
         setStatus(`No routes found for ${currentDate}. Enter load numbers manually.`, '#ff8800');
         injectFallback(currentDate);
       } else {
-        const s = data.summary;
+        const s = data.summary || buildSummary(auditRecords, currentDate);
+        data.auditRecords = auditRecords;
+        data.summary = s;
         setStatus(
-          `✓ ${s.totalRoutes} routes · ${s.totalStops} stops · ${s.totalMilesActual}mi · $${s.totalStolenDollars} est theft`,
+          `✓ ${s.totalRoutes} routes · ${s.totalStops} stops · ${fmt1(s.totalMilesActual)}mi · $${fmt2(s.totalStolenDollars)} est theft`,
           '#00ff88'
         );
         renderBadges(s);
@@ -97,7 +113,7 @@
     if (!p) { p = document.createElement('div'); p.id = 'nv-fallback'; document.body.appendChild(p); }
     p.innerHTML = `
       <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#0a1628;border:1px solid #00d4ff44;border-radius:12px;padding:24px;width:420px;z-index:99999;font-family:'Orbitron',monospace;box-shadow:0 0 40px #00d4ff22;">
-        <div style="color:#00d4ff;font-size:12px;font-weight:700;margin-bottom:6px;">◈ MANUAL LOAD ENTRY — ${date}</div>
+        <div style="color:#00d4ff;font-size:12px;font-weight:700;margin-bottom:6px;">◈ MANUAL LOAD ENTRY — ${escapeHtml(date)}</div>
         <div style="color:#8899aa;font-size:10px;margin-bottom:10px;">Paste route/load numbers, one per line:</div>
         <textarea id="nv-fb-input" rows="6" style="width:100%;box-sizing:border-box;background:#060e1c;border:1px solid #00d4ff33;border-radius:6px;color:#fff;padding:8px;font-family:inherit;font-size:11px;resize:vertical;outline:none;"></textarea>
         <div style="display:flex;gap:8px;margin-top:10px;">
@@ -110,25 +126,32 @@
       const lines = document.getElementById('nv-fb-input').value.split('\n').map(l=>l.trim()).filter(Boolean);
       if (!lines.length) return;
       const fbStatus = document.getElementById('nv-fb-status');
-      const records = [], errors = [];
-      for (let i = 0; i < lines.length; i += 3) {
-        const batch = lines.slice(i, i+3);
-        fbStatus.textContent = `Fetching ${i+1}–${Math.min(i+3,lines.length)} of ${lines.length}...`;
-        const settled = await Promise.allSettled(batch.map(async n => {
-          const r = await fetch(`${AUDIT_API}?loadNbr=${encodeURIComponent(n)}`);
-          const d = await r.json();
-          if (!r.ok || !d.success) throw new Error(d.error);
-          return d.auditRecord;
-        }));
-        settled.forEach((r,idx) => {
-          if (r.status === 'fulfilled') records.push(r.value);
-          else errors.push({ loadNbr: batch[idx], error: r.reason?.message });
-        });
+      try {
+        const records = [], errors = [];
+        for (let i = 0; i < lines.length; i += 3) {
+          const batch = lines.slice(i, i+3);
+          fbStatus.textContent = `Fetching ${i+1}–${Math.min(i+3,lines.length)} of ${lines.length}...`;
+          const settled = await Promise.allSettled(batch.map(async n => {
+            const r = await fetch(`${AUDIT_API}?loadNbr=${encodeURIComponent(n)}`);
+            const d = await r.json();
+            // Default the error string so a missing d.error never produces
+            // `new Error(undefined)`.
+            if (!r.ok || !d.success) throw new Error(d.error || 'Unknown error');
+            return d.auditRecord;
+          }));
+          settled.forEach((r,idx) => {
+            if (r.status === 'fulfilled') records.push(r.value);
+            else errors.push({ loadNbr: batch[idx], error: r.reason?.message || 'Unknown error' });
+          });
+        }
+        records.sort((a,b) => b.score - a.score);
+        setStatus(`✓ ${records.length} routes · ${errors.length} failed`, '#00ff88');
+        renderResults({ auditRecords: records, summary: buildSummary(records, date), errors }, date);
+        document.getElementById('nv-fallback')?.remove();
+      } catch (err) {
+        if (fbStatus) { fbStatus.textContent = `✗ ${err.message || 'Fetch failed'}`; fbStatus.style.color = '#ff4444'; }
+        setStatus(`✗ ${err.message || 'Fetch failed'}`, '#ff4444');
       }
-      records.sort((a,b) => b.score - a.score);
-      setStatus(`✓ ${records.length} routes · ${errors.length} failed`, '#00ff88');
-      renderResults({ auditRecords: records, summary: buildSummary(records, date), errors }, date);
-      document.getElementById('nv-fallback').remove();
     };
   }
 
@@ -140,9 +163,11 @@
       medium: records.filter(r=>r.risk==='medium').length,
       low: records.filter(r=>r.risk==='low').length,
       totalStops: records.reduce((a,r)=>a+(r.stops||0),0),
-      totalMilesActual: records.reduce((a,r)=>a+(r.miles||0),0).toFixed(1),
-      totalStolenHrs: records.reduce((a,r)=>a+(r.stolenH||0),0).toFixed(2),
-      totalStolenDollars: records.reduce((a,r)=>a+(r.stolenD||0),0).toFixed(2),
+      // Keep these as NUMBERS (matches the server summary's numeric path) and
+      // format only at render time via fmt1 / fmt2.
+      totalMilesActual: records.reduce((a,r)=>a+(r.miles||0),0),
+      totalStolenHrs: records.reduce((a,r)=>a+(r.stolenH||0),0),
+      totalStolenDollars: records.reduce((a,r)=>a+(r.stolenD||0),0),
     };
   }
 
@@ -180,22 +205,23 @@
       else document.getElementById('root')?.appendChild(wrap);
     }
 
-    const { auditRecords, summary } = data;
+    const auditRecords = Array.isArray(data.auditRecords) ? data.auditRecords : [];
+    const summary = data.summary || buildSummary(auditRecords, date);
 
     wrap.innerHTML = `
       <div style="margin:0 0 24px;font-family:'Orbitron',monospace;">
 
         <!-- Fleet summary bar -->
         <div style="background:linear-gradient(135deg,#0a1628,#0d2040);border:1px solid #00d4ff44;border-radius:12px 12px 0 0;padding:16px 20px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
-          <div style="color:#00d4ff;font-size:12px;font-weight:700;letter-spacing:2px;">◈ ${date} — ${auditRecords.length} ROUTES</div>
+          <div style="color:#00d4ff;font-size:12px;font-weight:700;letter-spacing:2px;">◈ ${escapeHtml(date)} — ${auditRecords.length} ROUTES</div>
           ${['critical','high','medium','low'].map(r => summary[r] > 0 ?
             `<span style="color:${RC[r]};font-size:11px;font-weight:700;">${summary[r]} ${r.toUpperCase()}</span>` : ''
           ).join('')}
           <div style="margin-left:auto;display:flex;gap:20px;">
             <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">TOTAL STOPS</div><div style="color:#fff;font-size:13px;font-weight:700;">${summary.totalStops}</div></div>
-            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">ACTUAL MILES</div><div style="color:#fff;font-size:13px;font-weight:700;">${summary.totalMilesActual}</div></div>
-            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">STOLEN HRS</div><div style="color:#ff4444;font-size:13px;font-weight:700;">${summary.totalStolenHrs}</div></div>
-            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">EST LOSS</div><div style="color:#ff4444;font-size:13px;font-weight:700;">$${summary.totalStolenDollars}</div></div>
+            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">ACTUAL MILES</div><div style="color:#fff;font-size:13px;font-weight:700;">${fmt1(summary.totalMilesActual)}</div></div>
+            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">STOLEN HRS</div><div style="color:#ff4444;font-size:13px;font-weight:700;">${fmt2(summary.totalStolenHrs)}</div></div>
+            <div style="text-align:center;"><div style="color:#8899aa;font-size:9px;">EST LOSS</div><div style="color:#ff4444;font-size:13px;font-weight:700;">$${fmt2(summary.totalStolenDollars)}</div></div>
           </div>
         </div>
 
@@ -211,8 +237,11 @@
 
   function renderRouteRow(r, i) {
     const flagBadges = r.flags ? r.flags.slice(0, 4).map(f =>
-      `<span style="background:${RC[f.severity] || '#8899aa'}22;border:1px solid ${RC[f.severity] || '#8899aa'}44;border-radius:3px;padding:1px 5px;color:${RC[f.severity] || '#8899aa'};font-size:8px;white-space:nowrap;">${f.type?.replace(/_/g,' ')}</span>`
+      `<span style="background:${RC[f.severity] || '#8899aa'}22;border:1px solid ${RC[f.severity] || '#8899aa'}44;border-radius:3px;padding:1px 5px;color:${RC[f.severity] || '#8899aa'};font-size:8px;white-space:nowrap;">${escapeHtml(String(f.type ?? '').replace(/_/g,' '))}</span>`
     ).join('') : '';
+    // Over-plan miles color only when plannedMiles is a real finite number —
+    // null/undefined * 1.15 === 0, which would paint every route red.
+    const overPlan = Number.isFinite(r.plannedMiles) && Number.isFinite(r.miles) && r.miles > r.plannedMiles * 1.15;
 
     return `
       <div style="border-bottom:1px solid #ffffff0a;">
@@ -224,29 +253,29 @@
           transition:background 0.15s;
         " onmouseover="this.style.background='#0d1f38'" onmouseout="this.style.background='${i % 2 === 0 ? '#0a1628' : '#080f20'}'">
           <div>
-            <div style="color:#fff;font-size:11px;font-weight:700;">${r.driver}</div>
-            <div style="color:#8899aa;font-size:9px;">${r.truck} · ${r.loadNbr}</div>
+            <div style="color:#fff;font-size:11px;font-weight:700;">${escapeHtml(r.driver)}</div>
+            <div style="color:#8899aa;font-size:9px;">${escapeHtml(r.truck)} · ${escapeHtml(r.loadNbr)}</div>
           </div>
           <div style="font-size:10px;color:#ccd;">
-            <div>${r.clockIn || '—'} in</div>
-            <div>${r.clockOut || '—'} out</div>
+            <div>${escapeHtml(r.clockIn || '—')} in</div>
+            <div>${escapeHtml(r.clockOut || '—')} out</div>
           </div>
           <div style="font-size:10px;">
-            <div style="color:#ffcc00;">${r.firstDeliveryTime || '—'}</div>
-            <div style="color:#8899aa;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;" title="${r.firstDeliveryBusiness || ''}">${r.firstDeliveryBusiness || '—'}</div>
+            <div style="color:#ffcc00;">${escapeHtml(r.firstDeliveryTime || '—')}</div>
+            <div style="color:#8899aa;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;" title="${escapeHtml(r.firstDeliveryBusiness || '')}">${escapeHtml(r.firstDeliveryBusiness || '—')}</div>
             ${r.firstDeliveryMinsAfterStart != null ? `<div style="color:${r.firstDeliveryMinsAfterStart > 90 ? '#ff4444' : '#8899aa'};font-size:8px;">+${r.firstDeliveryMinsAfterStart}min</div>` : ''}
           </div>
           <div style="font-size:10px;">
-            <div style="color:#ffcc00;">${r.lastDeliveryTime || '—'}</div>
-            <div style="color:#8899aa;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;" title="${r.lastDeliveryBusiness || ''}">${r.lastDeliveryBusiness || '—'}</div>
+            <div style="color:#ffcc00;">${escapeHtml(r.lastDeliveryTime || '—')}</div>
+            <div style="color:#8899aa;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;" title="${escapeHtml(r.lastDeliveryBusiness || '')}">${escapeHtml(r.lastDeliveryBusiness || '—')}</div>
           </div>
-          <div style="font-size:10px;color:#ccd;text-align:center;">${r.stops}<br><span style="color:#8899aa;font-size:8px;">${r.totalStops} total</span></div>
+          <div style="font-size:10px;color:#ccd;text-align:center;">${r.stops ?? '—'}<br><span style="color:#8899aa;font-size:8px;">${r.totalStops ?? '—'} total</span></div>
           <div style="font-size:10px;text-align:center;">
-            <div style="color:${r.miles > r.plannedMiles * 1.15 ? '#ff4444' : '#ccd'};">${r.miles ?? '—'}</div>
+            <div style="color:${overPlan ? '#ff4444' : '#ccd'};">${r.miles ?? '—'}</div>
             <div style="color:#8899aa;font-size:8px;">${r.plannedMiles ?? '—'} plan</div>
           </div>
           <div style="font-size:10px;color:${r.unaccountedMins > 60 ? '#ff8800' : '#8899aa'};text-align:center;">${r.unaccountedMins != null ? r.unaccountedMins + 'min' : '—'}<br><span style="font-size:8px;">unacct</span></div>
-          <div style="font-size:10px;font-weight:700;color:${RC[r.risk]};text-align:center;">${r.score}<br><span style="font-size:8px;text-transform:uppercase;">${r.risk}</span></div>
+          <div style="font-size:10px;font-weight:700;color:${RC[r.risk] || '#8899aa'};text-align:center;">${r.score}<br><span style="font-size:8px;text-transform:uppercase;">${escapeHtml(r.risk)}</span></div>
           <div style="font-size:9px;display:flex;flex-wrap:wrap;gap:3px;">${flagBadges}</div>
           <div style="color:#8899aa;font-size:10px;text-align:right;">▾</div>
         </div>
@@ -269,8 +298,8 @@
       <div style="padding:10px 0 6px;display:flex;flex-wrap:wrap;gap:6px;">
         ${r.flags.map(f => `
           <div style="background:${RC[f.severity] || '#555'}18;border:1px solid ${RC[f.severity] || '#555'}44;border-radius:4px;padding:4px 8px;max-width:400px;">
-            <span style="color:${RC[f.severity] || '#ccd'};font-size:9px;font-weight:700;">${f.type?.replace(/_/g,' ')} — </span>
-            <span style="color:#aabbcc;font-size:9px;">${f.message}</span>
+            <span style="color:${RC[f.severity] || '#ccd'};font-size:9px;font-weight:700;">${escapeHtml(String(f.type ?? '').replace(/_/g,' '))} — </span>
+            <span style="color:#aabbcc;font-size:9px;">${escapeHtml(f.message)}</span>
           </div>
         `).join('')}
       </div>
@@ -288,24 +317,24 @@
         <tr style="border-bottom:1px solid #ffffff08;">
           <td style="padding:6px 8px;color:#556677;font-size:9px;">${s.seq}</td>
           <td style="padding:6px 8px;">
-            <div style="color:#fff;font-size:10px;font-weight:600;">${s.businessName || '—'}</div>
-            <div style="color:#8899aa;font-size:9px;">${s.addr1 || ''} ${s.city || ''}${s.state ? ', '+s.state : ''} ${s.zip || ''}</div>
-            ${s.customerAccount ? `<div style="color:#556677;font-size:8px;">Acct: ${s.customerAccount}</div>` : ''}
+            <div style="color:#fff;font-size:10px;font-weight:600;">${escapeHtml(s.businessName || '—')}</div>
+            <div style="color:#8899aa;font-size:9px;">${escapeHtml(s.addr1 || '')} ${escapeHtml(s.city || '')}${s.state ? ', '+escapeHtml(s.state) : ''} ${escapeHtml(s.zip || '')}</div>
+            ${s.customerAccount ? `<div style="color:#556677;font-size:8px;">Acct: ${escapeHtml(s.customerAccount)}</div>` : ''}
           </td>
           <td style="padding:6px 8px;font-size:9px;color:#8899aa;">${s.stopType === 'PU' ? '📦 Pickup' : '📍 Delivery'}</td>
           <td style="padding:6px 8px;">
             ${s.interStopGapMins != null ? `
               <div style="color:${gapColor};font-size:10px;font-weight:${s.interStopGapFlag?'700':'400'};">${s.interStopGapMins}min gap</div>
-              ${s.prevStopBusiness ? `<div style="color:#556677;font-size:8px;">from ${s.prevStopBusiness}</div>` : ''}
+              ${s.prevStopBusiness ? `<div style="color:#556677;font-size:8px;">from ${escapeHtml(s.prevStopBusiness)}</div>` : ''}
               ${s.interStopExcessMins != null && s.interStopGapFlag ? `<div style="color:${RC.high};font-size:8px;">+${s.interStopExcessMins}min over plan</div>` : ''}
             ` : '<span style="color:#556677;font-size:9px;">—</span>'}
           </td>
           <td style="padding:6px 8px;">
-            <div style="color:#8899aa;font-size:9px;">${s.plannedEta || '—'} planned</div>
-            <div style="color:#ffcc00;font-size:10px;font-weight:600;">${s.actualArrival || '—'} arrived</div>
+            <div style="color:#8899aa;font-size:9px;">${escapeHtml(s.plannedEta || '—')} planned</div>
+            <div style="color:#ffcc00;font-size:10px;font-weight:600;">${escapeHtml(s.actualArrival || '—')} arrived</div>
           </td>
           <td style="padding:6px 8px;">
-            <div style="color:#00ff88;font-size:10px;font-weight:600;">${s.completionTime || '—'}</div>
+            <div style="color:#00ff88;font-size:10px;font-weight:600;">${escapeHtml(s.completionTime || '—')}</div>
             ${s.arrivalToConfirmMins != null ? `<div style="color:${s.arrivalToConfirmMins > 20 ? RC.high : '#556677'};font-size:8px;">${s.arrivalToConfirmMins}min arr→confirm</div>` : ''}
           </td>
           <td style="padding:6px 8px;">
@@ -319,8 +348,8 @@
             ${s.plannedMilesToNextStop != null ? `<div style="color:#556677;font-size:8px;">${parseFloat(s.plannedMilesToNextStop).toFixed(1)}mi→next</div>` : ''}
           </td>
           <td style="padding:6px 8px;">
-            ${s.exceptionPresent ? `<div style="color:${RC.high};font-size:9px;">⚠ ${s.exceptions?.map(e=>e.desc||e.code).join(', ')||'Exception'}</div>` : ''}
-            ${s.proNumber ? `<div style="color:#556677;font-size:8px;">PRO:${s.proNumber}</div>` : ''}
+            ${s.exceptionPresent ? `<div style="color:${RC.high};font-size:9px;">⚠ ${escapeHtml(s.exceptions?.map(e=>e.desc||e.code).join(', ')||'Exception')}</div>` : ''}
+            ${s.proNumber ? `<div style="color:#556677;font-size:8px;">PRO:${escapeHtml(s.proNumber)}</div>` : ''}
           </td>
         </tr>
       `;

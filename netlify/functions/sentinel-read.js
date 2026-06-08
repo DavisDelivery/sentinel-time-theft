@@ -32,6 +32,19 @@ const CORS = {
   'Cache-Control': 'no-store'
 };
 
+// Input validators — mirror the date-regex pattern sentinel-day-scan.js uses.
+// date: strict YYYY-MM-DD; driverSlug: lowercase alnum + underscore (the
+// employee docId charset). Reject anything else before it reaches a query or
+// a doc-ID concatenation.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DRIVER_SLUG_RE = /^[a-z0-9_]+$/;
+
+// Whitelist for distribution/grouping keys read off stored fields. Unexpected
+// values (undefined / 'nodata' / typos) must not create stray object keys.
+const RISK_LEVELS = ['clean', 'low', 'medium', 'high', 'critical'];
+const BASELINE_CONFIDENCE_LEVELS = ['insufficient', 'low', 'medium', 'high'];
+const normRiskLevel = (v) => (RISK_LEVELS.includes(v) ? v : 'clean');
+
 function readEnv(key) {
   try {
     if (typeof Netlify !== 'undefined' && Netlify?.env?.get) {
@@ -43,13 +56,21 @@ function readEnv(key) {
   return null;
 }
 
+const BY_DATE_LIMIT = 500;
+
 async function byDate(db, date) {
   const rows = await db.listDocs('sentinelDriverDays', {
     where: [{ field: 'date', op: '==', value: date }],
-    limit: 500
+    limit: BY_DATE_LIMIT
   });
   rows.sort((a, b) => (b.riskScore || 0) - (a.riskScore || 0));
-  return rows;
+  // Signal truncation like byDriver does — a silent cap would let the UI
+  // under-report driver-days for an unusually busy date.
+  const truncated = rows.length >= BY_DATE_LIMIT;
+  if (truncated) {
+    console.warn(`[sentinel-read] byDate ${date} hit BY_DATE_LIMIT=${BY_DATE_LIMIT} — result truncated, bump the cap or paginate`);
+  }
+  return { records: rows, truncated };
 }
 
 async function byDriver(db, driverSlug) {
@@ -403,7 +424,9 @@ async function dashboard(db, days) {
   for (const b of baselineDocs) {
     const slug = b.driverSlug || b.id;
     if (slug) baselinesBySlug[slug] = b;
-    const c = b.confidence || 'insufficient';
+    // Whitelist the stored confidence value so an unexpected/typo'd field
+    // can't spawn a stray key on the distribution object.
+    const c = BASELINE_CONFIDENCE_LEVELS.includes(b.confidence) ? b.confidence : 'insufficient';
     baselineConfidence[c] = (baselineConfidence[c] || 0) + 1;
   }
   let recordsScoredAgainstBaseline = 0;
@@ -474,7 +497,9 @@ async function dashboard(db, days) {
 
     if (!inRange(r)) continue;
 
-    dist[r.riskLevel] = (dist[r.riskLevel] || 0) + 1;
+    // Coalesce unexpected/missing riskLevel to 'clean' (matching the grouping
+    // logic elsewhere) so stray keys like undefined/'nodata' don't appear.
+    dist[normRiskLevel(r.riskLevel)] += 1;
     totalStolen$ += r.stolenDollars || 0;
     totalStolenMin += r.stolenMinutes || 0;
     if (r.date) datesPresent.add(r.date);
@@ -701,12 +726,15 @@ export default async (req) => {
       case 'byDate': {
         const date = url.searchParams.get('date');
         if (!date) return new Response(JSON.stringify({ error: 'date required' }), { status: 400, headers: CORS });
-        body = { action, date, records: await byDate(db, date) };
+        if (!DATE_RE.test(date)) return new Response(JSON.stringify({ error: 'date must be YYYY-MM-DD' }), { status: 400, headers: CORS });
+        const { records, truncated } = await byDate(db, date);
+        body = { action, date, records, truncated };
         break;
       }
       case 'byDriver': {
         const driverSlug = url.searchParams.get('driverSlug');
         if (!driverSlug) return new Response(JSON.stringify({ error: 'driverSlug required' }), { status: 400, headers: CORS });
+        if (!DRIVER_SLUG_RE.test(driverSlug)) return new Response(JSON.stringify({ error: 'driverSlug must match ^[a-z0-9_]+$' }), { status: 400, headers: CORS });
         const { records, baseline, avgClockInTime, avgFirstDeliveryTime } = await byDriver(db, driverSlug);
         body = { action, driverSlug, records, baseline, avgClockInTime, avgFirstDeliveryTime };
         break;
@@ -730,6 +758,8 @@ export default async (req) => {
         const driverSlug = url.searchParams.get('driverSlug');
         const date = url.searchParams.get('date');
         if (!driverSlug || !date) return new Response(JSON.stringify({ error: 'driverSlug + date required' }), { status: 400, headers: CORS });
+        if (!DRIVER_SLUG_RE.test(driverSlug)) return new Response(JSON.stringify({ error: 'driverSlug must match ^[a-z0-9_]+$' }), { status: 400, headers: CORS });
+        if (!DATE_RE.test(date)) return new Response(JSON.stringify({ error: 'date must be YYYY-MM-DD' }), { status: 400, headers: CORS });
         body = { action, record: await detail(db, driverSlug, date) };
         break;
       }
@@ -737,6 +767,8 @@ export default async (req) => {
         const driverSlug = url.searchParams.get('driverSlug');
         const date = url.searchParams.get('date');
         if (!driverSlug || !date) return new Response(JSON.stringify({ error: 'driverSlug + date required' }), { status: 400, headers: CORS });
+        if (!DRIVER_SLUG_RE.test(driverSlug)) return new Response(JSON.stringify({ error: 'driverSlug must match ^[a-z0-9_]+$' }), { status: 400, headers: CORS });
+        if (!DATE_RE.test(date)) return new Response(JSON.stringify({ error: 'date must be YYYY-MM-DD' }), { status: 400, headers: CORS });
         body = { action, driverSlug, date, ...(await stops(db, driverSlug, date)) };
         break;
       }

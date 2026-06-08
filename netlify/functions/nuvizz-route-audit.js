@@ -7,6 +7,13 @@
 
 const NUVIZZ_BASE = Netlify.env.get('NUVIZZ_BASE_URL') || 'https://portal.nuvizz.com/deliverit/openapi/v7';
 const COMPANY_CODE = Netlify.env.get('NUVIZZ_COMPANY_CODE') || 'davis';
+const FETCH_TIMEOUT_MS = 20000;
+
+// NuVizz times are naive US-Eastern — format them in that zone for display.
+const NUVIZZ_TZ = 'America/New_York';
+
+// Per-truck-type hourly rate used to value stolen (unaccounted) time.
+const STOLEN_RATE_BY_TYPE = { tractor: 27.50, straight: 23.00, unknown: 25.00 };
 
 function authHeader() {
   const u = Netlify.env.get('NUVIZZ_USERNAME');
@@ -15,10 +22,29 @@ function authHeader() {
   return 'Basic ' + btoa(`${u}:${p}`);
 }
 
+// Resolve a stolen-time rate from a truck-type-ish value.
+function stolenRate(truckType) {
+  const t = (truckType || '').toString().toLowerCase();
+  if (t.includes('tractor')) return STOLEN_RATE_BY_TYPE.tractor;
+  if (t.includes('straight') || t.includes('box')) return STOLEN_RATE_BY_TYPE.straight;
+  return STOLEN_RATE_BY_TYPE.unknown;
+}
+
 async function nv(path) {
-  const res = await fetch(`${NUVIZZ_BASE}${path}`, {
-    headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${NUVIZZ_BASE}${path}`, {
+      headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`NuVizz upstream timeout for ${path}`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`NuVizz ${res.status} ${path}: ${txt.substring(0, 200)}`);
@@ -41,7 +67,8 @@ function diffMins(a, b) {
 
 function fmtTime(dttm) {
   if (!dttm) return null;
-  return new Date(dttm).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  // NuVizz timestamps are naive US-Eastern; format in that zone.
+  return new Date(dttm).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: NUVIZZ_TZ });
 }
 
 function fmtHrs(mins) {
@@ -92,6 +119,7 @@ async function fetchLoadFull(loadNbr) {
     driverUserName: assign.driverUserName,
     tractorNbr: h.tractorNbr,
     trailerNbr: h.trailerNbr,
+    vehicleType: h.vehicleType,
     loadStatus: exec.loadStatus,
     plannedStartDttm: h.earliestStartDttm,
     actualStartDttm: exec.actualStartDTTM,
@@ -223,7 +251,8 @@ function scoreRoute(load) {
     load.stops.filter(s => s.dwellMins).reduce((a, s) => a + s.dwellMins, 0);
   const unaccountedMins = totalShiftMins != null ? Math.max(0, totalShiftMins - accountedMins) : null;
   const stolenHours = unaccountedMins != null ? unaccountedMins / 60 : null;
-  const stolenDollars = stolenHours != null ? stolenHours * 23 : null; // $23/hr avg
+  const rate = stolenRate(load.vehicleType); // per-truck-type rate
+  const stolenDollars = stolenHours != null ? stolenHours * rate : null;
 
   // Risk level
   const risk = score >= 150 ? 'critical' : score >= 80 ? 'high' : score >= 40 ? 'medium' : 'low';

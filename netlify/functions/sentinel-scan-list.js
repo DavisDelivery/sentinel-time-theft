@@ -21,7 +21,13 @@ export default async (req) => {
     const url = new URL(req.url);
     const scanId = url.searchParams.get('scanId');
     const canonicalName = url.searchParams.get('driver');
-    const limit = parseInt(url.searchParams.get('limit') || '50');
+    // Parse with radix 10, fall back to 50 on NaN, clamp to a sane max so a
+    // caller can't request an unbounded list scan.
+    const MAX_LIMIT = 200;
+    const parsedLimit = parseInt(url.searchParams.get('limit') || '50', 10);
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? Math.min(parsedLimit, MAX_LIMIT)
+      : 50;
     const db = getDb();
 
     // DELETE — remove a scan + its subcollection (no secret required, same as
@@ -96,7 +102,7 @@ export default async (req) => {
 
   } catch (err) {
     console.error('[sentinel-scan-list]', err);
-    return new Response(JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 300) }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: 'Internal error', message: err.message }), { status: 500, headers: CORS });
   }
 };
 

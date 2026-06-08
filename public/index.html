@@ -172,7 +172,6 @@ body {
 .off-rank { color: var(--text-3); font-size: var(--fs-sm); font-weight: 600; text-align: right; }
 .off-main { min-width: 0; }
 .off-name { font-weight: 600; font-size: var(--fs-base); margin-bottom: 4px; }
-.off-bars { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
 .off-bar { width: 6px; border-radius: 1px; background: var(--bg-3); flex-shrink: 0; }
 .off-bar.critical { background: var(--crit); }
 .off-bar.high { background: var(--high); }
@@ -1082,7 +1081,7 @@ const fmtTime = fmtClockTime;
 const fmtDate = d => {
   if (!d) return '';
   const [y, mo, da] = d.split('-');
-  return `${parseInt(mo)}/${parseInt(da)}`;
+  return `${parseInt(mo, 10)}/${parseInt(da, 10)}`;
 };
 const riskCls = lv => ['critical','high','medium','low','clean'].includes(lv) ? lv : 'no_data';
 const flagCls = f => ({critical:'critical',flag:'flag',warn:'warn',ok:'ok'}[f] || '');
@@ -1123,19 +1122,6 @@ function renderDistBar(dist, total, opts = {}) {
     <div class="dist-bar">${segs}</div>
     <div class="dist-legend">${legend}</div>
   `;
-}
-
-// ============ Sparkline (per-day stolen $ bars) ============
-function renderSparkBars(records, height = 22, getValue) {
-  if (!records || records.length === 0) return '';
-  const values = records.map(r => getValue(r));
-  const max = Math.max(...values, 1);
-  return records.map((r, i) => {
-    const v = values[i];
-    const h = Math.max(2, Math.round((v / max) * height));
-    const cls = riskCls(r.riskLevel);
-    return `<div class="off-bar ${cls}" style="height:${h}px" title="${r.date}: $${v.toFixed(2)}"></div>`;
-  }).join('');
 }
 
 // ============ Overview ============
@@ -1423,7 +1409,15 @@ function showStaleBanner(cachedAt, message) {
     container.insertBefore(banner, container.firstChild);
   }
   const ts = cachedAt ? new Date(cachedAt) : null;
-  const tsStr = ts ? fmtClockTime(`${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`) : '—';
+  let tsStr = '—';
+  if (ts) {
+    const timeStr = fmtClockTime(`${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`);
+    // Include the date when the cached timestamp isn't today, so "last updated
+    // 5:54am" can't be misread as this morning when it's actually days stale.
+    const now = new Date();
+    const sameDay = ts.getFullYear() === now.getFullYear() && ts.getMonth() === now.getMonth() && ts.getDate() === now.getDate();
+    tsStr = sameDay ? timeStr : `${ts.getMonth() + 1}/${ts.getDate()} ${timeStr}`;
+  }
   banner.innerHTML = `Stale — last updated ${tsStr}. Refresh failed: ${escapeHtml(message || 'fetch error')}`;
 }
 
@@ -1434,12 +1428,33 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
   if (gen != null && gen !== overviewCurrentGen) return;
   const container = document.getElementById('overviewContent');
   try {
+    // Shape guard: the dashboard payload must carry the top-level fields the
+    // hero/distribution reads or every downstream deref throws. Fall back to a
+    // neutral error rather than rendering a half-broken hero (PR #19 review #?).
+    if (!d || !d.dist || !d.totalStolen || !Array.isArray(d.datesPresent)) {
+      container.innerHTML = `<div class="error-banner">Dashboard data unavailable or malformed.</div>`;
+      return;
+    }
     const dist = d.dist;
-    const total = d.totalDriverDays;
-    const rangeDays = d.datesPresent.length || 0;
-    const annualized = d.totalStolen.dollars * 365 / Math.max(1, rangeDays);
-    const dateRange = d.datesPresent.length
-      ? `${d.datesPresent[0]} → ${d.datesPresent[d.datesPresent.length - 1]}`
+    const total = d.totalDriverDays || 0;
+    const datesPresent = d.datesPresent;
+    // Annualize over the CALENDAR span of the selected window, not just the
+    // dates that happened to have data — dividing by datesPresent.length
+    // over-inflates the projection for sparse ranges. Prefer the explicit
+    // selected day count; fall back to the first→last calendar difference.
+    let spanDays;
+    if (typeof overviewState.days === 'number') {
+      spanDays = overviewState.days;
+    } else if (datesPresent.length >= 2) {
+      const first = new Date(datesPresent[0] + 'T00:00:00Z');
+      const last = new Date(datesPresent[datesPresent.length - 1] + 'T00:00:00Z');
+      spanDays = Math.round((last - first) / 86400000) + 1;
+    } else {
+      spanDays = datesPresent.length || 0;
+    }
+    const annualized = (d.totalStolen.dollars || 0) * 365 / Math.max(1, spanDays);
+    const dateRange = datesPresent.length
+      ? `${datesPresent[0]} → ${datesPresent[datesPresent.length - 1]}`
       : '—';
     const rangeText = rangeLabel(overviewState.days);
 
@@ -1461,11 +1476,11 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
             <div class="l">Annualized</div>
           </div>
           <div class="item">
-            <div class="v num">${dist.critical + dist.high}</div>
+            <div class="v num">${(dist.critical || 0) + (dist.high || 0)}</div>
             <div class="l">High-risk days</div>
           </div>
           <div class="item">
-            <div class="v num">${total > 0 ? Math.round(((dist.critical + dist.high) / total) * 100) : 0}%</div>
+            <div class="v num">${total > 0 ? Math.round((((dist.critical || 0) + (dist.high || 0)) / total) * 100) : 0}%</div>
             <div class="l">of fleet-days</div>
           </div>
         </div>
@@ -1526,7 +1541,7 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
     // Top-10 offenders (skip rows with $0 — clean drivers don't belong in a
     // top-offenders list. View-all still shows them.)
     const list = document.getElementById('offenderList');
-    const top10 = d.topOffenders.slice(0, 10).filter(o => o.stolenDollars > 0);
+    const top10 = (d.topOffenders || []).slice(0, 10).filter(o => o.stolenDollars > 0);
     if (top10.length === 0) {
       list.innerHTML = `<div style="padding:var(--s-4);color:var(--text-3);font-size:var(--fs-sm);text-align:center">No drivers with unexplained time in ${rangeText}.</div>`;
     } else {
@@ -1534,7 +1549,7 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
         const row = document.createElement('div');
         row.className = 'off-row';
         const truckBadge = o.truckType && o.truckType !== 'unknown'
-          ? `<span class="off-truck">${o.truckType}</span>`
+          ? `<span class="off-truck">${escapeHtml(o.truckType)}</span>`
           : '';
         row.innerHTML = `
           <div class="off-rank num">${i + 1}</div>
@@ -1620,11 +1635,13 @@ function showRefreshedToast() {
 
 function navigateToDriver(slug) {
   document.querySelector('.tab[data-page="investigate"]').click();
-  setTimeout(() => {
+  // Wait for the driver dropdown to populate before selecting — a fixed
+  // setTimeout raced the async driverList fetch and left the dropdown desynced.
+  Promise.resolve(loadInvestigateInit()).then(() => {
     const sel = document.getElementById('driverSelect');
     sel.value = slug;
     loadDriver(slug);
-  }, 50);
+  });
 }
 
 function renderViewAll(container, d) {
@@ -1717,10 +1734,10 @@ function renderDriverDayRow(r, context) {
   // day-of-week is critical for understanding whether a "low" day is a
   // Saturday route or a midweek anomaly.
   const dateOrName = context === 'audit'
-    ? r.displayName
+    ? escapeHtml(r.displayName)
     : `${dayOfWeek(r.date)} ${fmtDate(r.date)}`;
   const metaParts = [];
-  metaParts.push(r.truckType || '?');
+  metaParts.push(escapeHtml(r.truckType || '?'));
   if (r.completedStops != null) metaParts.push(`${r.completedStops} stops`);
   if (r.clockIn) metaParts.push(`${fmtClockTime(r.clockIn)}–${r.clockOut ? fmtClockTime(r.clockOut) : '?'}`);
   const stolenCls = (r.stolenDollars > 0) ? '' : 'zero';
@@ -1787,15 +1804,15 @@ function renderDetail(r) {
   // Shift + bookends combined
   const shift = r.clockIn ? `${fmtClockTime(r.clockIn)} → ${r.clockOut ? fmtClockTime(r.clockOut) : '?'} (${r.totalShiftMin ? (r.totalShiftMin/60).toFixed(2) + 'hr' : '?'})` : 'No B600 punch';
   const bookends = [];
-  if (r.firstDeliveryTime) bookends.push(`<span class="k">First</span><span class="v">${fmtTime(r.firstDeliveryTime)}${r.firstDeliveryCustomer ? ' · ' + r.firstDeliveryCustomer : ''}</span>${r.firstDeliveryAddr ? `<span class="k"></span><span class="v dim">${r.firstDeliveryAddr}</span>` : ''}`);
-  if (r.lastDeliveryTime) bookends.push(`<span class="k">Last</span><span class="v">${fmtTime(r.lastDeliveryTime)}${r.lastDeliveryCustomer ? ' · ' + r.lastDeliveryCustomer : ''}</span>${r.lastDeliveryAddr ? `<span class="k"></span><span class="v dim">${r.lastDeliveryAddr}</span>` : ''}`);
+  if (r.firstDeliveryTime) bookends.push(`<span class="k">First</span><span class="v">${fmtTime(r.firstDeliveryTime)}${r.firstDeliveryCustomer ? ' · ' + escapeHtml(r.firstDeliveryCustomer) : ''}</span>${r.firstDeliveryAddr ? `<span class="k"></span><span class="v dim">${escapeHtml(r.firstDeliveryAddr)}</span>` : ''}`);
+  if (r.lastDeliveryTime) bookends.push(`<span class="k">Last</span><span class="v">${fmtTime(r.lastDeliveryTime)}${r.lastDeliveryCustomer ? ' · ' + escapeHtml(r.lastDeliveryCustomer) : ''}</span>${r.lastDeliveryAddr ? `<span class="k"></span><span class="v dim">${escapeHtml(r.lastDeliveryAddr)}</span>` : ''}`);
 
   parts.push(`
     <div class="dd-sec">
       <div class="dh">Day</div>
       <div class="kv-grid">
         <span class="k">Shift</span><span class="v">${shift}</span>
-        <span class="k">Truck</span><span class="v">${r.truckType || '?'}</span>
+        <span class="k">Truck</span><span class="v">${escapeHtml(r.truckType || '?')}</span>
         <span class="k">Stops</span><span class="v">${r.completedStops || 0} delivered</span>
         <span class="k">Score</span><span class="v">${r.riskScore} · ${r.riskLevel}</span>
         <span class="k">Unexplained</span><span class="v">${fmtDur(r.stolenMinutes || 0)} · ${fmt$Plain(r.stolenDollars || 0)}</span>
@@ -1812,8 +1829,8 @@ function renderDetail(r) {
       const srcCls = usedBaseline ? 'src-baseline' : 'src-static';
       return `
         <div class="flag-card ${flagCls(f.severity)}">
-          <div class="kind ${flagCls(f.severity)}">${f.kind.replace(/_/g, ' ')} · ${f.severity} <span class="src ${srcCls}">${srcLabel}</span></div>
-          <div class="ev">${f.evidence}</div>
+          <div class="kind ${flagCls(f.severity)}">${escapeHtml(String(f.kind).replace(/_/g, ' '))} · ${escapeHtml(f.severity)} <span class="src ${srcCls}">${srcLabel}</span></div>
+          <div class="ev">${escapeHtml(f.evidence)}</div>
         </div>
       `;
     }).join('');
@@ -1840,9 +1857,9 @@ function renderDetail(r) {
       .map(w => {
         const rows = windows[w].map(v => `
           <div class="visit-row">
-            <div class="t">${v.arrivedAt || '—'}</div>
-            <div class="a">${v.destAddr || 'ZIP ' + v.destZip}</div>
-            <div class="m">${fmtDur(v.stationaryMin)} · ${v.driveMi}mi</div>
+            <div class="t">${escapeHtml(v.arrivedAt || '—')}</div>
+            <div class="a">${v.destAddr ? escapeHtml(v.destAddr) : 'ZIP ' + escapeHtml(v.destZip)}</div>
+            <div class="m">${fmtDur(v.stationaryMin)} · ${escapeHtml(v.driveMi)}mi</div>
           </div>
         `).join('');
         const groupMin = windows[w].reduce((s, v) => s + (v.stationaryMin || 0) + (v.driveMinToReach || 0), 0);
@@ -1869,7 +1886,7 @@ function renderDetail(r) {
   if (r.dataHealth && r.dataHealth.length) {
     const chips = r.dataHealth.map(d => {
       const cls = d.includes('post_route') || d.includes('manual') ? 'post-route' : '';
-      return `<span class="dh-chip ${cls}">${d}</span>`;
+      return `<span class="dh-chip ${cls}">${escapeHtml(d)}</span>`;
     }).join('');
     parts.push(`<div class="dd-sec"><div class="dh">Data Health Notes</div><div class="dh-chips">${chips}</div></div>`);
   }
@@ -1880,7 +1897,7 @@ function renderDetail(r) {
   // resolve which (driverSlug, date) to fetch without re-parsing the DOM.
   parts.push(`
     <div class="dd-sec" data-stops-section>
-      <button class="stops-btn" data-stops-toggle data-driver-slug="${r.driverSlug}" data-date="${r.date}" data-clock-in="${r.clockIn || ''}" data-clock-out="${r.clockOut || ''}">
+      <button class="stops-btn" data-stops-toggle data-driver-slug="${escapeHtml(r.driverSlug)}" data-date="${escapeHtml(r.date)}" data-clock-in="${escapeHtml(r.clockIn || '')}" data-clock-out="${escapeHtml(r.clockOut || '')}">
         Show all deliveries for this day →
       </button>
       <div class="stops-list" data-stops-body></div>
@@ -1923,7 +1940,7 @@ document.addEventListener('click', async (ev) => {
     body.dataset.loaded = '1';
     btn.textContent = 'Hide deliveries ↑';
   } catch (e) {
-    body.innerHTML = `<div class="stops-err">Failed to load deliveries: ${e.message}</div>`;
+    body.innerHTML = `<div class="stops-err">Failed to load deliveries: ${escapeHtml(e.message)}</div>`;
     btn.textContent = 'Show all deliveries for this day →';
   } finally {
     btn.disabled = false;
@@ -1938,7 +1955,7 @@ function fmtNuvizzTime(s) {
 
 function renderStops(stops, diag, opts = {}) {
   if (!stops.length) {
-    return `<div class="stops-empty">No NuVizz stops found for this driver/date. ${diag.reason || ''}</div>`;
+    return `<div class="stops-empty">No NuVizz stops found for this driver/date. ${escapeHtml(diag.reason || '')}</div>`;
   }
   const { clockIn, clockOut } = opts;
   // Group by status so the operator immediately sees completed vs failed vs other.
@@ -1975,10 +1992,10 @@ function renderStops(stops, diag, opts = {}) {
       <div class="stop-row">
         <div class="stop-t mono">${fmtNuvizzTime(s.deliveryEnd)}</div>
         <div class="stop-mid">
-          <div class="stop-name">${s.shipToName || s.shipTo || 'unknown'}</div>
-          <div class="stop-sub">${s.shipTo ? s.shipTo : ''}${s.city ? ` · ${s.city}` : ''}${s.zip ? ` ${s.zip}` : ''}</div>
+          <div class="stop-name">${escapeHtml(s.shipToName || s.shipTo || 'unknown')}</div>
+          <div class="stop-sub">${s.shipTo ? escapeHtml(s.shipTo) : ''}${s.city ? ` · ${escapeHtml(s.city)}` : ''}${s.zip ? ` ${escapeHtml(s.zip)}` : ''}</div>
         </div>
-        <div class="stop-pro mono">${s.pro || ''}</div>
+        <div class="stop-pro mono">${escapeHtml(s.pro || '')}</div>
       </div>
     `).join('');
     const statusCls = /^completed$/i.test(status) ? 'completed' : /complet/i.test(status) ? 'manual' : 'other';
@@ -1994,7 +2011,7 @@ function renderStops(stops, diag, opts = {}) {
     `;
   }).join('');
   return `
-    <div class="stops-total mono">Total: ${stops.length} stops · matched to NuVizz name "${diag.nuvizzName || '?'}"</div>
+    <div class="stops-total mono">Total: ${stops.length} stops · matched to NuVizz name "${escapeHtml(diag.nuvizzName || '?')}"</div>
     ${sections}
   `;
 }
@@ -2005,9 +2022,9 @@ async function loadAudit() {
   if (!cachedDates) {
     try {
       const r = await api('dates');
-      cachedDates = r.dates;
+      cachedDates = r.dates || [];
       const sel = document.getElementById('dateSelect');
-      sel.innerHTML = cachedDates.map(d => `<option value="${d}">${d}</option>`).join('');
+      sel.innerHTML = cachedDates.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
       sel.addEventListener('change', () => loadAuditForDate(sel.value));
     } catch (e) { return; }
   }
@@ -2021,15 +2038,18 @@ async function loadAuditForDate(date) {
   container.innerHTML = '<div class="loading">Loading day</div>';
   try {
     const r = await api('byDate', { date });
-    const records = r.records;
+    const records = r.records || [];
     if (!records.length) {
-      container.innerHTML = `<div class="empty"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg><h3>No records</h3><p>Nothing was scanned for ${date}</p></div>`;
+      container.innerHTML = `<div class="empty"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg><h3>No records</h3><p>Nothing was scanned for ${escapeHtml(date)}</p></div>`;
       return;
     }
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
     let stolen$ = 0, withData = 0, withMotive = 0;
     for (const rec of records) {
-      dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
+      // Coalesce unknown/undefined risk levels into 'clean' so the bar sums to
+      // 100% and matches the grouping logic below (which buckets the same way).
+      const lvl = Object.prototype.hasOwnProperty.call(dist, rec.riskLevel) ? rec.riskLevel : 'clean';
+      dist[lvl]++;
       stolen$ += rec.stolenDollars || 0;
       if (rec.b600Matched || rec.nuvizzMatched) withData++;
       if (rec.motive?.periodsCount) withMotive++;
@@ -2045,8 +2065,8 @@ async function loadAuditForDate(date) {
 
     let html = `
       <div class="hero">
-        <div class="hero-label">${date}</div>
-        <div class="hero-value num">${fmt$(stolen$.toFixed(2))}</div>
+        <div class="hero-label">${escapeHtml(date)}</div>
+        <div class="hero-value num">${fmt$(stolen$)}</div>
         <div class="hero-sub">${withData} of ${records.length} drivers w/ data · ${withMotive} w/ Motive</div>
         <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">${renderDistBar(dist, records.length)}</div>
       </div>
@@ -2073,7 +2093,7 @@ async function loadAuditForDate(date) {
       for (const rec of groupRecs) list.appendChild(renderDriverDayRow(rec, 'audit'));
     }
   } catch (e) {
-    if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
+    if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
   }
 }
 document.getElementById('refreshDate').addEventListener('click', () => { cachedDates = null; loadAudit(); });
@@ -2084,10 +2104,10 @@ async function loadInvestigateInit() {
   if (!cachedDrivers) {
     try {
       const r = await api('driverList');
-      cachedDrivers = r.drivers;
+      cachedDrivers = r.drivers || [];
       const sel = document.getElementById('driverSelect');
       sel.innerHTML = '<option value="">— select driver —</option>' +
-        cachedDrivers.map(d => `<option value="${d.slug}">${d.fullName}${d.defaultTruck ? ' · #' + d.defaultTruck : ''}</option>`).join('');
+        cachedDrivers.map(d => `<option value="${escapeHtml(d.slug)}">${escapeHtml(d.fullName)}${d.defaultTruck ? ' · #' + escapeHtml(d.defaultTruck) : ''}</option>`).join('');
       sel.addEventListener('change', () => loadDriver(sel.value));
     } catch (e) { return; }
   }
@@ -2104,7 +2124,7 @@ async function loadDriver(slug) {
   try {
     const r = await api('byDriver', { driverSlug: slug });
     currentBaseline = r.baseline || null;
-    const records = r.records.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
+    const records = (r.records || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
     if (!records.length) {
       container.innerHTML = `<div class="empty"><h3>No data</h3><p>No records found for this driver</p></div>`;
       return;
@@ -2143,10 +2163,12 @@ async function loadDriver(slug) {
     const avgPerWorkDay = daysWithData ? total$ / daysWithData : 0;
 
     // Davis Delivery doesn't run Sat/Sun routes. Drop weekend dates from the
-    // grid axis so every gap is a missed workday. getDay(): 0=Sun, 6=Sat.
+    // grid axis so every gap is a missed workday. Parse as UTC midnight and use
+    // getUTCDay() to stay consistent with dayOfWeek() — a local-tz parse here
+    // could shift the weekday by one. getUTCDay(): 0=Sun, 6=Sat.
     const isWeekend = (dateStr) => {
-      const d = new Date(dateStr + 'T00:00:00');
-      const wd = d.getDay();
+      const [y, m, da] = dateStr.split('-').map(Number);
+      const wd = new Date(Date.UTC(y, m - 1, da)).getUTCDay();
       return wd === 0 || wd === 6;
     };
     const workdayRecords = tenureRecords.filter(rec => rec.date && !isWeekend(rec.date));
@@ -2158,7 +2180,10 @@ async function loadDriver(slug) {
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
     for (const rec of workdayRecords) {
       if (!recHasData(rec)) { noDataWorkdays++; continue; }
-      dist[rec.riskLevel] = (dist[rec.riskLevel] || 0) + 1;
+      // Coalesce unknown/undefined risk levels into 'clean' so the distribution
+      // bar sums to 100% and matches the heatmap/grouping logic.
+      const lvl = Object.prototype.hasOwnProperty.call(dist, rec.riskLevel) ? rec.riskLevel : 'clean';
+      dist[lvl]++;
       if (['critical','high','medium'].includes(rec.riskLevel)) daysFlagged++;
     }
     const scoredWorkdays = workdayRecords.length - noDataWorkdays;
@@ -2170,7 +2195,7 @@ async function loadDriver(slug) {
     const heatmap = workdayRecords.map(rec => {
       const hasData = recHasData(rec);
       const cls = hasData ? riskCls(rec.riskLevel) : 'no_data';
-      const day = parseInt(rec.date.split('-')[2]);
+      const day = parseInt(rec.date.split('-')[2], 10);
       const titleSuffix = hasData
         ? `: ${rec.riskLevel} · $${rec.stolenDollars || 0}`
         : ': no data (not on roster / no punch / no manifest)';
@@ -2242,8 +2267,8 @@ async function loadDriver(slug) {
 
     container.innerHTML = `
       <div class="driver-hero">
-        <div class="driver-hero-name">${display}</div>
-        <div class="driver-hero-meta">${truck || 'driver'} · <span class="num">${workdayRecords.length}</span> working days · <span class="num">${daysWithData}</span> w/ data · <span class="num">${daysFlagged}</span> flagged${firstDataDate ? ` · since <span class="num">${firstDataDate}</span>` : ''}</div>
+        <div class="driver-hero-name">${escapeHtml(display)}</div>
+        <div class="driver-hero-meta">${escapeHtml(truck || 'driver')} · <span class="num">${workdayRecords.length}</span> working days · <span class="num">${daysWithData}</span> w/ data · <span class="num">${daysFlagged}</span> flagged${firstDataDate ? ` · since <span class="num">${escapeHtml(firstDataDate)}</span>` : ''}</div>
         <div class="driver-hero-stat">
           <div class="item"><div class="l">Total unexplained $</div><div class="v num">${fmt$Plain(total$.toFixed(2))}</div></div>
           <div class="item"><div class="l">Total unexplained time</div><div class="v num">${fmtDur(totalMin)}</div></div>
@@ -2276,7 +2301,7 @@ async function loadDriver(slug) {
     const desc = records.slice().reverse();
     for (const rec of desc) list.appendChild(renderDriverDayRow(rec, 'investigate'));
   } catch (e) {
-    if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
+    if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
   }
 }
 document.getElementById('refreshDriver').addEventListener('click', () => {

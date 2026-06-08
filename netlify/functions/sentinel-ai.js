@@ -8,6 +8,8 @@ const CORS = {
   'Content-Type': 'application/json'
 };
 
+const FETCH_TIMEOUT_MS = 20000;
+
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
 
@@ -74,20 +76,33 @@ ${(topCities || []).slice(0, 6).map(([city, count]) => `  ${city}: ${count} stop
 
 Provide your SENTINEL analysis. Be specific with dates and patterns.`;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: _rawPrompt ? 3000 : 1500,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: _rawPrompt || userPrompt }]
-      })
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: _rawPrompt ? 3000 : 1500,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: _rawPrompt || userPrompt }]
+        }),
+        signal: controller.signal
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        return new Response(JSON.stringify({ error: 'Claude API upstream timeout' }), { status: 504, headers: CORS });
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!res.ok) {
       const errText = await res.text();

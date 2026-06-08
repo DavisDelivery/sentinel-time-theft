@@ -119,15 +119,17 @@ export default async (req) => {
   }
 
   // Load shared inputs once per invocation. listAllDocs paginates so we get
-  // ALL records (the bug PR #7 fixed for the synchronous version); baselines,
-  // defaults, and the employees roster are small enough to fit in one
-  // listDocs page. employees-by-slug is consulted on every rescored record to
-  // resolve loadPrepMin / wrapUpMin overrides.
+  // ALL records (the bug PR #7 fixed for the synchronous version). The
+  // employees roster is also loaded via listAllDocs: a capped listDocs page
+  // would silently drop overrides for the alphabetically-last drivers once the
+  // roster exceeds the cap, corrupting stolen-$ attribution with no signal.
+  // employees-by-slug is consulted on every rescored record to resolve
+  // loadPrepMin / wrapUpMin overrides.
   const [records, baselines, defaults, employees] = await Promise.all([
     db.listAllDocs('sentinelDriverDays'),
     loadAllBaselines(db),
     loadDefaults(db),
-    db.listDocs('employees', { limit: 500, fields: ['loadPrepMin', 'wrapUpMin', 'truckType'] })
+    db.listAllDocs('employees', { fields: ['loadPrepMin', 'wrapUpMin', 'truckType'] })
   ]);
   const employeesBySlug = {};
   for (const e of employees) {

@@ -7,14 +7,21 @@ import crypto from 'crypto';
 let _accessToken = null;
 let _tokenExpiry = 0;
 
-function getProjectId() { return Netlify.env.get('FIREBASE_PROJECT_ID'); }
+function getProjectId() {
+  const id = Netlify.env.get('FIREBASE_PROJECT_ID');
+  if (!id) throw new Error('FIREBASE_PROJECT_ID not set');
+  return id;
+}
 
 async function getAccessToken() {
   if (_accessToken && Date.now() < _tokenExpiry - 60000) return _accessToken;
   const clientEmail = Netlify.env.get('FIREBASE_CLIENT_EMAIL');
   let privateKey = Netlify.env.get('FIREBASE_PRIVATE_KEY');
   if (!clientEmail || !privateKey) throw new Error('Firebase credentials not set');
-  privateKey = privateKey.replace(/\\n/g, '\n');
+  // Tolerant normalization: only collapse literal "\n" escapes when present
+  // (env stores the PEM with escaped newlines); a key with real newlines is
+  // left untouched.
+  if (privateKey.includes('\\n')) privateKey = privateKey.replace(/\\n/g, '\n');
 
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'RS256', typ: 'JWT' };
@@ -27,7 +34,12 @@ async function getAccessToken() {
   };
   const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
   const unsigned = `${b64url(header)}.${b64url(claim)}`;
-  const signature = crypto.sign('RSA-SHA256', Buffer.from(unsigned), privateKey).toString('base64url');
+  let signature;
+  try {
+    signature = crypto.sign('RSA-SHA256', Buffer.from(unsigned), privateKey).toString('base64url');
+  } catch (e) {
+    throw new Error('FIREBASE_PRIVATE_KEY appears malformed');
+  }
   const jwt = `${unsigned}.${signature}`;
 
   const res = await fetch('https://oauth2.googleapis.com/token', {

@@ -115,8 +115,9 @@ export default async (req, context) => {
     if (context && typeof context.waitUntil === 'function') {
       context.waitUntil(fire);
     } else {
-      // No waitUntil → fire and forget at least the request initiation
-      fire;
+      // No waitUntil → await the request initiation so the instance doesn't
+      // freeze before the outbound bg invoke is actually sent.
+      await fire;
     }
 
     return new Response(JSON.stringify({

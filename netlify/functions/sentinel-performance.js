@@ -32,9 +32,13 @@ function stddev(nums){
   return Math.sqrt(s.reduce((a,b)=>a+(b-m)**2,0)/s.length);
 }
 function pct(arr, p){
+  // Nearest-rank percentile, matching _baselines.js percentile():
+  //   idx = clamp(ceil(p*n) - 1, 0, n-1), with p as a 0-1 fraction.
   const s = arr.filter(n=>typeof n==='number' && !isNaN(n)).sort((a,b)=>a-b);
   if (!s.length) return 0;
-  const idx = Math.min(s.length-1, Math.floor(s.length * p));
+  if (p <= 0) return s[0];
+  if (p >= 1) return s[s.length-1];
+  const idx = Math.min(s.length-1, Math.max(0, Math.ceil(p * s.length) - 1));
   return s[idx];
 }
 
@@ -122,8 +126,12 @@ async function fetchPerformanceRecords(days){
   if (all.length >= limit) {
     console.warn(`[sentinel-performance] hit listDocs limit=${limit} for days=${days} — result may be truncated, paginate runQuery if this fires`);
   }
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
+  // Compute the cutoff entirely in UTC so the subtraction and the YYYY-MM-DD
+  // formatting use the same calendar. Mixing setDate() (server-local) with
+  // toISOString() (UTC) could shift the cutoff by a day near midnight relative
+  // to the dates stored in records.
+  const now = new Date();
+  const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - days));
   const cutoffIso = cutoff.toISOString().slice(0,10);
   const filtered = all.filter(r => r.date && r.date >= cutoffIso);
   console.log(`[sentinel-performance] days=${days} → read ${all.length}, kept ${filtered.length} after date filter`);
@@ -142,10 +150,13 @@ export default async (req) => {
 
     const records = await fetchPerformanceRecords(days);
 
-    // Apply class filter (also used for benchmarks below)
+    // Apply class filter (also used for benchmarks below). Partition
+    // explicitly: only 'tractor' and 'straight' are real classes. Records with
+    // a null/undefined/garbage driverType are excluded from both benchmark
+    // samples so they can't contaminate medians/percentiles or the regression.
     const recordsByClass = {
       tractor: records.filter(r => r.driverType === 'tractor'),
-      straight: records.filter(r => r.driverType !== 'tractor'),
+      straight: records.filter(r => r.driverType === 'straight'),
     };
 
     // ─── Fleet-level benchmarks per class ──────────────────────────────────
@@ -185,9 +196,12 @@ export default async (req) => {
       if (!k) continue;
       if (!byDriver[k]) {
         byDriver[k] = {
+          // Preserve the real class only when it's a known value; don't coerce
+          // null/garbage into 'straight' (that would re-contaminate the class
+          // aggregation the benchmark bucketing was fixed to exclude).
           canonicalName: k,
           displayName: r.displayName || k,
-          driverType: r.driverType || 'straight',
+          driverType: (r.driverType === 'tractor' || r.driverType === 'straight') ? r.driverType : 'unknown',
           driverRole: r.driverRole || '',
           truck: r.truck || '',
           records: []
@@ -198,7 +212,11 @@ export default async (req) => {
 
     const driverAggs = Object.values(byDriver).map(d => {
       const rs = d.records;
-      const bench = benchmarks[d.driverType === 'tractor' ? 'tractor' : 'straight'];
+      // Only 'tractor'/'straight' map to a benchmark class; anything else has
+      // no class bench (and is excluded from class aggregation upstream).
+      const bench = d.driverType === 'tractor' ? benchmarks.tractor
+                  : d.driverType === 'straight' ? benchmarks.straight
+                  : null;
       const model = bench?.regressionModel || null;
 
       // Compute "expected on-route" per record using both methods and aggregate
@@ -254,7 +272,7 @@ export default async (req) => {
     // Apply driver / class filters for response
     let responseDrivers = driverAggs;
     if (classFilter) responseDrivers = responseDrivers.filter(d =>
-      classFilter === 'tractor' ? d.driverType === 'tractor' : d.driverType !== 'tractor'
+      classFilter === 'tractor' ? d.driverType === 'tractor' : d.driverType === 'straight'
     );
     if (driverFilter) {
       const want = driverFilter.toLowerCase();
