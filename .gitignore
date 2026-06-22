@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Netlify local build output / deployed bundles (rebuilt from source by Netlify;
+# these stale .zip artifacts should not be committed). To untrack existing ones:
+#   git rm -r --cached .netlify
+.netlify/
+
+# OS / editor cruft
+.DS_Store
+*.log

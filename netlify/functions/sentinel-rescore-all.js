@@ -212,10 +212,7 @@ export default async (req, context) => {
 
   } catch (err) {
     console.error('[sentinel-rescore-all]', err);
-    return new Response(JSON.stringify({
-      error: err.message,
-      stack: err.stack?.slice(0, 800)
-    }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
   }
 };
 

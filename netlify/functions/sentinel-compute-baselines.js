@@ -162,10 +162,7 @@ export default async (req) => {
     }, null, 2), { status: 200, headers: CORS });
   } catch (err) {
     console.error('[sentinel-compute-baselines]', err);
-    return new Response(JSON.stringify({
-      error: err.message,
-      stack: err.stack?.slice(0, 800)
-    }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
   }
 };
 

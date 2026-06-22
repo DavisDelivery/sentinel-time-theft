@@ -76,11 +76,6 @@
   to = "/.netlify/functions/sentinel-ai"
   status = 200
 
-[[redirects]]
-  from = "/api/motive-dashcam"
-  to = "/.netlify/functions/motive-dashcam"
-  status = 200
-
 [[headers]]
   for = "/*"
   [headers.values]
