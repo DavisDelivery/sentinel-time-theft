@@ -522,6 +522,15 @@ body {
   padding: 8px var(--s-3); border-radius: 6px; margin-bottom: var(--s-3);
   font-size: var(--fs-xs); font-weight: 600;
 }
+/* Feed-health warning — shown when records were scored but the inputs were
+   incomplete (no matched delivery/punch), so unexplained time reads $0 for a
+   data-ingestion reason rather than a clean fleet. */
+.feed-banner {
+  background: var(--med-bg); border: 1px solid rgba(180,83,9,0.3); color: var(--med);
+  padding: 10px var(--s-3); border-radius: 8px; margin-bottom: var(--s-3);
+  font-size: var(--fs-sm); font-weight: 500; line-height: 1.5;
+}
+.feed-banner .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
 .refreshed-toast {
   position: fixed; left: 50%; bottom: calc(72px + env(safe-area-inset-bottom));
   transform: translateX(-50%) translateY(8px);
@@ -1138,6 +1147,8 @@ const overviewState = {
 function renderTrendIndicator(t30) {
   if (!t30) return '<div class="viewall-trend flat">—</div>';
   const delta = t30.delta;
+  // A trend object missing/NaN delta must not render "▼ $NaN".
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) return '<div class="viewall-trend flat">—</div>';
   if (Math.abs(delta) < 1) return '<div class="viewall-trend flat">±$0</div>';
   if (delta > 0) return `<div class="viewall-trend up">▲ ${fmt$Plain(delta)}</div>`;
   return `<div class="viewall-trend down">▼ ${fmt$Plain(Math.abs(delta))}</div>`;
@@ -1458,6 +1469,20 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
       : '—';
     const rangeText = rangeLabel(overviewState.days);
 
+    // Feed-health banner: when days were scored but NOT ONE produced a usable
+    // morning/afternoon gap, the $0 hero is a data problem, not a clean fleet.
+    // Spell out which input is missing so an ingestion gap is actionable
+    // instead of looking like an empty dashboard. `feedHealth` may be absent on
+    // an old cached payload — guard for it.
+    const fh = d.feedHealth;
+    let feedBanner = '';
+    if (fh && (fh.scoredDays || 0) > 0 && (fh.withGapData || 0) === 0) {
+      const detail = (fh.withBoth || 0) === 0
+        ? `No driver-day in this window had <strong>both</strong> a clock punch and a matched delivery, so no morning/afternoon gap can be computed. B600 punches matched on ${fh.withB600 || 0} day(s), NuVizz deliveries on ${fh.withNuvizz || 0} day(s) — at least one feed is not landing for these dates.`
+        : `${fh.withBoth} day(s) had both a punch and a delivery, but travel-time lookups produced no gap on any of them — check the yard address (SENTINEL_YARD_ADDRESS) and Distance Matrix configuration.`;
+      feedBanner = `<div class="feed-banner">⚠ ${fh.scoredDays} driver-day(s) were scored, but unexplained time is $0 because the inputs are incomplete. ${detail} This is a data-ingestion gap, not a scoring bug. Check the newest ingested dates with <span class="mono">/api/sentinel-day-scan?coverage=true</span>.</div>`;
+    }
+
     container.innerHTML = `
       <div class="range-chips" id="rangeChips">
         ${[30, 90, 180, 365, 'all'].map(v => {
@@ -1465,6 +1490,8 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
           return `<button class="range-chip ${isActive ? 'active' : ''}" data-range="${v}">${rangeLabel(v)}</button>`;
         }).join('')}
       </div>
+
+      ${feedBanner}
 
       <div class="hero">
         <div class="hero-label">Unexplained Time · ${rangeText}</div>
@@ -1814,7 +1841,7 @@ function renderDetail(r) {
         <span class="k">Shift</span><span class="v">${shift}</span>
         <span class="k">Truck</span><span class="v">${escapeHtml(r.truckType || '?')}</span>
         <span class="k">Stops</span><span class="v">${r.completedStops || 0} delivered</span>
-        <span class="k">Score</span><span class="v">${r.riskScore} · ${r.riskLevel}</span>
+        <span class="k">Score</span><span class="v">${r.riskScore ?? 0} · ${escapeHtml(r.riskLevel || 'no_data')}</span>
         <span class="k">Unexplained</span><span class="v">${fmtDur(r.stolenMinutes || 0)} · ${fmt$Plain(r.stolenDollars || 0)}</span>
         ${bookends.join('')}
       </div>

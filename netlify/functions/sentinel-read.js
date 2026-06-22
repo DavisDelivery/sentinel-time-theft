@@ -461,6 +461,11 @@ async function dashboard(db, days) {
 
   const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
   let totalStolen$ = 0, totalStolenMin = 0;
+  // Feed-health counters — let the UI tell "genuinely clean fleet" apart from
+  // "records were written but the inputs (B600 punch / NuVizz delivery / travel
+  // time) never co-occurred, so nothing was computable and everything reads
+  // clean $0." A silent all-clean dashboard otherwise hides an ingestion gap.
+  let feedWithB600 = 0, feedWithNuvizz = 0, feedWithBoth = 0, feedWithGapData = 0;
   const perDriver = {};
   const datesPresent = new Set();
   const allDatesPresent = new Set();
@@ -503,6 +508,12 @@ async function dashboard(db, days) {
     totalStolen$ += r.stolenDollars || 0;
     totalStolenMin += r.stolenMinutes || 0;
     if (r.date) datesPresent.add(r.date);
+
+    // Feed-health: count which inputs actually landed on this scored day.
+    if (r.b600Matched) feedWithB600++;
+    if (r.nuvizzMatched) feedWithNuvizz++;
+    if (r.b600Matched && r.nuvizzMatched) feedWithBoth++;
+    if (typeof r.morningGapMin === 'number' || typeof r.afternoonGapMin === 'number') feedWithGapData++;
 
     if (!perDriver[slug]) {
       perDriver[slug] = {
@@ -694,6 +705,13 @@ async function dashboard(db, days) {
     allDatesPresent: [...allDatesPresent].sort(),
     dist,
     totalStolen: { dollars: +totalStolen$.toFixed(2), minutes: totalStolenMin },
+    feedHealth: {
+      scoredDays: dist.critical + dist.high + dist.medium + dist.low + dist.clean,
+      withB600: feedWithB600,
+      withNuvizz: feedWithNuvizz,
+      withBoth: feedWithBoth,
+      withGapData: feedWithGapData
+    },
     topOffenders: offendersRanked.slice(0, 15),
     offendersRanked,
     restRoster,

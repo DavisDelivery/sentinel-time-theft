@@ -57,11 +57,6 @@ export default async (req, context) => {
         ep = "driver_logs";
         break;
 
-      case "users":
-      case "drivers":
-        ep = "users";
-        break;
-
       case "performance":
         ep = "driver_performance_events";
         break;
@@ -75,7 +70,10 @@ export default async (req, context) => {
         break;
 
       default:
-        ep = action;
+        // Reject unknown actions instead of interpolating arbitrary
+        // client-supplied paths into the Motive URL — that was an open,
+        // credentialed proxy to the entire Motive API under our server key.
+        return new Response(JSON.stringify({ error: true, message: `Unsupported action: ${action}` }), { status: 400, headers: cors });
     }
 
     // Build URL with remaining params
@@ -96,7 +94,12 @@ export default async (req, context) => {
       }
     });
 
-    const data = await resp.json();
+    // Motive 5xx/error pages can be HTML; read once as text then try to parse so
+    // a non-JSON upstream body doesn't throw and mask the real status.
+    const bodyText = await resp.text();
+    let data;
+    try { data = JSON.parse(bodyText); }
+    catch { data = { error: true, message: "Motive returned non-JSON response", status: resp.status, body: bodyText.slice(0, 300) }; }
 
     return new Response(JSON.stringify(data), {
       status: resp.status,

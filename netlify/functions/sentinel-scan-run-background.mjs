@@ -511,7 +511,10 @@ function processDriverPeriods(periods) {
 
 // ─── DATA HUB CONFIG ─────────────────────────────────────────────────────────
 const HUB_FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/davismarginiq/databases/(default)/documents';
-const HUB_FIRESTORE_KEY = 'AIzaSyDyRyjuiP_UD8T_2xmW2xLjvqx9RLCYCmo';
+// SECURITY: this key is committed to git history and MUST be rotated. Reading
+// from env first lets ops rotate (set HUB_FIRESTORE_KEY in Netlify) without a
+// code change; the literal remains only as a fallback until the rotation lands.
+const HUB_FIRESTORE_KEY = Netlify.env.get('HUB_FIRESTORE_KEY') || 'AIzaSyDyRyjuiP_UD8T_2xmW2xLjvqx9RLCYCmo';
 
 function _fsFields(fields) {
   const out = {};
