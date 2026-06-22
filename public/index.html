@@ -223,6 +223,16 @@ body {
 .chip.critical { background: var(--crit-bg); color: var(--crit); }
 .chip.ok { background: var(--clean-bg); color: var(--clean); }
 
+/* No-delivery-data day — punches may exist but NuVizz didn't match, so the day
+   can't be scored. Mark it as missing data instead of a misleading clean row. */
+.dd-nodata {
+  font-size: var(--fs-xs); font-weight: 600; color: var(--text-3);
+  background: var(--bg-3); border: 1px solid var(--line);
+  padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+}
+.dd-row.no-signal-row { background: var(--bg-2); }
+.dd-row.no-signal-row .dd-name { color: var(--text-2); }
+
 /* ============ Detail (expanded) ============ */
 .dd-detail { display: none; padding: var(--s-4); border-top: 1px solid var(--line); background: var(--bg); }
 .dd-row.expanded .dd-detail { display: block; }
@@ -1763,26 +1773,44 @@ function renderDriverDayRow(r, context) {
   const dateOrName = context === 'audit'
     ? escapeHtml(r.displayName)
     : `${dayOfWeek(r.date)} ${fmtDate(r.date)}`;
+  // A day with no delivery anchor (NuVizz didn't match / 0 completed stops)
+  // can't be scored — every gap metric needs a first/last delivery. Render it
+  // as an explicit "no delivery data" row instead of a misleading green
+  // "clean · $0 · OK" one, so a feed gap (punches present, deliveries absent)
+  // is obvious at a glance.
+  const stopsCount = r.completedStops || 0;
+  const hasDelivery = !!(r.nuvizzMatched || stopsCount > 0 || r.firstDeliveryTime || r.lastDeliveryTime);
+  const hasPunch = !!(r.b600Matched || r.clockIn);
+
   const metaParts = [];
   metaParts.push(escapeHtml(r.truckType || '?'));
-  if (r.completedStops != null) metaParts.push(`${r.completedStops} stops`);
-  if (r.clockIn) metaParts.push(`${fmtClockTime(r.clockIn)}–${r.clockOut ? fmtClockTime(r.clockOut) : '?'}`);
-  const stolenCls = (r.stolenDollars > 0) ? '' : 'zero';
-  div.innerHTML = `
-    <div class="dd-head">
-      <div class="dd-strip ${riskCls(r.riskLevel)}"></div>
-      <div class="dd-main">
-        <div class="dd-name">${dateOrName}</div>
-        <div class="dd-meta">${metaParts.map((p, i) => i === 0 ? `<span>${p}</span>` : `<span class="sep">·</span><span>${p}</span>`).join('')}</div>
-      </div>
-      <div class="dd-right">
+  metaParts.push(r.clockIn ? `${fmtClockTime(r.clockIn)}–${r.clockOut ? fmtClockTime(r.clockOut) : '?'}` : 'no clock punch');
+  if (hasDelivery) metaParts.push(`${stopsCount} stops`);
+
+  let right;
+  if (!hasDelivery) {
+    div.classList.add('no-signal-row');
+    right = `<div class="dd-nodata">${hasPunch ? 'no delivery data' : 'no data'}</div>`;
+  } else {
+    const stolenCls = (r.stolenDollars > 0) ? '' : 'zero';
+    right = `
         <div class="dd-amount num ${stolenCls}">${fmt$(r.stolenDollars)}</div>
         <div class="dd-chips">
           <span class="chip ${flagCls(r.morningFlag)}">M ${flagLabel(r.morningFlag)}</span>
           <span class="chip ${flagCls(r.afternoonFlag)}">A ${flagLabel(r.afternoonFlag)}</span>
           <span class="chip ${flagCls(r.inRouteFlag)}">IR ${flagLabel(r.inRouteFlag)}</span>
-        </div>
+        </div>`;
+  }
+  const stripCls = hasDelivery ? riskCls(r.riskLevel) : 'no_data';
+
+  div.innerHTML = `
+    <div class="dd-head">
+      <div class="dd-strip ${stripCls}"></div>
+      <div class="dd-main">
+        <div class="dd-name">${dateOrName}</div>
+        <div class="dd-meta">${metaParts.map((p, i) => i === 0 ? `<span>${p}</span>` : `<span class="sep">·</span><span>${p}</span>`).join('')}</div>
       </div>
+      <div class="dd-right">${right}</div>
     </div>
     <div class="dd-detail"></div>
   `;
@@ -1811,9 +1839,12 @@ function renderDetail(r) {
   // Surface that explicitly so the operator doesn't mistake it for a real OK.
   const stopsCount = r.completedStops || 0;
   const hasAnchors = !!(r.firstDeliveryTime || r.lastDeliveryTime);
+  const hasPunch = !!(r.b600Matched || r.clockIn);
   if (stopsCount === 0 || !hasAnchors) {
     const reason = stopsCount === 0
-      ? 'No deliveries logged this day.'
+      ? (hasPunch
+          ? 'Shift hours were logged, but no NuVizz deliveries matched for this driver/day — that points to a delivery-feed/ingestion gap, not driver behavior.'
+          : 'No deliveries and no clock punch logged this day.')
       : 'Missing first/last delivery anchor.';
     const offRoute = (r.motive && r.motive.offRouteVisits && r.motive.offRouteVisits.length)
       ? ` Off-route activity recorded (${r.motive.offRouteVisits.length} location${r.motive.offRouteVisits.length === 1 ? '' : 's'}) — review below.`
