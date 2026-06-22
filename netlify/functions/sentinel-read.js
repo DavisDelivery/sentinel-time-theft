@@ -261,22 +261,30 @@ async function detail(db, driverSlug, date) {
 async function stops(db, driverSlug, date) {
   const emp = await db.getDoc('employees', driverSlug);
   if (!emp) return { stops: [], diag: { reason: 'employee not found', driverSlug } };
-  const nuvizzName = emp?.externalIds?.nuvizz || emp?.fullName;
-  if (!nuvizzName) return { stops: [], diag: { reason: 'no nuvizz external ID on employee', driverSlug } };
+
+  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  // Same broadened name matching the scan uses (externalIds.nuvizz + fullName +
+  // first/last + aliases) so this diagnostic reflects what actually scores.
+  const nameCandidates = [
+    emp?.externalIds?.nuvizz,
+    emp?.fullName,
+    (emp?.firstName && emp?.lastName) ? `${emp.firstName} ${emp.lastName}` : null,
+    ...(Array.isArray(emp?.aliases) ? emp.aliases : [])
+  ].filter(Boolean).map(norm);
+  const targetSet = new Set(nameCandidates);
+  if (targetSet.size === 0) return { stops: [], diag: { reason: 'no nuvizz name/alias on employee', driverSlug } };
 
   const rows = await db.listDocs('nuvizz_rows_raw', {
     where: [{ field: 'delivery_date', op: '==', value: date }],
     limit: 2000
   });
-  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
-  const target = norm(nuvizzName);
 
   const out = [];
   const statusBreakdown = {};
   let matched = 0;
   for (const r of rows) {
     const raw = r.raw || {};
-    if (norm(raw['driver name']) !== target) continue;
+    if (!targetSet.has(norm(raw['driver name']))) continue;
     matched++;
     const status = raw['stop status'] || '(none)';
     statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
@@ -307,7 +315,7 @@ async function stops(db, driverSlug, date) {
   console.log(`[sentinel-read] stops ${driverSlug} ${date} → ${out.length} matched of ${rows.length} scanned`);
   return {
     stops: out,
-    diag: { rowsScannedForDate: rows.length, driverNameMatches: matched, statusBreakdown, nuvizzName }
+    diag: { rowsScannedForDate: rows.length, driverNameMatches: matched, statusBreakdown, nuvizzNameCandidates: [...targetSet] }
   };
 }
 

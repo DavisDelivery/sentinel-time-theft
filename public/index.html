@@ -2053,7 +2053,7 @@ function renderStops(stops, diag, opts = {}) {
     `;
   }).join('');
   return `
-    <div class="stops-total mono">Total: ${stops.length} stops · matched to NuVizz name "${escapeHtml(diag.nuvizzName || '?')}"</div>
+    <div class="stops-total mono">Total: ${stops.length} stops · matched on NuVizz name(s) ${escapeHtml((diag.nuvizzNameCandidates || []).join(', ') || '?')}</div>
     ${sections}
   `;
 }
