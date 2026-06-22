@@ -226,3 +226,42 @@ them (`totalpass-scraper.js` only *returns* B600 CSV, it does not persist it). T
   benchmarks (reporting gap).
 - `_motive.js` — distance-fallback unit assumption (km) is unverified; pagination hard-caps at 10
   pages.
+
+---
+
+## 2026-06-22 — Secrets removed + legacy v3 stack deleted (operator decision)
+
+Per the owner: this is a single-operator internal tool that never wanted an
+access secret. The `SCAN_SECRET` mechanism was removed entirely rather than
+hardened — and because "no secret" would otherwise leave destructive/dump
+endpoints anonymously callable, the unused legacy surface was deleted instead of
+left open.
+
+**Removed the secret everywhere**
+- Client (`index.html`): dropped `DEFAULT_SECRET` / `getSecret` / `setSecret`,
+  the Settings "Access Secret" field + save handler, and the `secret=` param on
+  every fetch. No credential is sent.
+- Server: removed the secret check from `sentinel-read`, `sentinel-write`,
+  `sentinel-compute-baselines`, `sentinel-day-scan`, `sentinel-rescore-all`,
+  `sentinel-historical-backfill`; `sentinel-weekly-baselines` no longer puts a
+  secret in its internal call.
+
+**Deleted (unused by the app; unsafe to leave un-authed)**
+- `firestore-introspect.js` (full-DB dump — must never be public; SCHEMA already
+  said to delete it).
+- `sentinel-purge.js` (destructive).
+- The legacy v3 scan stack: `sentinel-scan-run-background.mjs` (also carried the
+  committed Firebase Web API key — now gone from source), `sentinel-scan-save.js`,
+  `sentinel-scan-list.js`, `sentinel-scan-status.js`.
+- Their `netlify.toml` redirects.
+
+**Also:** stopped tracking `.netlify/` build artifacts (`git rm -r --cached`),
+covered by the new `.gitignore`.
+
+**Resolves** prior open CRITICALs #1 (committed Firebase key), the unauthenticated
+purge / scan-list-DELETE / introspect endpoints, and the hardcoded secret
+fallbacks. **Trade-off the owner accepted:** the remaining endpoints (dashboard
+read, driver-config write, rescore, baselines) are now fully open with wildcard
+CORS — anyone with the site URL can read the data and edit driver config. If that
+ever needs locking down, put the whole site behind Netlify Identity / password
+protection rather than re-introducing an in-app secret.

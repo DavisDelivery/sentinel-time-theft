@@ -12,7 +12,7 @@
 //   ?action=getBaseline&driverSlug=X        → full baseline doc for one driver
 //   ?action=driverConfig                    → active drivers + per-driver loadPrep/wrapUp/truckType overrides
 //
-// Auth: ?secret=<SCAN_SECRET>
+// Auth: none — open internal endpoint.
 // All responses are JSON. CORS open for browser fetch.
 
 import { getDb } from './_firebase-admin.js';
@@ -730,12 +730,6 @@ export default async (req) => {
 
   try {
     const url = new URL(req.url);
-    const secret = url.searchParams.get('secret');
-    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-    if (secret !== expected) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-    }
-
     const action = url.searchParams.get('action') || 'dashboard';
     const db = getDb();
     let body;

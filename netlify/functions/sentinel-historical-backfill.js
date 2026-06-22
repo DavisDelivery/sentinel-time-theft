@@ -1,15 +1,15 @@
 // netlify/functions/sentinel-historical-backfill.js
 // SENTINEL v4 Phase 3c — control plane for the historical backfill.
 //
-//   GET  /api/sentinel-historical-backfill?secret=<S>
+//   GET  /api/sentinel-historical-backfill
 //     → returns the current sentinelConfig/historicalBackfillStatus doc
 //
-//   POST /api/sentinel-historical-backfill?secret=<S>
+//   POST /api/sentinel-historical-backfill
 //        body: { reset?: bool, startDate?: 'YYYY-MM-DD', endDate?: 'YYYY-MM-DD' }
 //     → if a run is already in flight and reset is falsy → 409
 //        otherwise wipes status and fires the background worker, returns 202
 //
-// Secret defaults to davis2026sentinel (same as sentinel-day-scan).
+// Auth: none — open internal endpoint.
 
 import { getDb } from './_firebase-admin.js';
 
@@ -44,13 +44,6 @@ export default async (req, context) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
 
   try {
-    const url = new URL(req.url);
-    const secret = url.searchParams.get('secret');
-    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-    if (secret !== expected) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-    }
-
     const db = getDb();
 
     if (req.method === 'GET') {

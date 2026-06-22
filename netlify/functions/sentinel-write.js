@@ -8,7 +8,7 @@
 //     - null              → clear the override (revert to defaults/auto-resolve)
 //     - Omitted key       → field untouched
 //
-// Auth: ?secret=<SCAN_SECRET>
+// Auth: none — open internal endpoint.
 // Uses masked patchDoc so the existing employee fields (externalIds, fullName,
 // status, etc.) are preserved exactly.
 
@@ -118,12 +118,6 @@ export default async (req) => {
 
   try {
     const url = new URL(req.url);
-    const secret = url.searchParams.get('secret');
-    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-    if (secret !== expected) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-    }
-
     let body;
     try {
       const text = await req.text();

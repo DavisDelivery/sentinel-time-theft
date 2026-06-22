@@ -6,13 +6,13 @@
 // nightly-scan background workers.
 //
 // API:
-//   GET /api/sentinel-day-scan?secret=<S>&driverSlug=<slug>&date=<YYYY-MM-DD>
+//   GET /api/sentinel-day-scan?driverSlug=<slug>&date=<YYYY-MM-DD>
 //     → scores one driver-day, writes /sentinelDriverDays/{slug}_{date}, returns the scored doc
 //
-//   GET /api/sentinel-day-scan?secret=<S>&test=true
+//   GET /api/sentinel-day-scan?test=true
 //     → runs _sentinel-engine self-test (no I/O), returns pass/fail
 //
-//   GET /api/sentinel-day-scan?secret=<S>&listDrivers=true
+//   GET /api/sentinel-day-scan?listDrivers=true
 //     → returns first 100 active driver slugs (for finding test targets)
 
 import { getDb } from './_firebase-admin.js';
@@ -45,12 +45,6 @@ export default async (req) => {
 
   try {
     const url = new URL(req.url);
-    const secret = url.searchParams.get('secret');
-    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-    if (secret !== expected) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-    }
-
     // Self-test mode
     if (url.searchParams.get('test') === 'true') {
       const r = runSelfTest();
