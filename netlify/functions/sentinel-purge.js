@@ -9,9 +9,9 @@
 // NOT purged: driverPerformanceDaily is an upstream v3 bootstrap input (the
 // data source for sentinel-performance.js), so it is deliberately excluded.
 //
-// Auth: same model as sentinel-scan-run — no secret required from the user.
-// The endpoint is only callable from the deployed Netlify domain. Heavy
-// artifacts (Firebase service account, Motive API key) stay server-side.
+// Auth: requires ?secret=<SCAN_SECRET>. This endpoint deletes data, so it must
+// not be anonymously callable — the old "only callable from the deployed domain"
+// assumption is false for public Netlify functions.
 //
 // Safety:
 //   - Dry-run by default. Pass &confirm=YES to actually delete.
@@ -32,6 +32,17 @@ const CORS = {
   'Content-Type': 'application/json'
 };
 
+function readEnv(key) {
+  try {
+    if (typeof Netlify !== 'undefined' && Netlify?.env?.get) {
+      const v = Netlify.env.get(key);
+      if (v) return v;
+    }
+  } catch (_) {}
+  if (typeof process !== 'undefined' && process?.env?.[key]) return process.env[key];
+  return null;
+}
+
 // NOTE: driverPerformanceDaily is intentionally NOT here. It is an upstream
 // v3 bootstrap input (not SENTINEL-owned) and the sole data source for
 // sentinel-performance.js — a default purge must never be able to wipe it.
@@ -43,6 +54,12 @@ const PURGEABLE = [
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
+
+  // Auth gate — this endpoint deletes Firestore data; require the shared secret.
+  const secret = new URL(req.url).searchParams.get('secret');
+  if (secret !== (readEnv('SCAN_SECRET') || 'davis2026sentinel')) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
+  }
 
   try {
     let confirm, collection;

@@ -14,6 +14,17 @@ const CORS = {
   'Content-Type': 'application/json'
 };
 
+function readEnv(key) {
+  try {
+    if (typeof Netlify !== 'undefined' && Netlify?.env?.get) {
+      const v = Netlify.env.get(key);
+      if (v) return v;
+    }
+  } catch (_) {}
+  if (typeof process !== 'undefined' && process?.env?.[key]) return process.env[key];
+  return null;
+}
+
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
 
@@ -30,9 +41,14 @@ export default async (req) => {
       : 50;
     const db = getDb();
 
-    // DELETE — remove a scan + its subcollection (no secret required, same as
-    // sentinel-scan-run / sentinel-purge — only callable from the deployed domain)
+    // DELETE — remove a scan + its subcollection. Destructive, so require the
+    // shared secret (the old "only callable from the deployed domain" claim is
+    // false for public Netlify functions).
     if (req.method === 'DELETE') {
+      const secret = url.searchParams.get('secret');
+      if (secret !== (readEnv('SCAN_SECRET') || 'davis2026sentinel')) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
+      }
       if (!scanId) return new Response(JSON.stringify({ error: 'scanId required' }), { status: 400, headers: CORS });
       const existing = await db.getDoc('sentinelScans', scanId);
       if (!existing) return new Response(JSON.stringify({ error: 'Scan not found' }), { status: 404, headers: CORS });
