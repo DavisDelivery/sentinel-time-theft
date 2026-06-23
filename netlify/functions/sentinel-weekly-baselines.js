@@ -36,8 +36,7 @@ function siteOrigin(req) {
 
 export default async (req) => {
   const startedAt = new Date().toISOString();
-  const secret = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-  const targetUrl = `${siteOrigin(req)}/api/sentinel-compute-baselines?secret=${encodeURIComponent(secret)}`;
+  const targetUrl = `${siteOrigin(req)}/api/sentinel-compute-baselines`;
 
   console.log(`[weekly-baselines] firing ${targetUrl}`);
 

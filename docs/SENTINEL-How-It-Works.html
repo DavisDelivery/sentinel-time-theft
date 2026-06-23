@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SENTINEL — How It Works</title>
+<style>
+  body { font-family: 'Liberation Sans', Arial, sans-serif; color: #1f2937; font-size: 10.5pt; line-height: 1.45; }
+  h1 { color: #1e5b92; font-size: 26pt; margin: 0 0 4pt 0; }
+  h2 { color: #1e5b92; font-size: 16pt; border-bottom: 2px solid #1e5b92; padding-bottom: 3pt; margin-top: 22pt; }
+  h3 { color: #163a5f; font-size: 12.5pt; margin-top: 16pt; margin-bottom: 4pt; }
+  h4 { color: #163a5f; font-size: 11pt; margin-top: 12pt; margin-bottom: 3pt; }
+  p { margin: 6pt 0; }
+  .subtitle { color: #475569; font-size: 12pt; margin: 0 0 2pt 0; }
+  .meta { color: #64748b; font-size: 9pt; margin-top: 2pt; }
+  code { font-family: 'Liberation Mono', 'Courier New', monospace; font-size: 9pt; background: #eef2f7; padding: 1px 3px; border-radius: 2px; color: #0f3a5f; }
+  pre { font-family: 'Liberation Mono', 'Courier New', monospace; font-size: 8.5pt; background: #f6f8fb; border: 1px solid #d8e0ea; padding: 8pt; line-height: 1.3; color: #1f2937; }
+  table { border-collapse: collapse; width: 100%; margin: 8pt 0; font-size: 9pt; }
+  th { background: #1e5b92; color: #ffffff; text-align: left; padding: 5pt 7pt; font-size: 9pt; }
+  td { border: 1px solid #cbd5e1; padding: 5pt 7pt; vertical-align: top; }
+  tr:nth-child(even) td { background: #f4f7fb; }
+  .box { background: #f6f8fb; border: 1px solid #d8e0ea; border-left: 4px solid #1e5b92; padding: 8pt 10pt; margin: 8pt 0; }
+  .warn { background: #fef3c7; border: 1px solid #e6c878; border-left: 4px solid #b45309; padding: 8pt 10pt; margin: 8pt 0; color: #6b4304; }
+  .crit { background: #fee2e2; border: 1px solid #f0a8a8; border-left: 4px solid #b91c1c; padding: 8pt 10pt; margin: 8pt 0; color: #7f1d1d; }
+  .page-break { page-break-before: always; }
+  ul, ol { margin: 6pt 0 6pt 0; padding-left: 18pt; }
+  li { margin: 3pt 0; }
+  .small { font-size: 8.5pt; color: #64748b; }
+  .tag { font-family: 'Liberation Mono', monospace; font-size: 8pt; background: #e5e7eb; color: #374151; padding: 1px 4px; border-radius: 2px; }
+  .ext { color: #b45309; font-weight: bold; }
+  .own { color: #15803d; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>SENTINEL</h1>
+<p class="subtitle">Driver time-theft detection — how it works, how the data is mapped, and what the fallbacks are</p>
+<p class="meta">Davis Delivery · operator &amp; engineering reference · generated 2026-06-22 · reflects engine <code>v4.5–4.6</code></p>
+
+<div class="box">
+<b>One-paragraph summary.</b> SENTINEL takes three independent records of a driver's day — when they
+<i>clocked in/out</i> (B600 time clock), when they <i>made deliveries</i> (NuVizz), and where the
+<i>truck physically went</i> (Motive GPS) — and looks for time that the driver was on the clock but
+not accounted for by driving or delivering. It compares the <b>real</b> gaps (clock-in → first
+delivery, last delivery → clock-out, and off-route stops mid-day) against an <b>expected</b> gap
+(map travel time + a loading/wrap-up allowance). Anything beyond a tolerance is flagged as
+"unexplained time" and priced in dollars. Everything else on screen is built on top of that one idea.
+</div>
+
+<h2>1. The big picture (data flow)</h2>
+
+<p>SENTINEL does not collect raw data itself. Three upstream systems feed a shared Firestore
+database; SENTINEL reads from it, scores each driver-day, writes one result document per
+driver per day, and the dashboard reads those results back.</p>
+
+<pre>
+  EXTERNAL SYSTEMS              FIRESTORE (shared "hub" DB)         SENTINEL
+
+  B600 / TotalPass   --ingest-->  timeclock_daily ----+
+  NuVizz (weekly)    --ingest-->  nuvizz_rows_raw ----+
+                                                      +--->  SCAN ENGINE
+  Motive GPS         --live API at scan time ---------+      (_sentinel-scan.js +
+  Google Distance    --live API--> distanceMatrixCache+       _sentinel-engine.js)
+  MarginIQ roster    --owns------> employees ---------+              |
+                                                                    v
+                                                          sentinelDriverDays
+                                                          (one doc per driver/day)
+                                                                    |
+                                                                    v
+                                          DASHBOARD  (sentinel-read.js -> index.html)
+                                          Overview . Daily Audit . Investigate . Profiles
+</pre>
+
+<div class="warn">
+<b>Critical mental model:</b> the raw collections <code>timeclock_daily</code> and
+<code>nuvizz_rows_raw</code> are <span class="ext">owned and populated by external ingestion</span>
+(the B600 scraper / the NuVizz weekly import that live in MarginIQ, not in this app). SENTINEL only
+<b>reads</b> them. If a feed stops landing, SENTINEL has nothing to match — and the day will score as
+"clean / $0" because there is nothing to compute, not because the driver was clean. This is the
+single most important thing to understand when a dashboard looks empty.
+</div>
+
+<h2>2. The data sources and who owns what</h2>
+
+<table>
+<tr><th>Source</th><th>Firestore collection</th><th>Owner</th><th>What SENTINEL uses it for</th></tr>
+<tr><td>B600 / TotalPass time clock</td><td><code>timeclock_daily</code></td><td class="ext">External ingest</td><td>Clock-in / clock-out per driver per day. The "on the clock" boundary.</td></tr>
+<tr><td>NuVizz delivery system</td><td><code>nuvizz_rows_raw</code></td><td class="ext">External ingest</td><td>Completed stops with timestamps + addresses. The delivery anchors (first / last).</td></tr>
+<tr><td>Motive (GPS / ELD)</td><td>(fetched live at scan)</td><td class="ext">Motive API</td><td>Driving periods &amp; destinations to detect off-route / mid-day detours (Flag Class 3).</td></tr>
+<tr><td>Google Distance Matrix</td><td><code>distanceMatrixCache</code></td><td class="own">SENTINEL-owned cache</td><td>Expected travel time yard&nbsp;↔&nbsp;first/last stop. Cached forever per address pair.</td></tr>
+<tr><td>Driver roster</td><td><code>employees</code></td><td class="ext">MarginIQ</td><td>Identity, status, role, truck #, and the cross-system match keys (see §3).</td></tr>
+<tr><td>Scoring config</td><td><code>sentinelConfig/*</code></td><td class="own">SENTINEL-owned</td><td>Defaults (wages, thresholds, load prep), truck-type map, job status docs.</td></tr>
+<tr><td>Results</td><td><code>sentinelDriverDays</code></td><td class="own">SENTINEL-owned</td><td>The scored output — one doc per driver per day. Powers the whole UI.</td></tr>
+<tr><td>Baselines</td><td><code>sentinelBaselines</code></td><td class="own">SENTINEL-owned</td><td>Per-driver "your typical day" coaching context (not used for flag severity).</td></tr>
+</table>
+
+<div class="page-break"></div>
+<h2>3. How a driver is mapped across systems (identity)</h2>
+
+<p>This is the heart of "how everything is mapped." Each system names the same human differently.
+The <code>employees</code> record is the Rosetta Stone: it carries an <code>externalIds</code> object
+plus a truck number, and SENTINEL uses those to join the three feeds together.</p>
+
+<table>
+<tr><th>To match…</th><th>Match key on the employee</th><th>Matched against</th><th>Notes</th></tr>
+<tr><td>Time clock punch</td><td><code>externalIds.b600</code></td><td><code>timeclock_daily</code> row's <code>display_id</code> / <code>display_name</code> / <code>payroll_id</code></td><td>Case-insensitive equality; first match wins.</td></tr>
+<tr><td>NuVizz deliveries</td><td><code>externalIds.nuvizz</code></td><td><code>nuvizz_rows_raw</code> row's <code>raw["driver name"]</code></td><td>Whitespace-normalized, lower-cased equality.</td></tr>
+<tr><td>Motive GPS</td><td><code>externalIds.motive</code></td><td>Motive driver ID (numeric)</td><td>Direct ID; no name matching.</td></tr>
+<tr><td>Truck type (tractor/straight)</td><td><code>defaultTruck</code> (truck #)</td><td><code>sentinelConfig/truckTypeMap.trucks[truck#]</code></td><td>Plus an optional per-driver <code>truckType</code> override.</td></tr>
+</table>
+
+<div class="warn">
+<b>The #1 real-world failure here:</b> the B600 name and the NuVizz name for the same driver are
+often <i>different</i> (the schema itself cites "Brent Boyd" vs "Brenton Byrd"). If
+<code>externalIds.nuvizz</code> doesn't exactly equal the name NuVizz prints, that driver's
+deliveries never match — you get clock punches with <b>0 stops</b>, and every day scores
+"clean / $0." Fixing the driver's <code>externalIds.nuvizz</code> and re-scanning resolves it.
+</div>
+
+<h3>The match-key chain (with fallbacks)</h3>
+<pre>
+  B600 punch:    externalIds.b600  ->  fullName  ->  "firstName lastName"   (first hit wins)
+  NuVizz stops:  externalIds.nuvizz  ->  fullName
+  Motive:        externalIds.motive  (no fallback; skipped if absent)
+  Truck type:    employees.truckType override  ->  truckTypeMap[defaultTruck]  ->  "unknown"
+</pre>
+
+<h2>4. The scan pipeline (per driver, per day)</h2>
+
+<p>For each active driver and a given date, the engine runs these steps
+(<code>_sentinel-scan.js</code> → <code>_sentinel-engine.js</code>):</p>
+
+<ol>
+<li><b>Resolve identity &amp; truck type</b> from the <code>employees</code> record (§3).</li>
+<li><b>Get the clock punch</b> from <code>timeclock_daily</code> for that date (multi-punch days use the first IN and last OUT).</li>
+<li><b>Get the deliveries</b> from <code>nuvizz_rows_raw</code> for that date, keep only <i>Completed</i> stops that have a parseable "delivery end" time, sort by time.</li>
+<li><b>Window to the shift:</b> drop deliveries before clock-in or after clock-out (those are recorded separately as data-health notes, not scored).</li>
+<li><b>Pick anchors:</b> first on-shift stop = morning anchor, last on-shift stop = afternoon anchor. A single-stop day still anchors both windows (the windows don't overlap, so it isn't double-counted).</li>
+<li><b>Look up travel times</b> yard → first stop and last stop → yard (Distance Matrix, cache first).</li>
+<li><b>Score</b> the morning gap, afternoon gap, and (if Motive ran) the in-route gap; compute risk score, stolen minutes and dollars (§5).</li>
+<li><b>Write</b> one document to <code>sentinelDriverDays/{slug}_{date}</code>.</li>
+</ol>
+
+<div class="page-break"></div>
+<h2>5. The scoring model</h2>
+
+<p>Each scored "gap" is: <b>actual minutes − expected minutes</b>. Expected = map travel time + a
+human allowance. Whatever exceeds the "ok" tolerance is unexplained.</p>
+
+<table>
+<tr><th>Gap (flag class)</th><th>Actual</th><th>Expected</th><th>Unexplained =</th></tr>
+<tr><td>Morning (Class 1)</td><td>clock-in → first delivery</td><td>travel(yard→first) + <b>load prep</b></td><td>actual − expected, charged above "ok"</td></tr>
+<tr><td>Afternoon (Class 2)</td><td>last delivery → clock-out</td><td>travel(last→yard) + <b>wrap up</b></td><td>actual − expected, charged above "ok"</td></tr>
+<tr><td>In-route (Class 3)</td><td>off-route minutes between first &amp; last stop (Motive)</td><td>0 (any off-route is suspect)</td><td>off-route minutes above "ok"</td></tr>
+<tr><td>Data integrity (Class 4)</td><td colspan="3">Not a dollar figure — notes like <code>b600_no_punch</code>, <code>nuvizz_no_stops</code>, <code>no_travel_time_to_first</code>.</td></tr>
+</table>
+
+<h3>Thresholds &amp; score weights (defaults)</h3>
+<table>
+<tr><th>Severity</th><th>Morning / Afternoon gap</th><th>In-route gap</th><th>Risk-score points</th></tr>
+<tr><td>ok</td><td>&le; 30 min</td><td>&le; 15 min</td><td>0</td></tr>
+<tr><td>warn</td><td>&le; 60 min</td><td>&le; 30 min</td><td>10</td></tr>
+<tr><td>flag</td><td>&le; 90 min</td><td>&le; 60 min</td><td>25</td></tr>
+<tr><td>critical</td><td>&gt; 90 min</td><td>&gt; 60 min</td><td>40</td></tr>
+</table>
+
+<p>The three class scores are summed and capped at 100, then bucketed into a risk level:</p>
+<table>
+<tr><th>Risk score</th><th>0–9</th><th>10–24</th><th>25–44</th><th>45–69</th><th>70–100</th></tr>
+<tr><td>Risk level</td><td>clean</td><td>low</td><td>medium</td><td>high</td><td>critical</td></tr>
+</table>
+
+<h3>Pricing the time</h3>
+<p>Stolen minutes (only the portion above the "ok" floor of each gap) are converted to dollars at an
+hourly rate that depends on truck type:</p>
+<table>
+<tr><th>Truck type</th><th>tractor</th><th>straight</th><th>unknown</th></tr>
+<tr><td>Default wage ($/hr)</td><td>27.50</td><td>23.00</td><td>25.00</td></tr>
+</table>
+<p class="small">stolenDollars = (stolenMinutes ÷ 60) × wageRate[truckType]. A "self-loader" (load prep
+≥ 60 min) is bucketed separately in the reference metrics, since their expected morning gap is much larger.</p>
+
+<h2>6. Fallbacks &amp; defaults — the full list</h2>
+
+<p>SENTINEL is built to <b>degrade gracefully</b>: a missing input narrows what can be computed rather
+than crashing. Here is every fallback in the pipeline.</p>
+
+<table>
+<tr><th>Decision</th><th>Preferred</th><th>Falls back to</th><th>Final fallback</th></tr>
+<tr><td>Truck type</td><td>per-driver <code>truckType</code> override</td><td><code>truckTypeMap[defaultTruck]</code></td><td><code>"unknown"</code> (wage 25)</td></tr>
+<tr><td>Load prep minutes</td><td>employee <code>loadPrepMin</code></td><td><code>sentinelConfig/defaults</code></td><td><b>15 min</b></td></tr>
+<tr><td>Wrap-up minutes</td><td>employee <code>wrapUpMin</code></td><td><code>sentinelConfig/defaults</code></td><td><b>15 min</b></td></tr>
+<tr><td>Wage rate</td><td><code>wageRates[truckType]</code></td><td><code>wageRates.unknown</code></td><td>25.00 $/hr</td></tr>
+<tr><td>Clock times</td><td><code>punches[]</code> first-IN / last-OUT</td><td>top-level <code>clock_in</code>/<code>clock_out</code></td><td>none → <code>b600_no_punch</code>, no morning/afternoon gap</td></tr>
+<tr><td>B600 name match</td><td><code>externalIds.b600</code></td><td><code>fullName</code></td><td><code>firstName + lastName</code></td></tr>
+<tr><td>NuVizz name match</td><td><code>externalIds.nuvizz</code></td><td><code>fullName</code></td><td>none → no stops matched</td></tr>
+<tr><td>Travel time</td><td><code>distanceMatrixCache</code> hit</td><td>Google Distance Matrix API</td><td><code>null</code> → gap not computed (<code>no_travel_time_*</code>)</td></tr>
+<tr><td>Config doc</td><td>stored <code>sentinelConfig/defaults</code></td><td>deep-merged over built-in <code>DEFAULT_DEFAULTS</code></td><td>built-in defaults (prevents NaN dollars)</td></tr>
+<tr><td>Yard ZIP set (off-route)</td><td><code>defaults.yardZips</code></td><td>—</td><td><code>["30518","30542"]</code></td></tr>
+<tr><td>Motive in-route</td><td>Motive driving periods</td><td>skipped on backfill / if no <code>externalIds.motive</code></td><td><code>inRouteFlag: "deferred"</code> (scores 0)</td></tr>
+<tr><td>Empty day (nightly)</td><td>write only if a punch OR stops exist</td><td>—</td><td>skip write entirely (counted "empty")</td></tr>
+<tr><td>Avg clock-in time (UI)</td><td>circular mean (handles around-midnight)</td><td>—</td><td>null if no punches</td></tr>
+<tr><td>Unknown risk / confidence value</td><td>stored value</td><td>coalesced to a known bucket</td><td><code>clean</code> / <code>insufficient</code></td></tr>
+<tr><td>Access secret</td><td>env <code>SCAN_SECRET</code></td><td>hardcoded literal</td><td>(see security note §11 — should be removed)</td></tr>
+</table>
+
+<div class="box">
+<b>Why a day can read "clean / $0" without anyone being clean.</b> A morning or afternoon gap is only
+computed when <u>all three</u> of these exist: a clock punch, a matched delivery anchor, <i>and</i> a
+travel-time estimate. Miss any one and that gap stays <code>null</code> → contributes 0 → the day
+falls through to <code>clean</code>. That is correct behavior (don't accuse on no evidence) but it
+means <b>$0 can mean "no evidence," not "no theft."</b> The dashboard now surfaces this difference
+explicitly (§9, §10).
+</div>
+
+<div class="page-break"></div>
+<h2>7. What gets stored — <code>sentinelDriverDays</code></h2>
+
+<p>One document per driver per day, ID <code>{driverSlug}_{YYYY-MM-DD}</code>. The fields the
+dashboard relies on:</p>
+
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>b600Matched</code> / <code>nuvizzMatched</code></td><td>Did the punch / delivery feed match this driver-day? (The feed-health signal.)</td></tr>
+<tr><td><code>clockIn</code> / <code>clockOut</code> / <code>totalShiftMin</code></td><td>Shift boundaries and length.</td></tr>
+<tr><td><code>firstDeliveryTime</code> / <code>lastDeliveryTime</code> (+ addr / customer)</td><td>The morning &amp; afternoon delivery anchors.</td></tr>
+<tr><td><code>completedStops</code></td><td>Count of completed deliveries.</td></tr>
+<tr><td><code>clockInToFirstMin</code> / <code>morningGapMin</code></td><td>Actual morning span / the unexplained portion.</td></tr>
+<tr><td><code>lastToClockOutMin</code> / <code>afternoonGapMin</code></td><td>Actual afternoon span / the unexplained portion.</td></tr>
+<tr><td><code>inRouteOffRouteMin</code> / <code>inRouteFlag</code></td><td>Mid-day off-route minutes (Motive) / its severity.</td></tr>
+<tr><td><code>riskScore</code> / <code>riskLevel</code></td><td>Composite 0–100 / its bucket.</td></tr>
+<tr><td><code>stolenMinutes</code> / <code>stolenDollars</code></td><td>The headline unexplained time, priced.</td></tr>
+<tr><td><code>flags[]</code></td><td>Human-readable evidence per flag (the "why this flagged" text).</td></tr>
+<tr><td><code>dataHealth[]</code></td><td>Integrity notes: <code>b600_no_punch</code>, <code>nuvizz_no_stops</code>, <code>no_travel_time_to_first</code>, …</td></tr>
+</table>
+
+<h2>8. How the KPIs are computed (Overview)</h2>
+
+<table>
+<tr><th>KPI</th><th>How it's derived</th></tr>
+<tr><td>Unexplained Time ($ &amp; minutes)</td><td>Sum of <code>stolenDollars</code> / <code>stolenMinutes</code> over every record in the window.</td></tr>
+<tr><td>Annualized</td><td>Window total × 365 ÷ days in the selected window.</td></tr>
+<tr><td>High-risk days / % of fleet-days</td><td>Count of <code>critical</code>+<code>high</code> records ÷ total driver-days.</td></tr>
+<tr><td>Risk Distribution</td><td>Tally of records by <code>riskLevel</code>.</td></tr>
+<tr><td>Top Offenders</td><td>Drivers ranked by summed <code>stolenDollars</code> (zero-dollar drivers hidden here, shown in "view all").</td></tr>
+<tr><td>Reference Metrics</td><td>Median morning gap / on-route / etc. per truck-type × pre-load/self-load bucket. <b>Medians only fill from numeric records</b> — blank medians = no computable gaps.</td></tr>
+<tr><td>Baselines</td><td>Count of per-driver baseline docs by confidence. Coaching context only.</td></tr>
+<tr><td>Feed-health banner <span class="tag">new</span></td><td>Shows when days were scored but none had a computable gap — names which feed (B600 / NuVizz / travel) is missing. Turns a silent "$0" into a diagnosis.</td></tr>
+</table>
+
+<h2>9. Baselines (coaching context, not enforcement)</h2>
+<p>Separately from scoring, SENTINEL computes a per-driver "typical day" (median / P75 / P90 of their
+own history) and a confidence band based on how many days of data exist. <b>Baselines are display-only
+context</b> ("worse day than usual") — since v4.5 the fraud judgment is a fixed static threshold the
+same for every driver, so a driver can't normalize their own theft into an acceptable baseline.</p>
+
+<div class="page-break"></div>
+<h2>10. Failure modes &amp; how to read them</h2>
+
+<p>Because SENTINEL depends on three external feeds, an empty or all-clean dashboard is usually a
+<b>data problem, not a scoring bug</b>. Use this table to triage.</p>
+
+<table>
+<tr><th>What you see</th><th>What it means</th><th>What to check</th></tr>
+<tr><td>Clock times present, <b>0 stops</b>, $0, "no delivery data"</td><td>NuVizz feed not matching for that driver/date.</td><td>Expand the day → "Show all deliveries" → read the diagnostic line (see below).</td></tr>
+<tr><td>0 stops <b>and</b> "no clock punch"</td><td>Neither feed landed — total gap for that day.</td><td>Coverage probe; nightly scan status.</td></tr>
+<tr><td>Whole fleet $0, every median blank, Baselines still populated</td><td>Recent raw feed stale (history exists, recent dates don't).</td><td>Coverage probe — compare newest NuVizz vs timeclock date.</td></tr>
+<tr><td>Punch + stops present but still $0</td><td>Travel-time lookups failing (Distance Matrix / yard address).</td><td>Confirm <code>SENTINEL_YARD_ADDRESS</code> &amp; <code>GOOGLE_MAPS_API_KEY</code>.</td></tr>
+</table>
+
+<h3>The three diagnostic tools</h3>
+<ol>
+<li><b>Coverage probe (fleet-wide):</b> <code>GET /api/sentinel-day-scan?secret=…&amp;coverage=true</code> →
+returns the newest ingested <code>delivery_date</code> (NuVizz) and <code>date</code> (timeclock). If
+NuVizz's newest is older than the window you're viewing, the weekly import is the problem.</li>
+<li><b>Nightly job status:</b> the <code>sentinelConfig/nightlyScanStatus</code> doc shows
+<code>written</code> vs <code>empty</code> vs <code>errors</code> for the last run.</li>
+<li><b>Per-day deliveries diagnostic (per driver):</b> on any day in Investigate, expand it and click
+<i>"Show all deliveries for this day →"</i>. The line at the bottom reports
+<code>rowsScannedForDate</code> and <code>driverNameMatches</code>:
+<ul>
+<li><code>rowsScannedForDate = 0</code> → no NuVizz rows ingested for that date at all (whole-feed gap → ops/ingestion fix).</li>
+<li>rows &gt; 0 but <code>driverNameMatches = 0</code> → the driver's <code>externalIds.nuvizz</code> doesn't match the name NuVizz prints (identity fix → set the correct name, re-scan).</li>
+</ul></li>
+</ol>
+
+<h2>11. Scheduling, endpoints &amp; maintenance</h2>
+
+<h4>Scheduled jobs</h4>
+<ul>
+<li><b>Nightly scan</b> — runs daily ~09:00 UTC, targets the date <b>7 days ago</b> (cushion so the
+weekly NuVizz email and settled punches have landed). Weekends are skipped explicitly.</li>
+<li><b>Weekly baselines</b> — recomputes each driver's "typical day" context.</li>
+<li><b>Historical backfill</b> — one-time sweep over the full date range (Motive off for speed).</li>
+<li><b>Re-score all</b> — re-applies the current thresholds/config to every stored record without
+re-fetching raw data (used after you change wages, load-prep, or a driver's truck type).</li>
+</ul>
+
+<h4>Key operator endpoints</h4>
+<table>
+<tr><th>Endpoint</th><th>Purpose</th></tr>
+<tr><td><code>/api/sentinel-read?action=dashboard</code></td><td>The whole Overview payload.</td></tr>
+<tr><td><code>/api/sentinel-day-scan?...&amp;coverage=true</code></td><td>Data-freshness probe (newest ingested dates).</td></tr>
+<tr><td><code>/api/sentinel-day-scan?driverSlug=…&amp;date=…</code></td><td>Re-scan a single driver-day (with full debug).</td></tr>
+<tr><td>Settings → Driver Config</td><td>Per-driver truck type / load-prep / wrap-up overrides.</td></tr>
+<tr><td>Settings → Re-score All</td><td>Apply config changes across history.</td></tr>
+</table>
+
+<div class="crit">
+<b>Security follow-ups (see <code>AUDIT.md</code>).</b> A few items need attention before relying on
+this deployment: a Firebase API key is committed in source and must be <b>rotated</b>; several
+endpoints (purge, scan-list delete, introspect) are unauthenticated; and the shared access secret has
+a hardcoded fallback. These don't affect the scoring math but should be closed out by an engineer.
+</div>
+
+<p class="small" style="margin-top:18pt; border-top:1px solid #cbd5e1; padding-top:6pt;">
+SENTINEL · this document is a plain-language companion to <code>DESIGN.md</code> (design),
+<code>SCHEMA.md</code> (field-by-field contract), and <code>AUDIT.md</code> (known issues). Numbers
+shown are the shipped defaults; per-driver and config overrides take precedence as described in §6.
+</p>
+
+</body>
+</html>

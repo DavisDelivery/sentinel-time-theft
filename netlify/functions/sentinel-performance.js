@@ -144,7 +144,10 @@ export default async (req) => {
 
   try {
     const url = new URL(req.url);
-    const days = parseInt(url.searchParams.get('days') || '30');
+    // Guard against ?days=abc → NaN, which later flows into Date.UTC(...) and
+    // makes cutoff.toISOString() throw a RangeError (500). Clamp to a sane range.
+    const daysRaw = parseInt(url.searchParams.get('days') || '30', 10);
+    const days = (Number.isFinite(daysRaw) && daysRaw > 0) ? Math.min(daysRaw, 3650) : 30;
     const driverFilter = url.searchParams.get('driver');
     const classFilter = url.searchParams.get('class'); // 'tractor' | 'straight'
 
@@ -271,9 +274,9 @@ export default async (req) => {
 
     // Apply driver / class filters for response
     let responseDrivers = driverAggs;
-    if (classFilter) responseDrivers = responseDrivers.filter(d =>
-      classFilter === 'tractor' ? d.driverType === 'tractor' : d.driverType === 'straight'
-    );
+    // Exact match — a stray ?class=foo previously fell through to 'straight' and
+    // silently dropped 'unknown'-class drivers without indication.
+    if (classFilter) responseDrivers = responseDrivers.filter(d => d.driverType === classFilter);
     if (driverFilter) {
       const want = driverFilter.toLowerCase();
       responseDrivers = responseDrivers.filter(d =>
@@ -297,7 +300,7 @@ export default async (req) => {
 
   } catch (err) {
     console.error('[sentinel-performance]', err);
-    return new Response(JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 400) }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
   }
 };
 

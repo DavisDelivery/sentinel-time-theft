@@ -12,7 +12,7 @@
 //   ?action=getBaseline&driverSlug=X        → full baseline doc for one driver
 //   ?action=driverConfig                    → active drivers + per-driver loadPrep/wrapUp/truckType overrides
 //
-// Auth: ?secret=<SCAN_SECRET>
+// Auth: none — open internal endpoint.
 // All responses are JSON. CORS open for browser fetch.
 
 import { getDb } from './_firebase-admin.js';
@@ -261,22 +261,30 @@ async function detail(db, driverSlug, date) {
 async function stops(db, driverSlug, date) {
   const emp = await db.getDoc('employees', driverSlug);
   if (!emp) return { stops: [], diag: { reason: 'employee not found', driverSlug } };
-  const nuvizzName = emp?.externalIds?.nuvizz || emp?.fullName;
-  if (!nuvizzName) return { stops: [], diag: { reason: 'no nuvizz external ID on employee', driverSlug } };
+
+  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  // Same broadened name matching the scan uses (externalIds.nuvizz + fullName +
+  // first/last + aliases) so this diagnostic reflects what actually scores.
+  const nameCandidates = [
+    emp?.externalIds?.nuvizz,
+    emp?.fullName,
+    (emp?.firstName && emp?.lastName) ? `${emp.firstName} ${emp.lastName}` : null,
+    ...(Array.isArray(emp?.aliases) ? emp.aliases : [])
+  ].filter(Boolean).map(norm);
+  const targetSet = new Set(nameCandidates);
+  if (targetSet.size === 0) return { stops: [], diag: { reason: 'no nuvizz name/alias on employee', driverSlug } };
 
   const rows = await db.listDocs('nuvizz_rows_raw', {
     where: [{ field: 'delivery_date', op: '==', value: date }],
     limit: 2000
   });
-  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
-  const target = norm(nuvizzName);
 
   const out = [];
   const statusBreakdown = {};
   let matched = 0;
   for (const r of rows) {
     const raw = r.raw || {};
-    if (norm(raw['driver name']) !== target) continue;
+    if (!targetSet.has(norm(raw['driver name']))) continue;
     matched++;
     const status = raw['stop status'] || '(none)';
     statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
@@ -307,7 +315,7 @@ async function stops(db, driverSlug, date) {
   console.log(`[sentinel-read] stops ${driverSlug} ${date} → ${out.length} matched of ${rows.length} scanned`);
   return {
     stops: out,
-    diag: { rowsScannedForDate: rows.length, driverNameMatches: matched, statusBreakdown, nuvizzName }
+    diag: { rowsScannedForDate: rows.length, driverNameMatches: matched, statusBreakdown, nuvizzNameCandidates: [...targetSet] }
   };
 }
 
@@ -461,6 +469,11 @@ async function dashboard(db, days) {
 
   const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
   let totalStolen$ = 0, totalStolenMin = 0;
+  // Feed-health counters — let the UI tell "genuinely clean fleet" apart from
+  // "records were written but the inputs (B600 punch / NuVizz delivery / travel
+  // time) never co-occurred, so nothing was computable and everything reads
+  // clean $0." A silent all-clean dashboard otherwise hides an ingestion gap.
+  let feedWithB600 = 0, feedWithNuvizz = 0, feedWithBoth = 0, feedWithGapData = 0;
   const perDriver = {};
   const datesPresent = new Set();
   const allDatesPresent = new Set();
@@ -503,6 +516,12 @@ async function dashboard(db, days) {
     totalStolen$ += r.stolenDollars || 0;
     totalStolenMin += r.stolenMinutes || 0;
     if (r.date) datesPresent.add(r.date);
+
+    // Feed-health: count which inputs actually landed on this scored day.
+    if (r.b600Matched) feedWithB600++;
+    if (r.nuvizzMatched) feedWithNuvizz++;
+    if (r.b600Matched && r.nuvizzMatched) feedWithBoth++;
+    if (typeof r.morningGapMin === 'number' || typeof r.afternoonGapMin === 'number') feedWithGapData++;
 
     if (!perDriver[slug]) {
       perDriver[slug] = {
@@ -694,6 +713,13 @@ async function dashboard(db, days) {
     allDatesPresent: [...allDatesPresent].sort(),
     dist,
     totalStolen: { dollars: +totalStolen$.toFixed(2), minutes: totalStolenMin },
+    feedHealth: {
+      scoredDays: dist.critical + dist.high + dist.medium + dist.low + dist.clean,
+      withB600: feedWithB600,
+      withNuvizz: feedWithNuvizz,
+      withBoth: feedWithBoth,
+      withGapData: feedWithGapData
+    },
     topOffenders: offendersRanked.slice(0, 15),
     offendersRanked,
     restRoster,
@@ -712,12 +738,6 @@ export default async (req) => {
 
   try {
     const url = new URL(req.url);
-    const secret = url.searchParams.get('secret');
-    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-    if (secret !== expected) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-    }
-
     const action = url.searchParams.get('action') || 'dashboard';
     const db = getDb();
     let body;

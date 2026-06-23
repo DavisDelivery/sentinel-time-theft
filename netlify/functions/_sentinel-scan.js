@@ -156,24 +156,35 @@ async function getNuvizzStops(db, employee, date) {
     where: [{ field: 'delivery_date', op: '==', value: date }],
     limit: 2000
   });
-  const nuvizzName = employee?.externalIds?.nuvizz || employee?.fullName;
+  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  // Match NuVizz's raw["driver name"] against every name we know for this
+  // driver, not just externalIds.nuvizz. SCHEMA documents an `aliases` fallback
+  // for exactly the "NuVizz prints a slightly different name" case (e.g. Brent
+  // Boyd vs Brenton Byrd) that otherwise yields 0 matched stops. All comparisons
+  // are exact after whitespace/case normalization — no fuzzy/substring matching,
+  // so one driver's stops can't bleed onto another.
+  const nameCandidates = [
+    employee?.externalIds?.nuvizz,
+    employee?.fullName,
+    (employee?.firstName && employee?.lastName) ? `${employee.firstName} ${employee.lastName}` : null,
+    ...(Array.isArray(employee?.aliases) ? employee.aliases : [])
+  ].filter(Boolean).map(norm);
+  const targetSet = new Set(nameCandidates);
   const diag = {
     rowsScannedForDate: rows.length,
+    nuvizzNameCandidates: [...targetSet],
     driverNameMatches: 0,
     statusBreakdown: {},
     countedAsComplete: 0,
     skippedNoTime: 0,
     manualCompletions: 0
   };
-  if (!nuvizzName) return { matches: [], diag: { ...diag, reason: 'no nuvizz external ID on employee' } };
-
-  const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
-  const target = norm(nuvizzName);
+  if (targetSet.size === 0) return { matches: [], diag: { ...diag, reason: 'no nuvizz name/alias on employee' } };
 
   const matches = [];
   for (const r of rows) {
     const raw = r.raw || {};
-    if (norm(raw['driver name']) !== target) continue;
+    if (!targetSet.has(norm(raw['driver name']))) continue;
     diag.driverNameMatches++;
 
     const status = raw['stop status'] || '(none)';

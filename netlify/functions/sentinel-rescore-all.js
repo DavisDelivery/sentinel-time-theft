@@ -5,16 +5,14 @@
 // can't fit inside Netlify's 26-second request cap. The actual work moved
 // into sentinel-rescore-all-background.js (15-min budget). This file:
 //
-//   GET  /api/sentinel-rescore-all?secret=<S>
-//     → if a run is currently 'running': return the status doc (no kickoff)
+//   GET  /api/sentinel-rescore-all//     → if a run is currently 'running': return the status doc (no kickoff)
 //     → otherwise: write a 'pending' status with bumped epoch, fire the bg,
 //       return 202 with the pending status doc
 //
-//   GET  /api/sentinel-rescore-all?secret=<S>&status=true
+//   GET  /api/sentinel-rescore-all?status=true
 //     → never kick off, just return the current status doc (poll endpoint)
 //
-//   POST /api/sentinel-rescore-all?secret=<S>
-//        body: { reset?: bool }
+//   POST /api/sentinel-rescore-all//        body: { reset?: bool }
 //     → explicit kickoff. If state==running and !reset → 409. Otherwise bump
 //       epoch (which kills any in-flight chain via the bg's epoch guard),
 //       write pending, fire bg, return 202.
@@ -145,12 +143,6 @@ export default async (req, context) => {
 
   try {
     const url = new URL(req.url);
-    const secret = url.searchParams.get('secret');
-    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-    if (secret !== expected) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-    }
-
     const db = getDb();
     const statusOnly = url.searchParams.get('status') === 'true';
     const existing = await loadStatus(db);
@@ -212,10 +204,7 @@ export default async (req, context) => {
 
   } catch (err) {
     console.error('[sentinel-rescore-all]', err);
-    return new Response(JSON.stringify({
-      error: err.message,
-      stack: err.stack?.slice(0, 800)
-    }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
   }
 };
 

@@ -47,38 +47,8 @@
   status = 200
 
 [[redirects]]
-  from = "/api/firestore-introspect"
-  to = "/.netlify/functions/firestore-introspect"
-  status = 200
-
-[[redirects]]
-  from = "/api/sentinel-scan-run"
-  to = "/.netlify/functions/sentinel-scan-run"
-  status = 200
-
-[[redirects]]
-  from = "/api/sentinel-scan-save"
-  to = "/.netlify/functions/sentinel-scan-save"
-  status = 200
-
-[[redirects]]
-  from = "/api/sentinel-scan-list"
-  to = "/.netlify/functions/sentinel-scan-list"
-  status = 200
-
-[[redirects]]
-  from = "/api/sync-b600-weekly"
-  to = "/.netlify/functions/sync-b600-weekly"
-  status = 200
-
-[[redirects]]
   from = "/api/sentinel-ai"
   to = "/.netlify/functions/sentinel-ai"
-  status = 200
-
-[[redirects]]
-  from = "/api/motive-dashcam"
-  to = "/.netlify/functions/motive-dashcam"
   status = 200
 
 [[headers]]

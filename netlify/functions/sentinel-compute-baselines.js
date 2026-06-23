@@ -1,7 +1,7 @@
 // netlify/functions/sentinel-compute-baselines.js
 // SENTINEL v4 Phase 3 — build per-driver baselines from all sentinelDriverDays.
 //
-// GET /api/sentinel-compute-baselines?secret=davis2026sentinel
+// GET /api/sentinel-compute-baselines
 //   → reads every sentinelDriverDays record, groups by driverSlug, builds a
 //     baseline doc per driver, writes to /sentinelBaselines/{slug}.
 //
@@ -66,12 +66,6 @@ export default async (req) => {
 
   try {
     const url = new URL(req.url);
-    const secret = url.searchParams.get('secret');
-    const expected = readEnv('SCAN_SECRET') || 'davis2026sentinel';
-    if (secret !== expected) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-    }
-
     const t0 = Date.now();
     const db = getDb();
 
@@ -162,10 +156,7 @@ export default async (req) => {
     }, null, 2), { status: 200, headers: CORS });
   } catch (err) {
     console.error('[sentinel-compute-baselines]', err);
-    return new Response(JSON.stringify({
-      error: err.message,
-      stack: err.stack?.slice(0, 800)
-    }), { status: 500, headers: CORS });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: CORS });
   }
 };
 
