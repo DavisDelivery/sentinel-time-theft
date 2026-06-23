@@ -146,8 +146,14 @@ export function scoreDriverDay(input) {
     completedStops = 0, nuvizzMatched,
     expectedTravelMinToFirst, expectedTravelMinToFirstSource = 'skipped',
     expectedTravelMinFromLast, expectedTravelMinFromLastSource = 'skipped',
+    googleTravelMinToFirst = null, motiveDriveMinToFirst = null,
+    googleTravelMinFromLast = null, motiveDriveMinFromLast = null,
     defaults
   } = input;
+
+  // Human label for which source set the expected travel time.
+  const srcLbl = (s) => s === 'motive' ? ' (Motive GPS)'
+    : (s === 'google' || s === 'cache' || s === 'api') ? ' (Google typical)' : '';
 
   const loadPrepMin = resolveOverride(input, defaults, 'loadPrepMin');
   const wrapUpMin = resolveOverride(input, defaults, 'wrapUpMin');
@@ -178,6 +184,9 @@ export function scoreDriverDay(input) {
     clockInToFirstMin: null,
     expectedTravelMinToFirst: expectedTravelMinToFirst ?? null,
     expectedTravelMinToFirstSource,
+    googleTravelMinToFirst: googleTravelMinToFirst ?? null,
+    motiveDriveMinToFirst: motiveDriveMinToFirst ?? null,
+    travelSourceToFirst: expectedTravelMinToFirstSource,
     loadPrepMin,
     morningGapMin: null,
     morningFlag: 'no_data',
@@ -187,6 +196,9 @@ export function scoreDriverDay(input) {
     lastToClockOutMin: null,
     expectedTravelMinFromLast: expectedTravelMinFromLast ?? null,
     expectedTravelMinFromLastSource,
+    googleTravelMinFromLast: googleTravelMinFromLast ?? null,
+    motiveDriveMinFromLast: motiveDriveMinFromLast ?? null,
+    travelSourceFromLast: expectedTravelMinFromLastSource,
     wrapUpMin,
     afternoonGapMin: null,
     afternoonFlag: 'no_data',
@@ -249,7 +261,7 @@ export function scoreDriverDay(input) {
         out.flags.push({
           kind: 'morning_gap',
           severity: out.morningFlag,
-          evidence: `clockIn ${clockIn} → first delivery ${firstDeliveryCustomer || 'unknown'} at ${firstDeliveryTime.toISOString().slice(11, 16)} (${clockInToFirstMin} min). Expected travel ${expectedTravelMinToFirst} min + ${loadPrepMin} min load prep = ${expectedTotal} min. Unexplained: ${gap} min.`,
+          evidence: `clockIn ${clockIn} → first delivery ${firstDeliveryCustomer || 'unknown'} at ${firstDeliveryTime.toISOString().slice(11, 16)} (${clockInToFirstMin} min). Expected travel ${expectedTravelMinToFirst} min${srcLbl(expectedTravelMinToFirstSource)} + ${loadPrepMin} min load prep = ${expectedTotal} min. Unexplained: ${gap} min.`,
           deltaMin: gap
         });
       }
@@ -283,7 +295,7 @@ export function scoreDriverDay(input) {
           out.flags.push({
             kind: 'afternoon_gap',
             severity: out.afternoonFlag,
-            evidence: `last delivery ${lastDeliveryCustomer || 'unknown'} at ${lastDeliveryTime.toISOString().slice(11, 16)} → clockOut ${clockOut} (${lastToClockOutMin} min). Expected return travel ${expectedTravelMinFromLast} min + ${wrapUpMin} min wrap-up = ${expectedTotal} min. Unexplained: ${gap} min.`,
+            evidence: `last delivery ${lastDeliveryCustomer || 'unknown'} at ${lastDeliveryTime.toISOString().slice(11, 16)} → clockOut ${clockOut} (${lastToClockOutMin} min). Expected return travel ${expectedTravelMinFromLast} min${srcLbl(expectedTravelMinFromLastSource)} + ${wrapUpMin} min wrap-up = ${expectedTotal} min. Unexplained: ${gap} min.`,
             deltaMin: gap
           });
         }

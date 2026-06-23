@@ -284,6 +284,7 @@ export default async (req, context) => {
       state: 'running',
       epoch: newEpoch,
       startDate, endDate,
+      withMotive: !!bodyOpts.motive,   // kickoff-immutable: run Motive (GPS) during this sweep
       dates, driverSlugs,
       cursorDate: 0, cursorDriver: 0,
       scanned: 0, written: 0, empty: 0, errors: 0,
@@ -335,7 +336,7 @@ export default async (req, context) => {
           driverSlug,
           date,
           scanId: status.scanId,
-          skipMotive: true,
+          skipMotive: !status.withMotive,
           skipWriteIfNoData: true,
           config
         });

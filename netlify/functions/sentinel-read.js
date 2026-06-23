@@ -733,6 +733,101 @@ async function dashboard(db, days) {
   };
 }
 
+// ---------- Anomalies (Motive GPS) ----------
+// Fleet-wide feed of GPS anomalies over the last N days, read from the stored
+// motive blocks on sentinelDriverDays (populated by a Motive-on scan). Pure
+// observation — not tied to the theft score or per-driver config.
+//   - flaggedPauses: stationary stretches >= 30m away from customer/yard
+//   - deviations:   off-route visits between first and last delivery
+//   - placePatterns: repeated (driver, ZIP) pause locations
+async function anomalies(db, days) {
+  const today = new Date();
+  let startDate = null;
+  if (typeof days === 'number' && days > 0) {
+    const start = new Date(today.getTime() - (days - 1) * 86400000);
+    startDate = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, '0')}-${String(start.getUTCDate()).padStart(2, '0')}`;
+  }
+  const rows = await db.listAllDocs('sentinelDriverDays', {
+    fields: ['date', 'driverSlug', 'displayName', 'truckType', 'clockIn', 'clockOut',
+             'firstDeliveryTime', 'lastDeliveryTime', 'motive']
+  });
+  const inRange = r => !startDate || (r.date && r.date >= startDate);
+  const hhmm = (iso) => (typeof iso === 'string' && iso.length >= 16) ? iso.slice(11, 16) : null;
+  // Keep only pauses within the working window — a pause starting after the
+  // shift end (or ending before the start) is an overnight/parked truck, not
+  // sitting on the clock. Use the B600 punch when present, else fall back to
+  // the first/last delivery times (handles drivers with no punch). HH:MM string
+  // compare is valid within a single day.
+  const onShift = (startET, endET, sStart, sEnd) => {
+    if (sEnd && startET && startET > sEnd) return false;
+    if (sStart && endET && endET < sStart) return false;
+    return true;
+  };
+
+  const pauses = [];
+  const deviations = [];
+  const placeMap = {};           // `${slug}|${zip}` → pattern accumulator
+  let daysWithMotive = 0;
+  const driversWithMotive = new Set();
+  let scannedInRange = 0;
+
+  for (const r of rows) {
+    if (!inRange(r)) continue;
+    scannedInRange++;
+    const m = r.motive;
+    if (!m || typeof m !== 'object') continue;
+    daysWithMotive++;
+    if (r.driverSlug) driversWithMotive.add(r.driverSlug);
+
+    const shiftStart = r.clockIn || hhmm(r.firstDeliveryTime);
+    const shiftEnd = r.clockOut || hhmm(r.lastDeliveryTime);
+    for (const p of (m.pauses || [])) {
+      if (!p || !p.flagged) continue;
+      if (!onShift(p.startET, p.endET, shiftStart, shiftEnd)) continue;
+      const entry = {
+        slug: r.driverSlug, displayName: r.displayName || r.driverSlug, date: r.date,
+        durationMin: p.durationMin, atZip: p.atZip || null, atAddr: p.atAddr || null,
+        class: p.class || 'unknown', startET: p.startET || null, endET: p.endET || null
+      };
+      pauses.push(entry);
+      const key = `${r.driverSlug}|${p.atZip || 'noZip'}`;
+      const pm = placeMap[key] || (placeMap[key] = {
+        slug: r.driverSlug, displayName: entry.displayName, atZip: p.atZip || null,
+        sampleAddr: p.atAddr || null, count: 0, totalMin: 0, dates: []
+      });
+      pm.count++; pm.totalMin += p.durationMin;
+      if (pm.dates.length < 30) pm.dates.push(r.date);
+      if (!pm.sampleAddr && p.atAddr) pm.sampleAddr = p.atAddr;
+    }
+
+    for (const v of (m.offRouteVisits || [])) {
+      if (!v || v.window !== 'in_route') continue;
+      deviations.push({
+        slug: r.driverSlug, displayName: r.displayName || r.driverSlug, date: r.date,
+        destZip: v.destZip || null, destAddr: v.destAddr || null,
+        stationaryMin: v.stationaryMin || 0, driveMinToReach: v.driveMinToReach || 0
+      });
+    }
+  }
+
+  pauses.sort((a, b) => b.durationMin - a.durationMin);
+  deviations.sort((a, b) => (b.stationaryMin + b.driveMinToReach) - (a.stationaryMin + a.driveMinToReach));
+  const placePatterns = Object.values(placeMap)
+    .map(p => ({ ...p, avgMin: Math.round(p.totalMin / p.count) }))
+    .filter(p => p.count >= 2)            // "repeated" = 2+ days at the same place
+    .sort((a, b) => (b.count - a.count) || (b.avgMin - a.avgMin));
+
+  return {
+    rangeDays: typeof days === 'number' ? days : 'all',
+    startDate, endDate: today.toISOString().slice(0, 10),
+    coverage: { scannedInRange, daysWithMotive, driversWithMotive: driversWithMotive.size },
+    counts: { flaggedPauses: pauses.length, deviations: deviations.length, places: placePatterns.length },
+    topPauses: pauses.slice(0, 200),
+    deviations: deviations.slice(0, 200),
+    placePatterns: placePatterns.slice(0, 100)
+  };
+}
+
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
 
@@ -801,6 +896,17 @@ export default async (req) => {
           if (Number.isFinite(n) && n > 0 && n <= 36500) days = n;
         }
         body = { action, ...(await dashboard(db, days)) };
+        break;
+      }
+      case 'anomalies': {
+        const rawDays = url.searchParams.get('days');
+        let days = 30;
+        if (rawDays === 'all') days = 'all';
+        else if (rawDays != null) {
+          const n = parseInt(rawDays, 10);
+          if (Number.isFinite(n) && n > 0 && n <= 36500) days = n;
+        }
+        body = { action, ...(await anomalies(db, days)) };
         break;
       }
       default:

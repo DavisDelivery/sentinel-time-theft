@@ -96,7 +96,8 @@ export default async (req, context) => {
     const bgUrl = bgUrlFromReq(req);
     const bgBody = JSON.stringify({
       startDate: opts.startDate || undefined,
-      endDate: opts.endDate || undefined
+      endDate: opts.endDate || undefined,
+      motive: opts.motive || undefined
     });
 
     const fire = fetch(bgUrl, {
