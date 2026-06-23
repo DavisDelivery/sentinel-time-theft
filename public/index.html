@@ -1863,6 +1863,29 @@ function renderDetail(r) {
     </div>
   `);
 
+  // Travel times — Google typical (time-of-day traffic) vs Motive actual GPS
+  // drive, with the source the engine actually used for the gap. Motive wins
+  // when its GPS matched the route; otherwise Google.
+  const tsrcBadge = (s) => {
+    if (s === 'motive') return '<span style="font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--brand);background:var(--bg-3);padding:1px 5px;border-radius:3px">MOTIVE GPS</span>';
+    if (s === 'google' || s === 'cache' || s === 'api') return '<span style="font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--text-3);background:var(--bg-3);padding:1px 5px;border-radius:3px">GOOGLE</span>';
+    return '';
+  };
+  const legRows = [];
+  const addLeg = (label, used, src, g, m) => {
+    if (used == null && g == null && m == null) return;
+    legRows.push(
+      `<span class="k">${label}</span><span class="v">${fmtDur(used)} ${tsrcBadge(src)}</span>` +
+      `<span class="k">· Google typical</span><span class="v dim">${g != null ? fmtDur(g) : '—'}</span>` +
+      `<span class="k">· Motive actual</span><span class="v dim">${m != null ? fmtDur(m) : '— (no GPS match)'}</span>`
+    );
+  };
+  addLeg('Drive to 1st (used)', r.expectedTravelMinToFirst, r.travelSourceToFirst, r.googleTravelMinToFirst, r.motiveDriveMinToFirst);
+  addLeg('Drive from last (used)', r.expectedTravelMinFromLast, r.travelSourceFromLast, r.googleTravelMinFromLast, r.motiveDriveMinFromLast);
+  if (legRows.length) {
+    parts.push(`<div class="dd-sec"><div class="dh">Travel times</div><div class="kv-grid">${legRows.join('')}</div></div>`);
+  }
+
   // Flags
   if (r.flags && r.flags.length) {
     const flagsHtml = r.flags.map(f => {

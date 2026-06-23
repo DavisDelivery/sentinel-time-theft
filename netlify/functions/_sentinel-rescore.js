@@ -109,13 +109,21 @@ function extractDetourNote(record) {
   return m ? m[0] : null;
 }
 
+// Label for which source set the expected travel time on a stored record.
+function travelSrcLabel(src) {
+  if (src === 'motive') return ' (Motive GPS)';
+  if (src === 'google' || src === 'cache' || src === 'api') return ' (Google typical)';
+  return '';
+}
+
 function buildEvidenceMorning({ record, prep, gap }) {
   const customer = record.firstDeliveryCustomer || 'unknown';
   const timeStr = fmtTime(record.firstDeliveryTime);
   const travel = record.expectedTravelMinToFirst;
+  const src = travelSrcLabel(record.travelSourceToFirst || record.expectedTravelMinToFirstSource);
   const expectedTotal = (travel != null) ? travel + prep : null;
   const prefix = `clockIn ${fmtTime(record.clockIn)} → first delivery ${customer} at ${timeStr} (${fmtDur(record.clockInToFirstMin)}).`;
-  const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)} + ${fmtDur(prep)} load prep = ${fmtDur(expectedTotal)}.` : '';
+  const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)}${src} + ${fmtDur(prep)} load prep = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
@@ -123,9 +131,10 @@ function buildEvidenceAfternoon({ record, wrap, gap }) {
   const customer = record.lastDeliveryCustomer || 'unknown';
   const timeStr = fmtTime(record.lastDeliveryTime);
   const travel = record.expectedTravelMinFromLast;
+  const src = travelSrcLabel(record.travelSourceFromLast || record.expectedTravelMinFromLastSource);
   const expectedTotal = (travel != null) ? travel + wrap : null;
   const prefix = `last delivery ${customer} at ${timeStr} → clockOut ${fmtTime(record.clockOut)} (${fmtDur(record.lastToClockOutMin)}).`;
-  const expectedStr = expectedTotal != null ? `Expected return travel ${fmtDur(travel)} + ${fmtDur(wrap)} wrap-up = ${fmtDur(expectedTotal)}.` : '';
+  const expectedStr = expectedTotal != null ? `Expected return travel ${fmtDur(travel)}${src} + ${fmtDur(wrap)} wrap-up = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
