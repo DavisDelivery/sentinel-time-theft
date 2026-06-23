@@ -748,9 +748,17 @@ async function anomalies(db, days) {
     startDate = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, '0')}-${String(start.getUTCDate()).padStart(2, '0')}`;
   }
   const rows = await db.listAllDocs('sentinelDriverDays', {
-    fields: ['date', 'driverSlug', 'displayName', 'truckType', 'motive']
+    fields: ['date', 'driverSlug', 'displayName', 'truckType', 'clockIn', 'clockOut', 'motive']
   });
   const inRange = r => !startDate || (r.date && r.date >= startDate);
+  // Keep only pauses that fall within the shift — a pause starting after
+  // clock-out (or ending before clock-in) is an overnight/parked truck, not
+  // sitting on the clock. HH:MM string compare is valid within a single day.
+  const onShift = (startET, endET, ci, co) => {
+    if (co && startET && startET > co) return false;
+    if (ci && endET && endET < ci) return false;
+    return true;
+  };
 
   const pauses = [];
   const deviations = [];
@@ -769,6 +777,7 @@ async function anomalies(db, days) {
 
     for (const p of (m.pauses || [])) {
       if (!p || !p.flagged) continue;
+      if (!onShift(p.startET, p.endET, r.clockIn, r.clockOut)) continue;
       const entry = {
         slug: r.driverSlug, displayName: r.displayName || r.driverSlug, date: r.date,
         durationMin: p.durationMin, atZip: p.atZip || null, atAddr: p.atAddr || null,
