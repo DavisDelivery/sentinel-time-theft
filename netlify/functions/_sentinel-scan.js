@@ -368,6 +368,35 @@ export async function scanOneDriverDay({
         .filter(v => v.window === 'in_route')
         .reduce((s, v) => s + v.driveMinToReach + v.stationaryMin, 0);
 
+      // ---------- Stationary pauses (for the Anomalies tab) ----------
+      // A pause is the gap between the end of one drive and the start of the
+      // next — i.e. the truck sat where the prior drive ended. Record pauses
+      // >= 15 min; flag those >= 30 min that are NOT at a customer or the yard
+      // (customer/yard dwell = normal delivering/loading). Pure observation;
+      // not folded into the theft score.
+      const PAUSE_RECORD_MIN = 15;
+      const PAUSE_FLAG_MIN = 30;
+      const pauses = [];
+      for (let i = 0; i < classified.length - 1; i++) {
+        const cur = classified[i], nxt = classified[i + 1];
+        if (!cur.endDt || !nxt.startDt) continue;
+        const durMin = Math.round((nxt.startDt - cur.endDt) / 60000);
+        if (durMin < PAUSE_RECORD_MIN) continue;
+        const cls = cur.destClass;
+        const awayFromStops = cls !== 'customer' && cls !== 'yard';
+        pauses.push({
+          durationMin: durMin,
+          atZip: cur.destZip || null,
+          atAddr: cur.destAddr ? String(cur.destAddr).slice(0, 90) : null,
+          class: cls,
+          startET: cur.endDt.toISOString().slice(11, 16),
+          endET: nxt.startDt.toISOString().slice(11, 16),
+          flagged: durMin >= PAUSE_FLAG_MIN && awayFromStops
+        });
+      }
+      const flaggedPauses = pauses.filter(p => p.flagged);
+      const longestPauseMin = pauses.reduce((m, p) => Math.max(m, p.durationMin), 0);
+
       motiveState = {
         driverId: motiveId,
         periodsCount: classified.length,
@@ -382,10 +411,15 @@ export async function scanOneDriverDay({
         morningDriveMin: morning.min,
         morningPeriods: morning.count,
         afternoonDriveMin: afternoon.min,
-        afternoonPeriods: afternoon.count
+        afternoonPeriods: afternoon.count,
+        pauses,
+        flaggedPauseCount: flaggedPauses.length,
+        flaggedPauseMin: flaggedPauses.reduce((s, p) => s + p.durationMin, 0),
+        longestPauseMin
       };
       if (!routeMatch) motiveHealth.push('motive_route_mismatch');
       if (summary.offRouteCount > 0) motiveHealth.push(`motive_off_route_visits:${summary.offRouteCount}`);
+      if (flaggedPauses.length > 0) motiveHealth.push(`motive_long_pauses:${flaggedPauses.length}`);
 
       motiveDebug = {
         skipped: false,
@@ -488,7 +522,11 @@ export async function scanOneDriverDay({
       inRouteOffRouteMin,
       routeMatch: motiveState.routeMatch,
       morningDriveMin: motiveState.morningDriveMin,
-      afternoonDriveMin: motiveState.afternoonDriveMin
+      afternoonDriveMin: motiveState.afternoonDriveMin,
+      pauses: motiveState.pauses,
+      flaggedPauseCount: motiveState.flaggedPauseCount,
+      flaggedPauseMin: motiveState.flaggedPauseMin,
+      longestPauseMin: motiveState.longestPauseMin
     };
 
     const t = defaults.inRouteStaticThresholds || { ok: 15, warn: 30, flag: 60 };

@@ -212,6 +212,7 @@ body {
 .dd-right { text-align: right; flex-shrink: 0; }
 .dd-amount { font-weight: 700; font-size: var(--fs-base); color: var(--text); }
 .dd-amount.zero { color: var(--text-4); font-weight: 500; }
+.anom-dur { font-weight: 700; font-size: var(--fs-base); color: var(--text); min-width: 64px; text-align: left; }
 .dd-chips { display: flex; gap: 3px; margin-top: 4px; justify-content: flex-end; }
 .chip {
   display: inline-block; padding: 2px 5px; border-radius: 3px;
@@ -837,6 +838,12 @@ body {
   </div>
 </div>
 
+<div class="page" id="page-anomalies">
+  <div id="anomaliesContent">
+    <div class="loading">Loading anomalies</div>
+  </div>
+</div>
+
 <nav class="tabs">
   <button class="tab active" data-page="overview">
     <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
@@ -853,6 +860,10 @@ body {
   <button class="tab" data-page="profile">
     <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
     Profiles
+  </button>
+  <button class="tab" data-page="anomalies">
+    <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+    Anomalies
   </button>
 </nav>
 
@@ -2454,11 +2465,74 @@ function renderProfilesList() {
 // which already surfaces the same data on the driver-day cards.
 
 // ============ Tab navigation ============
+// ============ Anomalies tab (Motive GPS) ============
+const anomalyState = { days: 30, view: 'pauses' };
+async function loadAnomalies() {
+  const c = document.getElementById('anomaliesContent');
+  c.innerHTML = '<div class="loading">Loading anomalies</div>';
+  let d;
+  try { d = await api('anomalies', { days: String(anomalyState.days) }); }
+  catch (e) { c.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`; return; }
+  renderAnomalies(d);
+}
+function renderAnomalies(d) {
+  const c = document.getElementById('anomaliesContent');
+  const cov = d.coverage || {}, cnt = d.counts || {};
+  const rangeChip = (v) => `<button class="range-chip ${anomalyState.days === v ? 'active' : ''}" data-anom-range="${v}">${rangeLabel(v)}</button>`;
+  const viewChip = (v, l, n) => `<button class="range-chip ${anomalyState.view === v ? 'active' : ''}" data-anom-view="${v}">${l}${n != null ? ` (${n})` : ''}</button>`;
+  const empty = (t) => `<div style="padding:var(--s-4);color:var(--text-3);font-size:var(--fs-sm);text-align:center">${t}</div>`;
+  const row = (slug, big, name, meta) => `
+    <div class="off-row" data-slug="${escapeHtml(slug)}">
+      <div class="anom-dur num">${big}</div>
+      <div class="off-main"><div class="off-name">${name}</div><div class="off-meta">${meta}</div></div>
+    </div>`;
+
+  let list = '';
+  if (anomalyState.view === 'pauses') {
+    const rows = d.topPauses || [];
+    list = rows.length ? rows.map(p => row(p.slug, fmtDur(p.durationMin),
+      `${escapeHtml(p.displayName || p.slug)} · ${dayOfWeek(p.date)} ${fmtDate(p.date)}`,
+      `${escapeHtml(p.class || '?')} · ${p.atZip ? 'ZIP ' + escapeHtml(p.atZip) : 'no ZIP'}${p.atAddr ? ' · ' + escapeHtml(p.atAddr) : ''} · ${escapeHtml(p.startET || '')}–${escapeHtml(p.endET || '')}`
+    )).join('') : empty('No flagged pauses (≥30m away from stops) in this window.');
+  } else if (anomalyState.view === 'deviations') {
+    const rows = d.deviations || [];
+    list = rows.length ? rows.map(v => row(v.slug, fmtDur((v.stationaryMin || 0) + (v.driveMinToReach || 0)),
+      `${escapeHtml(v.displayName || v.slug)} · ${dayOfWeek(v.date)} ${fmtDate(v.date)}`,
+      `off-route ${v.destZip ? 'ZIP ' + escapeHtml(v.destZip) : ''}${v.destAddr ? ' · ' + escapeHtml(v.destAddr) : ''} · ${v.stationaryMin || 0}m stopped + ${v.driveMinToReach || 0}m drive`
+    )).join('') : empty('No in-route deviations in this window.');
+  } else {
+    const rows = d.placePatterns || [];
+    list = rows.length ? rows.map(p => row(p.slug, `${p.count}×`,
+      `${escapeHtml(p.displayName || p.slug)} · ${p.atZip ? 'ZIP ' + escapeHtml(p.atZip) : 'no ZIP'}`,
+      `${p.count} days · avg ${fmtDur(p.avgMin)}${p.sampleAddr ? ' · ' + escapeHtml(p.sampleAddr) : ''}`
+    )).join('') : empty('No repeated pause locations (2+ days) in this window.');
+  }
+
+  c.innerHTML = `
+    <div class="range-chips">${[30, 90, 180].map(rangeChip).join('')}</div>
+    <div class="hero" style="padding:var(--s-3);margin-top:var(--s-2)">
+      <div class="hero-label">Motive Anomalies · ${rangeLabel(anomalyState.days)}</div>
+      <div class="hero-sub">GPS data on ${cov.daysWithMotive || 0} of ${cov.scannedInRange || 0} driver-days · ${cov.driversWithMotive || 0} drivers${(cov.daysWithMotive || 0) === 0 ? ' — run a Motive-on scan to populate this' : ''}</div>
+    </div>
+    <div class="range-chips" style="margin-top:var(--s-2)">
+      ${viewChip('pauses', 'Long pauses', cnt.flaggedPauses)}
+      ${viewChip('deviations', 'Deviations', cnt.deviations)}
+      ${viewChip('places', 'Repeat places', cnt.places)}
+    </div>
+    <div class="aux" style="margin:var(--s-2) 0;color:var(--text-3);font-size:var(--fs-xs)">Observation only — not part of theft scoring. Tap a row to open the driver.</div>
+    <div class="card card-flush">${list}</div>
+  `;
+  c.querySelectorAll('[data-anom-range]').forEach(b => b.addEventListener('click', () => { anomalyState.days = +b.dataset.anomRange; loadAnomalies(); }));
+  c.querySelectorAll('[data-anom-view]').forEach(b => b.addEventListener('click', () => { anomalyState.view = b.dataset.anomView; renderAnomalies(d); }));
+  c.querySelectorAll('.off-row[data-slug]').forEach(r => r.addEventListener('click', () => navigateToDriver(r.dataset.slug)));
+}
+
 const pages = {
   overview: { el: document.getElementById('page-overview'), loader: loadOverview, loaded: false },
   audit: { el: document.getElementById('page-audit'), loader: loadAudit, loaded: false },
   investigate: { el: document.getElementById('page-investigate'), loader: loadInvestigateInit, loaded: false },
-  profile: { el: document.getElementById('page-profile'), loader: loadProfileInit, loaded: false }
+  profile: { el: document.getElementById('page-profile'), loader: loadProfileInit, loaded: false },
+  anomalies: { el: document.getElementById('page-anomalies'), loader: loadAnomalies, loaded: false }
 };
 document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => {
