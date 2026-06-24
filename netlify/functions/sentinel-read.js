@@ -485,6 +485,7 @@ async function dashboard(db, days) {
   // table (one row per driver inside the bucket).
   const newBucket = () => ({
     c2f: [], morningGap: [], l2c: [], afternoonGap: [],
+    expToFirst: [], expFromLast: [],
     onRoute: [], shift: [], stops: [], stopsPerHr: [],
     drivers: new Set(),
     perDriver: {},
@@ -552,6 +553,8 @@ async function dashboard(db, days) {
         if (typeof r.morningGapMin === 'number') bucket.morningGap.push(r.morningGapMin);
         if (typeof r.lastToClockOutMin === 'number') bucket.l2c.push(r.lastToClockOutMin);
         if (typeof r.afternoonGapMin === 'number') bucket.afternoonGap.push(r.afternoonGapMin);
+        if (typeof r.expectedTravelMinToFirst === 'number') bucket.expToFirst.push(r.expectedTravelMinToFirst);
+        if (typeof r.expectedTravelMinFromLast === 'number') bucket.expFromLast.push(r.expectedTravelMinFromLast);
         // On-route span: minutes between first and last delivery on this day.
         // null when there's only one stop (no last different from first); the
         // engine writes lastDeliveryTime=null in that case. Keep both the
@@ -589,12 +592,15 @@ async function dashboard(db, days) {
           bucket.perDriver[slug] = {
             slug, displayName: meta.displayName, role: meta.role || 'driver',
             n_days: 0,
-            c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: [], stopsPerHr: []
+            c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: [], stopsPerHr: [],
+            expToFirst: [], expFromLast: []
           };
         }
         const pd = bucket.perDriver[slug];
         pd.n_days++;
         if (typeof r.clockInToFirstMin === 'number') pd.c2f.push(r.clockInToFirstMin);
+        if (typeof r.expectedTravelMinToFirst === 'number') pd.expToFirst.push(r.expectedTravelMinToFirst);
+        if (typeof r.expectedTravelMinFromLast === 'number') pd.expFromLast.push(r.expectedTravelMinFromLast);
         if (typeof r.morningGapMin === 'number') pd.morningGap.push(r.morningGapMin);
         if (typeof r.lastToClockOutMin === 'number') pd.l2c.push(r.lastToClockOutMin);
         if (typeof r.afternoonGapMin === 'number') pd.afternoonGap.push(r.afternoonGapMin);
@@ -673,6 +679,8 @@ async function dashboard(db, days) {
         role: pd.role || 'driver',
         n_days: pd.n_days,
         medianC2F: median(pd.c2f.slice()),
+        medianExpectedToFirst: median(pd.expToFirst.slice()),
+        medianExpectedFromLast: median(pd.expFromLast.slice()),
         medianMorningGap: median(pd.morningGap.slice()),
         medianL2C: median(pd.l2c.slice()),
         medianAfternoonGap: median(pd.afternoonGap.slice()),
@@ -687,6 +695,8 @@ async function dashboard(db, days) {
       // order — matches the per-driver branch above and avoids the future-
       // reader trap of seeing sorted-instead-of-insertion data. PR #19 #14.
       medianC2F: median(b.c2f.slice()),
+      medianExpectedToFirst: median(b.expToFirst.slice()),
+      medianExpectedFromLast: median(b.expFromLast.slice()),
       medianMorningGap: median(b.morningGap.slice()),
       medianL2C: median(b.l2c.slice()),
       medianAfternoonGap: median(b.afternoonGap.slice()),

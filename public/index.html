@@ -1184,6 +1184,7 @@ function renderReferenceCell(key, label, ref) {
       <div class="ref-row"><span class="k">Drivers</span><span class="v">${ref.n_drivers}</span></div>
       <div class="ref-row"><span class="k">Days observed</span><span class="v">${ref.n_days}</span></div>
       <div class="ref-row"><span class="k">Median clockIn→1st</span><span class="v">${fmtDur(ref.medianC2F)}</span></div>
+      <div class="ref-row"><span class="k">Median drive to 1st</span><span class="v">${ref.medianExpectedToFirst != null ? fmtDur(ref.medianExpectedToFirst) : '—'}</span></div>
       <div class="ref-row"><span class="k">Median morning gap</span><span class="v ${gapClass}">${fmtDur(obsGap)}</span></div>
       <div class="ref-row"><span class="k">Median on-route (1st→last)</span><span class="v">${fmtDur(ref.medianOnRouteMin)}</span></div>
       <div class="ref-row"><span class="k">Median last→clockOut</span><span class="v">${fmtDur(ref.medianL2C)}</span></div>
@@ -1272,6 +1273,7 @@ function renderReferenceDetailBody(container, ref) {
       </div>
       <div class="ref-detail-grid">
         <div><div class="k">Typical clock-in to 1st</div><div class="v">${fmtDur(ref.medianC2F)}</div></div>
+        <div><div class="k">Typical drive to 1st</div><div class="v">${ref.medianExpectedToFirst != null ? fmtDur(ref.medianExpectedToFirst) : '—'}</div></div>
         <div><div class="k">Typical morning gap</div><div class="v">${fmtDur(ref.medianMorningGap)}</div></div>
         <div><div class="k">Typical on route (1st → last)</div><div class="v">${fmtDur(ref.medianOnRouteMin)}</div></div>
         <div><div class="k">Typical last → clock-out</div><div class="v">${fmtDur(ref.medianL2C)}</div></div>
@@ -1280,7 +1282,7 @@ function renderReferenceDetailBody(container, ref) {
         <div><div class="k">Typical stops/day</div><div class="v">${ref.medianStopsPerDay != null ? ref.medianStopsPerDay : '—'}</div></div>
         <div><div class="k">Typical stops/hr on route</div><div class="v">${fmtSphRef(ref.medianStopsPerHourOnRoute)}</div></div>
       </div>
-      <div class="ref-detail-foot">Expected: drive time + ${ref.representativeLoadPrep}m loading + ${ref.morningOkThreshold}m acceptable buffer</div>
+      <div class="ref-detail-foot">Clock-in to 1st ≈ drive to 1st + ${ref.representativeLoadPrep}m loading + morning gap. Only minutes beyond the ${ref.morningOkThreshold}m buffer count as unexplained — so a long clock-in-to-1st is mostly a long drive, not theft.</div>
     </div>
     <div class="range-chips" style="margin-bottom:var(--s-2)">
       ${filterChip('all', 'All')}
@@ -1295,6 +1297,7 @@ function renderReferenceDetailBody(container, ref) {
             ${headerClick('alpha', 'Driver')}
             <th>Days w/ data</th>
             ${headerClick('c2f', 'Clock-in to 1st')}
+            <th>Expected drive</th>
             ${headerClick('morning', 'Morning gap')}
             ${headerClick('onRoute', 'On route')}
             ${headerClick('stopsPerHr', 'Stops/hr')}
@@ -1324,6 +1327,7 @@ function renderReferenceDetailBody(container, ref) {
                 <td class="rd-name">${escapeHtml(p.displayName || p.slug)}</td>
                 <td class="rd-n">${p.n_days}</td>
                 <td>${fmtDur(p.medianC2F)}</td>
+                <td class="dim">${p.medianExpectedToFirst != null ? fmtDur(p.medianExpectedToFirst) : '—'}</td>
                 <td>${fmtDur(p.medianMorningGap)}</td>
                 <td>${fmtDur(p.medianOnRouteMin)}</td>
                 <td>${fmtSphRef(p.medianStopsPerHourOnRoute)}</td>
@@ -1331,7 +1335,7 @@ function renderReferenceDetailBody(container, ref) {
                 <td class="rd-dev ${devCls}">${devStr}</td>
               </tr>`;
           }).join('')}
-          ${rows.length === 0 ? `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:var(--s-4)">No drivers match this filter.</td></tr>` : ''}
+          ${rows.length === 0 ? `<tr><td colspan="9" style="text-align:center;color:var(--text-3);padding:var(--s-4)">No drivers match this filter.</td></tr>` : ''}
         </tbody>
       </table>
     </div>
