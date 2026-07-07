@@ -325,15 +325,27 @@ export async function scanOneDriverDay({
       // stale / a different truck → don't trust Motive, fall back to Google.
       const routeMatch = classified.length > 0 && classified.some(p => p.destClass === 'customer');
 
-      // Per-leg actual drive minutes = sum of driving-period durations whose
-      // period started inside that leg's time window.
+      // Per-leg actual drive minutes = driving time OVERLAPPING the leg window,
+      // clipped to [a, b). Membership-by-start-time was wrong twice over: a
+      // return drive that started minutes before the last-delivery CONFIRM
+      // timestamp was dropped entirely (drivers confirm after driving off),
+      // and a period starting just inside the window was credited in full even
+      // if most of it fell outside. Off-route drives are excluded from the
+      // credit — driving to a personal stop is not expected travel, and
+      // crediting it would shrink the very gap it should widen.
       const sumDriveIn = (a, b) => {
-        if (!a || !b) return { min: null, count: 0 };
+        if (!a || !b || b <= a) return { min: null, count: 0 };
         let min = 0, count = 0;
         for (const p of classified) {
-          if (p.startDt >= a && p.startDt < b && typeof p.durationMin === 'number') { min += p.durationMin; count++; }
+          if (!p.startDt || !p.endDt) continue;
+          if (p.destClass === 'off_route') continue;
+          const s = Math.max(p.startDt.getTime(), a.getTime());
+          const e = Math.min(p.endDt.getTime(), b.getTime());
+          if (e <= s) continue;
+          min += (e - s) / 60000;
+          count++;
         }
-        return { min, count };
+        return { min: count > 0 ? Math.round(min) : min, count };
       };
       const morning = sumDriveIn(clockInDt, firstDeliveryDt);
       const afternoon = sumDriveIn(lastDeliveryDt, clockOutDt);
@@ -454,8 +466,15 @@ export async function scanOneDriverDay({
   // ---------- Choose effective travel per leg ----------
   // Motive wins when its GPS matched the route AND it has driving data in that
   // leg's window; otherwise fall back to Google's typical-traffic estimate.
+  // Sanity floor: a Motive sum far below Google's estimate usually means the
+  // GPS only caught a sliver of the real drive (confirm-time skew, coverage
+  // gap, ignition-off tow), not that the drive was tiny. Partial GPS must not
+  // turn into a theft accusation — fall back to Google below 25% of its figure.
   const pickLeg = (ok, motiveMin, motivePeriods, googleMin) => {
-    if (ok && typeof motiveMin === 'number' && motivePeriods > 0) return { minutes: motiveMin, source: 'motive' };
+    if (ok && typeof motiveMin === 'number' && motivePeriods > 0) {
+      const floor = (typeof googleMin === 'number') ? googleMin * 0.25 : 0;
+      if (motiveMin >= floor) return { minutes: motiveMin, source: 'motive' };
+    }
     if (typeof googleMin === 'number') return { minutes: googleMin, source: 'google' };
     return { minutes: null, source: 'none' };
   };
@@ -529,6 +548,15 @@ export async function scanOneDriverDay({
       longestPauseMin: motiveState.longestPauseMin
     };
 
+    // Reliability gate: if the GPS never visited one of this driver's NuVizz
+    // customer ZIPs, the truck assignment is stale or someone else drove it —
+    // every stop THEY made would classify off_route and charge risk + dollars
+    // to the wrong person. Store the observations (above) but score nothing.
+    if (!motiveState.routeMatch) {
+      result.inRouteFlag = 'no_data';
+      result.inRouteOffRouteMin = null;
+    } else {
+
     const t = defaults.inRouteStaticThresholds || { ok: 15, warn: 30, flag: 60 };
     let inRouteFlag = 'ok';
     if (inRouteOffRouteMin > t.flag) inRouteFlag = 'critical';
@@ -574,6 +602,8 @@ export async function scanOneDriverDay({
       if (afternoonFlag) afternoonFlag.evidence += ` Motive shows detour to: ${detourSummary}.`;
       result.dataHealth.push(`motive_post_route_detour:${postRouteVisits.length}`);
     }
+
+    } // end routeMatch gate
   }
 
   // Write (or skip if caller asked us to suppress empty rows)

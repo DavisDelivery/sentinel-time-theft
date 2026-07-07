@@ -385,6 +385,7 @@ async function dashboard(db, days) {
         'clockInToFirstMin', 'morningGapMin',
         'lastToClockOutMin', 'afternoonGapMin',
         'expectedTravelMinToFirst', 'expectedTravelMinFromLast',
+        'googleTravelMinToFirst', 'googleTravelMinFromLast',
         'firstDeliveryTime', 'lastDeliveryTime',
         'totalShiftMin', 'completedStops',
         'truckType'
@@ -553,8 +554,17 @@ async function dashboard(db, days) {
         if (typeof r.morningGapMin === 'number') bucket.morningGap.push(r.morningGapMin);
         if (typeof r.lastToClockOutMin === 'number') bucket.l2c.push(r.lastToClockOutMin);
         if (typeof r.afternoonGapMin === 'number') bucket.afternoonGap.push(r.afternoonGapMin);
-        if (typeof r.expectedTravelMinToFirst === 'number') bucket.expToFirst.push(r.expectedTravelMinToFirst);
-        if (typeof r.expectedTravelMinFromLast === 'number') bucket.expFromLast.push(r.expectedTravelMinFromLast);
+        // "Expected drive" medians use the GOOGLE typical figure specifically —
+        // post-dual-source, expectedTravelMin* can be Motive-actual on some days
+        // and Google-typical on others, and a median over that mix isn't a
+        // like-for-like reference. Older records (pre-dual-source) only carry
+        // expectedTravelMin*, which for them IS the Google figure — fall back.
+        const gToFirst = (typeof r.googleTravelMinToFirst === 'number') ? r.googleTravelMinToFirst
+          : (typeof r.expectedTravelMinToFirst === 'number' ? r.expectedTravelMinToFirst : null);
+        const gFromLast = (typeof r.googleTravelMinFromLast === 'number') ? r.googleTravelMinFromLast
+          : (typeof r.expectedTravelMinFromLast === 'number' ? r.expectedTravelMinFromLast : null);
+        if (gToFirst != null) bucket.expToFirst.push(gToFirst);
+        if (gFromLast != null) bucket.expFromLast.push(gFromLast);
         // On-route span: minutes between first and last delivery on this day.
         // null when there's only one stop (no last different from first); the
         // engine writes lastDeliveryTime=null in that case. Keep both the
@@ -599,8 +609,8 @@ async function dashboard(db, days) {
         const pd = bucket.perDriver[slug];
         pd.n_days++;
         if (typeof r.clockInToFirstMin === 'number') pd.c2f.push(r.clockInToFirstMin);
-        if (typeof r.expectedTravelMinToFirst === 'number') pd.expToFirst.push(r.expectedTravelMinToFirst);
-        if (typeof r.expectedTravelMinFromLast === 'number') pd.expFromLast.push(r.expectedTravelMinFromLast);
+        if (gToFirst != null) pd.expToFirst.push(gToFirst);
+        if (gFromLast != null) pd.expFromLast.push(gFromLast);
         if (typeof r.morningGapMin === 'number') pd.morningGap.push(r.morningGapMin);
         if (typeof r.lastToClockOutMin === 'number') pd.l2c.push(r.lastToClockOutMin);
         if (typeof r.afternoonGapMin === 'number') pd.afternoonGap.push(r.afternoonGapMin);
@@ -786,6 +796,11 @@ async function anomalies(db, days) {
     scannedInRange++;
     const m = r.motive;
     if (!m || typeof m !== 'object') continue;
+    // routeMatch === false → the GPS never touched this driver's route that
+    // day (stale/wrong truck assignment). Those pauses and deviations belong
+    // to whoever actually drove the truck — showing them under this driver's
+    // name is a false attribution. Older records without the field pass.
+    if (m.routeMatch === false) continue;
     daysWithMotive++;
     if (r.driverSlug) driversWithMotive.add(r.driverSlug);
 
