@@ -212,7 +212,11 @@ body {
 .dd-right { text-align: right; flex-shrink: 0; }
 .dd-amount { font-weight: 700; font-size: var(--fs-base); color: var(--text); }
 .dd-amount.zero { color: var(--text-4); font-weight: 500; }
-.anom-dur { font-weight: 700; font-size: var(--fs-base); color: var(--text); min-width: 64px; text-align: left; }
+.anom-dur { font-weight: 700; font-size: var(--fs-base); color: var(--text); text-align: left; }
+/* Anomaly rows have two cells (duration + main), not the offender list's
+   three (rank + main + amount) — reusing the 24px rank track put the
+   duration on top of the driver name. */
+.off-row.anom-row { grid-template-columns: 72px 1fr; }
 .dd-chips { display: flex; gap: 3px; margin-top: 4px; justify-content: flex-end; }
 .chip {
   display: inline-block; padding: 2px 5px; border-radius: 3px;
@@ -476,14 +480,19 @@ body {
 .driver-hero-stat .item { flex: 1; }
 .driver-hero-stat .v { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.02em; }
 .driver-hero-stat .l { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
-.heatmap { display: flex; gap: 3px; margin-top: var(--s-3); }
+/* Scrollable strip: fixed-size squares inside an overflow-x container. The
+   old flex:1 squares collapsed to ~1px slivers with overprinted text at full
+   backfill volume (~350 workdays). JS scrolls to the right edge (most recent)
+   after render. Month labels live inside the same max-content inner wrapper
+   so their percentage offsets track the full strip width. */
+.heatmap-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: var(--s-3); padding-bottom: 4px; }
+.heatmap-inner { min-width: 100%; width: max-content; }
+.heatmap { display: flex; gap: 3px; }
 .heatmap-day {
-  flex: 1; aspect-ratio: 1; min-height: 28px; border-radius: 3px;
+  flex: 0 0 22px; width: 22px; height: 28px; border-radius: 3px;
   display: flex; align-items: center; justify-content: center;
   font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.7);
-  cursor: pointer; transition: transform 0.1s;
 }
-.heatmap-day:hover { transform: scale(1.05); }
 .heatmap-day.critical { background: var(--crit); color: white; }
 .heatmap-day.high { background: var(--high); color: white; }
 .heatmap-day.medium { background: var(--med); color: white; }
@@ -922,7 +931,9 @@ body {
 </div>
 
 <script>
-const APP_VERSION = 'v4.6.2-heatmap-integrity';
+// NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
+// dashboard payload shape change or stale-shaped cached payloads survive.
+const APP_VERSION = 'v4.7.0-motive-integrity';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -2123,23 +2134,31 @@ async function loadAuditForDate(date) {
       container.innerHTML = `<div class="empty"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg><h3>No records</h3><p>Nothing was scanned for ${escapeHtml(date)}</p></div>`;
       return;
     }
+    // A day with neither a punch nor a matched delivery can't be scored — the
+    // engine writes riskLevel 'clean' as a default, but folding those into the
+    // clean bucket paints a feed gap green (same fix Investigate already has).
+    const recHasData = (rec) => !!(rec.b600Matched || rec.nuvizzMatched);
     const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
-    let stolen$ = 0, withData = 0, withMotive = 0;
+    let stolen$ = 0, withData = 0, withMotive = 0, noDataCount = 0;
     for (const rec of records) {
+      stolen$ += rec.stolenDollars || 0;
+      if (rec.motive?.periodsCount) withMotive++;
+      if (!recHasData(rec)) { noDataCount++; continue; }
+      withData++;
       // Coalesce unknown/undefined risk levels into 'clean' so the bar sums to
       // 100% and matches the grouping logic below (which buckets the same way).
       const lvl = Object.prototype.hasOwnProperty.call(dist, rec.riskLevel) ? rec.riskLevel : 'clean';
       dist[lvl]++;
-      stolen$ += rec.stolenDollars || 0;
-      if (rec.b600Matched || rec.nuvizzMatched) withData++;
-      if (rec.motive?.periodsCount) withMotive++;
     }
+    const scoredCount = records.length - noDataCount;
 
-    // Group by severity bucket for visual breakdown
-    const groupOrder = ['critical', 'high', 'medium', 'low', 'clean'];
+    // Group by severity bucket for visual breakdown; no-data days get their
+    // own group at the end instead of masquerading as clean.
+    const groupOrder = ['critical', 'high', 'medium', 'low', 'clean', 'no data'];
     const groups = Object.fromEntries(groupOrder.map(g => [g, []]));
     for (const rec of records) {
-      const g = groupOrder.includes(rec.riskLevel) ? rec.riskLevel : 'clean';
+      const g = !recHasData(rec) ? 'no data'
+        : (groupOrder.includes(rec.riskLevel) ? rec.riskLevel : 'clean');
       groups[g].push(rec);
     }
 
@@ -2148,7 +2167,7 @@ async function loadAuditForDate(date) {
         <div class="hero-label">${escapeHtml(date)}</div>
         <div class="hero-value num">${fmt$(stolen$)}</div>
         <div class="hero-sub">${withData} of ${records.length} drivers w/ data · ${withMotive} w/ Motive</div>
-        <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">${renderDistBar(dist, records.length)}</div>
+        <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">${renderDistBar(dist, scoredCount, { noDataCount })}</div>
       </div>
     `;
     for (const g of groupOrder) {
@@ -2161,7 +2180,7 @@ async function loadAuditForDate(date) {
             <h2>${g} <span style="color:var(--text-4)"> · ${groupRecs.length}</span></h2>
             <div class="aux num">${fmt$Plain(groupTotal.toFixed(2))}</div>
           </div>
-          <div id="group-${g}"></div>
+          <div id="group-${g.replace(/\s+/g, '-')}"></div>
         </div>
       `;
     }
@@ -2169,7 +2188,7 @@ async function loadAuditForDate(date) {
     for (const g of groupOrder) {
       const groupRecs = groups[g];
       if (!groupRecs.length) continue;
-      const list = document.getElementById('group-' + g);
+      const list = document.getElementById('group-' + g.replace(/\s+/g, '-'));
       for (const rec of groupRecs) list.appendChild(renderDriverDayRow(rec, 'audit'));
     }
   } catch (e) {
@@ -2361,8 +2380,10 @@ async function loadDriver(slug) {
         </div>
         <div style="margin-top:var(--s-4)">
           <div class="dh" style="margin-bottom:8px">Risk Pattern <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${fmtDate(firstDate)} → ${fmtDate(lastDate)}, ${workdayRecords.length} working days${noDataWorkdays > 0 ? ` (${noDataWorkdays} neutral)` : ''}</span></div>
-          ${monthAxis}
-          <div class="heatmap">${heatmap}</div>
+          <div class="heatmap-scroll"><div class="heatmap-inner">
+            ${monthAxis}
+            <div class="heatmap">${heatmap}</div>
+          </div></div>
         </div>
         <div style="margin-top:var(--s-4)">${renderDistBar(dist, scoredWorkdays, { noDataCount: noDataWorkdays })}</div>
         ${typicalHtml}
@@ -2376,6 +2397,9 @@ async function loadDriver(slug) {
         <div id="driverDayList"></div>
       </div>
     `;
+    // Start the risk-pattern strip at its right edge — most recent days first.
+    const hmScroll = container.querySelector('.heatmap-scroll');
+    if (hmScroll) hmScroll.scrollLeft = hmScroll.scrollWidth;
     const list = document.getElementById('driverDayList');
     // Show descending order (most recent first) for the daily breakdown
     const desc = records.slice().reverse();
@@ -2486,7 +2510,7 @@ function renderAnomalies(d) {
   const viewChip = (v, l, n) => `<button class="range-chip ${anomalyState.view === v ? 'active' : ''}" data-anom-view="${v}">${l}${n != null ? ` (${n})` : ''}</button>`;
   const empty = (t) => `<div style="padding:var(--s-4);color:var(--text-3);font-size:var(--fs-sm);text-align:center">${t}</div>`;
   const row = (slug, big, name, meta) => `
-    <div class="off-row" data-slug="${escapeHtml(slug)}">
+    <div class="off-row anom-row" data-slug="${escapeHtml(slug)}">
       <div class="anom-dur num">${big}</div>
       <div class="off-main"><div class="off-name">${name}</div><div class="off-meta">${meta}</div></div>
     </div>`;

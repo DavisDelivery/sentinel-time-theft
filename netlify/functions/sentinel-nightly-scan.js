@@ -16,10 +16,17 @@ function easternYMD(date) {
   }).format(date);
 }
 
+// Pure calendar-date arithmetic in UTC. The old version formatted the UTC
+// midnight through easternYMD, which lands 4-5h BEHIND UTC and returned the
+// previous day for every input (verified: addDays('2026-07-07', -7) gave
+// '2026-06-29', and even n=0 shifted a day back). Net effect: the nightly scan
+// targeted T-8, not the documented T-7. Same fix the backfill worker carries.
 function addDays(ymd, n) {
   const [y, m, d] = ymd.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + n));
-  return easternYMD(dt);
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${dt.getUTCFullYear()}-${mm}-${dd}`;
 }
 
 // Day-of-week (0=Sun .. 6=Sat) for a YYYY-MM-DD string, computed in UTC so it

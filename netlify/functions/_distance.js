@@ -150,11 +150,19 @@ export async function getTravelTime(fromAddr, toAddr, departureDt = null) {
   const db = getDb();
   const key = cacheKey(fromAddr, toAddr, bucket);
 
-  // 1. Cache
+  // 1. Cache. Non-OK entries (ZERO_RESULTS / NOT_FOUND) are honored too — we
+  // deliberately cache them so a permanently unroutable address doesn't
+  // re-bill Google on every scan forever. They get a retry window in case the
+  // address becomes routable (fixed upstream, new construction).
+  const NONOK_RETRY_MS = 30 * 86400000;
   try {
     const cached = await db.getDoc('distanceMatrixCache', key);
     if (cached && cached.status === 'OK') {
       return { minutes: cached.minutes, miles: cached.miles, source: 'cache', status: 'OK', traffic: !!cached.traffic };
+    }
+    if (cached && cached.status && cached.fetchedAt
+        && (Date.now() - Date.parse(cached.fetchedAt)) < NONOK_RETRY_MS) {
+      return { minutes: null, miles: null, source: 'cache', status: cached.status, traffic: false };
     }
   } catch (e) { /* miss → API */ }
 

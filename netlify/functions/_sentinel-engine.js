@@ -13,7 +13,7 @@
 //   minutesBetween(a, b)          → number
 //   classifyGap(gapMin, t)        → 'ok' | 'warn' | 'flag' | 'critical'
 
-const VERSION = 'v4.3.1-truck-type-override';
+const VERSION = 'v4.7.0-motive-integrity';
 
 // Per-driver load-prep / wrap-up overrides land on /employees/{slug} and flow
 // through scoreDriverDay via the optional `loadPrepMin` / `wrapUpMin` input

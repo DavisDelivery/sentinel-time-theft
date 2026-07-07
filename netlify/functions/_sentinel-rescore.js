@@ -27,7 +27,7 @@
 // output. Math is unchanged; rescore restamps every record so historical
 // evidence picks up the new format.
 
-export const ENGINE_VERSION = 'v4.5.0-driver-detail-polish';
+export const ENGINE_VERSION = 'v4.7.0-motive-integrity';
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
@@ -254,8 +254,14 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
   next.afternoonFlag = afternoonFlag;
 
   // ---------- In-route ----------
+  // Reliability gate (mirrors the scan): routeMatch === false means the GPS
+  // belonged to a stale/different truck assignment — never re-derive risk or
+  // stolen minutes from it. Records without the field (pre-dual-source engine)
+  // keep their existing behavior.
   let inRouteFlag = record.inRouteFlag || 'deferred';
-  if (record.inRouteOffRouteMin != null) {
+  if (record.motive?.routeMatch === false) {
+    inRouteFlag = 'no_data';
+  } else if (record.inRouteOffRouteMin != null) {
     inRouteFlag = classifyStatic(record.inRouteOffRouteMin, inRouteT);
     next.inRouteSeveritySource = 'static';
     sourceCounts.static++;
