@@ -499,6 +499,16 @@ async function dashboard(db, days) {
     tractor_selfload: newBucket()
   };
 
+  // Contractors (owner_ops) combined bucket. They ALSO stay in the truck×load
+  // grid above (operator wants them visible next to company drivers), but this
+  // bucket backs a dedicated "Contractors" card. Owner-ops don't punch B600, so
+  // only route + throughput metrics are meaningful: time on route + stops/hr.
+  const contractorsBucket = {
+    drivers: new Set(), days: 0,
+    onRoute: [], stopsPerHr: [], stops: [],
+    perDriver: {}
+  };
+
   for (const r of rows) {
     if (r.date) allDatesPresent.add(r.date);
     const slug = r.driverSlug;
@@ -542,80 +552,108 @@ async function dashboard(db, days) {
     if (r.riskLevel === 'high') pd.highDays++;
 
     // Reference-metrics bucketing — only counts records for drivers we know
-    // the category for (i.e. on the active roster).
+    // the category for (i.e. on the active roster). Route span + throughput are
+    // role-independent, so compute them once and feed whichever buckets apply.
     const meta = driverMeta[slug];
-    if (meta && meta.truckType !== 'unknown') {
-      const bucketKey = `${meta.truckType}_${meta.isSelfLoader ? 'selfload' : 'preload'}`;
-      const bucket = refBuckets[bucketKey];
-      if (bucket) {
-        bucket.drivers.add(slug);
-        bucket.days++;
-        if (typeof r.clockInToFirstMin === 'number') bucket.c2f.push(r.clockInToFirstMin);
-        if (typeof r.morningGapMin === 'number') bucket.morningGap.push(r.morningGapMin);
-        if (typeof r.lastToClockOutMin === 'number') bucket.l2c.push(r.lastToClockOutMin);
-        if (typeof r.afternoonGapMin === 'number') bucket.afternoonGap.push(r.afternoonGapMin);
-        // "Expected drive" medians use the GOOGLE typical figure specifically —
-        // post-dual-source, expectedTravelMin* can be Motive-actual on some days
-        // and Google-typical on others, and a median over that mix isn't a
-        // like-for-like reference. Older records (pre-dual-source) only carry
-        // expectedTravelMin*, which for them IS the Google figure — fall back.
-        const gToFirst = (typeof r.googleTravelMinToFirst === 'number') ? r.googleTravelMinToFirst
-          : (typeof r.expectedTravelMinToFirst === 'number' ? r.expectedTravelMinToFirst : null);
-        const gFromLast = (typeof r.googleTravelMinFromLast === 'number') ? r.googleTravelMinFromLast
-          : (typeof r.expectedTravelMinFromLast === 'number' ? r.expectedTravelMinFromLast : null);
-        if (gToFirst != null) bucket.expToFirst.push(gToFirst);
-        if (gFromLast != null) bucket.expFromLast.push(gFromLast);
-        // On-route span: minutes between first and last delivery on this day.
-        // null when there's only one stop (no last different from first); the
-        // engine writes lastDeliveryTime=null in that case. Keep both the
-        // raw-millisecond span (for stops/hr division — see below) and the
-        // minute-rounded value (for the on-route median, which is displayed
-        // in "Xh Ym" form and gains nothing from sub-minute precision).
-        let onRouteMin = null;
-        let onRouteMs = null;
-        if (r.firstDeliveryTime && r.lastDeliveryTime) {
-          const f = Date.parse(r.firstDeliveryTime);
-          const l = Date.parse(r.lastDeliveryTime);
-          if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
-            onRouteMs = l - f;
-            onRouteMin = Math.round(onRouteMs / 60000);
-          }
+    if (meta) {
+      // On-route span: minutes between first and last delivery on this day.
+      // null when there's only one stop (no last different from first); the
+      // engine writes lastDeliveryTime=null in that case. Keep both the
+      // raw-millisecond span (for stops/hr division — see below) and the
+      // minute-rounded value (for the on-route median, which is displayed
+      // in "Xh Ym" form and gains nothing from sub-minute precision).
+      let onRouteMin = null;
+      let onRouteMs = null;
+      if (r.firstDeliveryTime && r.lastDeliveryTime) {
+        const f = Date.parse(r.firstDeliveryTime);
+        const l = Date.parse(r.lastDeliveryTime);
+        if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
+          onRouteMs = l - f;
+          onRouteMin = Math.round(onRouteMs / 60000);
         }
-        // Stops/hr on route: throughput while actively delivering. Divide by
-        // the raw elapsed time (not the minute-rounded value, which inflated
-        // tight clusters into 60-120/hr outliers — PR #19 review #10). Also
-        // require ≥2 stops and a 15-minute floor on the route span so
-        // single-cluster days can't drive medians.
-        const MIN_ROUTE_SPAN_MS = 15 * 60 * 1000;
-        let stopsPerHr = null;
-        if (onRouteMs != null && onRouteMs >= MIN_ROUTE_SPAN_MS
-            && typeof r.completedStops === 'number' && r.completedStops >= 2) {
-          stopsPerHr = r.completedStops / (onRouteMs / 3600000);
-        }
-        if (onRouteMin != null) bucket.onRoute.push(onRouteMin);
-        if (stopsPerHr != null) bucket.stopsPerHr.push(stopsPerHr);
-        if (typeof r.totalShiftMin === 'number') bucket.shift.push(r.totalShiftMin);
-        if (typeof r.completedStops === 'number') bucket.stops.push(r.completedStops);
-        // Per-driver aggregation inside the bucket — keeps arrays per slug so
-        // the drilldown table can show driver vs bucket-median deviation.
-        if (!bucket.perDriver[slug]) {
-          bucket.perDriver[slug] = {
-            slug, displayName: meta.displayName, role: meta.role || 'driver',
-            n_days: 0,
-            c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: [], stopsPerHr: [],
-            expToFirst: [], expFromLast: []
+      }
+      // Stops/hr on route: throughput while actively delivering. Divide by the
+      // raw elapsed time (not the minute-rounded value, which inflated tight
+      // clusters into 60-120/hr outliers — PR #19 review #10). Require ≥2 stops
+      // and a 15-minute floor on the route span so single-cluster days can't
+      // drive medians.
+      const MIN_ROUTE_SPAN_MS = 15 * 60 * 1000;
+      let stopsPerHr = null;
+      if (onRouteMs != null && onRouteMs >= MIN_ROUTE_SPAN_MS
+          && typeof r.completedStops === 'number' && r.completedStops >= 2) {
+        stopsPerHr = r.completedStops / (onRouteMs / 3600000);
+      }
+
+      // Contractors (owner_ops): combined bucket. They ALSO fall through into
+      // the truck×load grid below (kept visible alongside company drivers per
+      // the operator's request); this bucket is what the Contractors card reads.
+      if (meta.role === 'owner_op') {
+        contractorsBucket.drivers.add(slug);
+        contractorsBucket.days++;
+        if (onRouteMin != null) contractorsBucket.onRoute.push(onRouteMin);
+        if (stopsPerHr != null) contractorsBucket.stopsPerHr.push(stopsPerHr);
+        if (typeof r.completedStops === 'number') contractorsBucket.stops.push(r.completedStops);
+        if (!contractorsBucket.perDriver[slug]) {
+          contractorsBucket.perDriver[slug] = {
+            slug, displayName: meta.displayName, truckType: meta.truckType,
+            n_days: 0, onRoute: [], stopsPerHr: [], stops: []
           };
         }
-        const pd = bucket.perDriver[slug];
-        pd.n_days++;
-        if (typeof r.clockInToFirstMin === 'number') pd.c2f.push(r.clockInToFirstMin);
-        if (gToFirst != null) pd.expToFirst.push(gToFirst);
-        if (gFromLast != null) pd.expFromLast.push(gFromLast);
-        if (typeof r.morningGapMin === 'number') pd.morningGap.push(r.morningGapMin);
-        if (typeof r.lastToClockOutMin === 'number') pd.l2c.push(r.lastToClockOutMin);
-        if (typeof r.afternoonGapMin === 'number') pd.afternoonGap.push(r.afternoonGapMin);
-        if (onRouteMin != null) pd.onRoute.push(onRouteMin);
-        if (stopsPerHr != null) pd.stopsPerHr.push(stopsPerHr);
+        const cpd = contractorsBucket.perDriver[slug];
+        cpd.n_days++;
+        if (onRouteMin != null) cpd.onRoute.push(onRouteMin);
+        if (stopsPerHr != null) cpd.stopsPerHr.push(stopsPerHr);
+        if (typeof r.completedStops === 'number') cpd.stops.push(r.completedStops);
+      }
+
+      // Truck×load grid — company drivers AND contractors with a known truck
+      // type (unchanged behavior: contractors stay in these cards too).
+      if (meta.truckType !== 'unknown') {
+        const bucketKey = `${meta.truckType}_${meta.isSelfLoader ? 'selfload' : 'preload'}`;
+        const bucket = refBuckets[bucketKey];
+        if (bucket) {
+          bucket.drivers.add(slug);
+          bucket.days++;
+          if (typeof r.clockInToFirstMin === 'number') bucket.c2f.push(r.clockInToFirstMin);
+          if (typeof r.morningGapMin === 'number') bucket.morningGap.push(r.morningGapMin);
+          if (typeof r.lastToClockOutMin === 'number') bucket.l2c.push(r.lastToClockOutMin);
+          if (typeof r.afternoonGapMin === 'number') bucket.afternoonGap.push(r.afternoonGapMin);
+          // "Expected drive" medians use the GOOGLE typical figure specifically —
+          // post-dual-source, expectedTravelMin* can be Motive-actual on some days
+          // and Google-typical on others, and a median over that mix isn't a
+          // like-for-like reference. Older records (pre-dual-source) only carry
+          // expectedTravelMin*, which for them IS the Google figure — fall back.
+          const gToFirst = (typeof r.googleTravelMinToFirst === 'number') ? r.googleTravelMinToFirst
+            : (typeof r.expectedTravelMinToFirst === 'number' ? r.expectedTravelMinToFirst : null);
+          const gFromLast = (typeof r.googleTravelMinFromLast === 'number') ? r.googleTravelMinFromLast
+            : (typeof r.expectedTravelMinFromLast === 'number' ? r.expectedTravelMinFromLast : null);
+          if (gToFirst != null) bucket.expToFirst.push(gToFirst);
+          if (gFromLast != null) bucket.expFromLast.push(gFromLast);
+          if (onRouteMin != null) bucket.onRoute.push(onRouteMin);
+          if (stopsPerHr != null) bucket.stopsPerHr.push(stopsPerHr);
+          if (typeof r.totalShiftMin === 'number') bucket.shift.push(r.totalShiftMin);
+          if (typeof r.completedStops === 'number') bucket.stops.push(r.completedStops);
+          // Per-driver aggregation inside the bucket — keeps arrays per slug so
+          // the drilldown table can show driver vs bucket-median deviation.
+          if (!bucket.perDriver[slug]) {
+            bucket.perDriver[slug] = {
+              slug, displayName: meta.displayName, role: meta.role || 'driver',
+              n_days: 0,
+              c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: [], stopsPerHr: [],
+              expToFirst: [], expFromLast: []
+            };
+          }
+          const pd = bucket.perDriver[slug];
+          pd.n_days++;
+          if (typeof r.clockInToFirstMin === 'number') pd.c2f.push(r.clockInToFirstMin);
+          if (gToFirst != null) pd.expToFirst.push(gToFirst);
+          if (gFromLast != null) pd.expFromLast.push(gFromLast);
+          if (typeof r.morningGapMin === 'number') pd.morningGap.push(r.morningGapMin);
+          if (typeof r.lastToClockOutMin === 'number') pd.l2c.push(r.lastToClockOutMin);
+          if (typeof r.afternoonGapMin === 'number') pd.afternoonGap.push(r.afternoonGapMin);
+          if (onRouteMin != null) pd.onRoute.push(onRouteMin);
+          if (stopsPerHr != null) pd.stopsPerHr.push(stopsPerHr);
+        }
       }
     }
   }
@@ -722,6 +760,30 @@ async function dashboard(db, days) {
     };
   }
 
+  // Contractors combined metrics. Owner-ops don't punch B600, so this surfaces
+  // only what's meaningful for them: time on route + deliveries/hr (with
+  // stops/day for context) plus a per-contractor breakdown for the comparison
+  // view and printable card.
+  const contractorMetrics = contractorsBucket.drivers.size === 0 ? null : {
+    n_drivers: contractorsBucket.drivers.size,
+    n_days: contractorsBucket.days,
+    medianOnRouteMin: median(contractorsBucket.onRoute.slice()),
+    medianStopsPerHourOnRoute: medianFloat(contractorsBucket.stopsPerHr.slice()),
+    medianStopsPerDay: median(contractorsBucket.stops.slice()),
+    perDriverBreakdown: Object.values(contractorsBucket.perDriver)
+      .filter(pd => pd.n_days > 0)
+      .map(pd => ({
+        slug: pd.slug,
+        displayName: pd.displayName,
+        truckType: pd.truckType,
+        n_days: pd.n_days,
+        medianOnRouteMin: median(pd.onRoute.slice()),
+        medianStopsPerHourOnRoute: medianFloat(pd.stopsPerHr.slice()),
+        medianStopsPerDay: median(pd.stops.slice())
+      }))
+      .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''))
+  };
+
   return {
     rangeMeta: {
       days: typeof days === 'number' ? days : 'all',
@@ -745,6 +807,7 @@ async function dashboard(db, days) {
     restRoster,
     drivers: Object.values(driverMeta),
     referenceMetrics: refMetricsOut,
+    contractorMetrics,
     baselines: {
       total: baselineDocs.length,
       byConfidence: baselineConfidence,

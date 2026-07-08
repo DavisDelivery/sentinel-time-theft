@@ -662,6 +662,102 @@ body {
   display: block; font-size: 9px; color: var(--brand); font-weight: 600;
   margin-top: 2px; text-transform: none; letter-spacing: 0;
 }
+.ref-cell.contractor-cell {
+  grid-column: 1 / -1;
+  border-color: var(--brand); background: var(--brand-2);
+}
+.ref-cell.contractor-cell h4 { color: var(--brand); }
+
+/* ============ Compare-all-drivers view ============ */
+.compare-wrap { margin-top: var(--s-3); }
+.compare-controls {
+  display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center;
+  margin-bottom: var(--s-3);
+}
+.compare-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.compare-seg button {
+  background: var(--bg-1); color: var(--text-3); border: none;
+  padding: 6px 12px; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.compare-seg button.active { background: var(--brand); color: #fff; }
+.compare-note { font-size: 10px; color: var(--text-4); margin-left: auto; }
+.compare-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.compare-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); white-space: nowrap; }
+.compare-table th, .compare-table td { padding: 8px 10px; text-align: right; }
+.compare-table th:first-child, .compare-table td:first-child { text-align: left; position: sticky; left: 0; background: var(--bg-1); }
+.compare-table thead th {
+  background: var(--bg-2); color: var(--text-3); font-weight: 700; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; user-select: none;
+  border-bottom: 1px solid var(--line-strong); position: sticky; top: 0; z-index: 1;
+}
+.compare-table thead th:first-child { z-index: 2; background: var(--bg-2); }
+.compare-table th .sort-caret { color: var(--brand); margin-left: 3px; }
+.compare-table tbody tr { border-bottom: 1px solid var(--line); }
+.compare-table tbody tr:active { background: var(--bg-2); }
+.compare-table td .v { font-weight: 600; font-feature-settings: 'tnum'; color: var(--text); }
+.compare-table td .delta { font-size: 9px; display: block; font-feature-settings: 'tnum'; }
+.compare-table td .delta.better { color: var(--clean); }
+.compare-table td .delta.worse { color: var(--crit); }
+.cmp-name { font-weight: 600; color: var(--text); }
+.cmp-type { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 4px; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.cmp-type.company { background: var(--bg-3); color: var(--text-3); }
+.cmp-type.contractor { background: var(--brand-2); color: var(--brand); }
+.cmp-card-btn {
+  background: none; border: 1px solid var(--line-strong); color: var(--brand);
+  border-radius: 6px; padding: 4px 9px; font-size: 10px; font-weight: 600; cursor: pointer;
+}
+.cmp-card-btn:active { background: var(--bg-3); }
+
+/* ============ Printable driver report card ============ */
+.report-modal {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.5);
+  display: none; align-items: flex-start; justify-content: center; overflow-y: auto;
+  padding: var(--s-4);
+}
+.report-modal.open { display: flex; }
+.report-card {
+  background: #fff; color: #0f172a; width: 100%; max-width: 640px; border-radius: 12px;
+  padding: 28px 32px; margin: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.report-actions { display: flex; gap: var(--s-2); justify-content: flex-end; margin-bottom: var(--s-3); }
+.report-actions button {
+  border: 1px solid var(--line-strong); background: var(--bg-1); color: var(--text);
+  border-radius: 7px; padding: 7px 14px; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+}
+.report-actions button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+.rc-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
+.rc-title { font-size: 22px; font-weight: 800; color: #0f172a; }
+.rc-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+.rc-brand { font-size: 11px; font-weight: 800; letter-spacing: 0.14em; color: #1e5b92; text-transform: uppercase; }
+.rc-brand span { display: block; font-size: 9px; color: #94a3b8; font-weight: 600; letter-spacing: 0.06em; }
+.rc-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin: 18px 0 8px; }
+.rc-metrics { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+.rc-metric-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.1fr; gap: 0; border-bottom: 1px solid #e5e7eb; }
+.rc-metric-row:last-child { border-bottom: none; }
+.rc-metric-row.header { background: #f3f4f6; }
+.rc-metric-row > div { padding: 9px 12px; font-size: 12px; font-feature-settings: 'tnum'; }
+.rc-metric-row.header > div { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+.rc-metric-row .rc-m-label { font-weight: 600; color: #0f172a; }
+.rc-metric-row .rc-m-you { font-weight: 700; color: #0f172a; text-align: right; }
+.rc-metric-row .rc-m-peer { color: #64748b; text-align: right; }
+.rc-metric-row .rc-m-verdict { text-align: right; font-weight: 700; }
+.rc-m-verdict.better { color: #15803d; }
+.rc-m-verdict.worse { color: #b91c1c; }
+.rc-m-verdict.neutral { color: #64748b; }
+.rc-note { font-size: 10px; color: #94a3b8; margin-top: 14px; line-height: 1.5; }
+.rc-summary { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #334155; line-height: 1.55; }
+
+@media print {
+  body * { visibility: hidden !important; }
+  .report-modal, .report-modal * { visibility: visible !important; }
+  .report-modal {
+    position: absolute; inset: 0; background: #fff; display: block !important;
+    padding: 0; overflow: visible;
+  }
+  .report-card { box-shadow: none; max-width: none; width: 100%; margin: 0; border-radius: 0; padding: 0.4in 0.5in; }
+  .report-actions { display: none !important; }
+  .rc-metric-row { break-inside: avoid; }
+}
 
 .ref-detail-summary { margin-bottom: var(--s-4); }
 .ref-detail-headline {
@@ -889,6 +985,10 @@ body {
   </div>
 </div>
 
+<div class="report-modal" id="reportModal">
+  <div id="reportBody"></div>
+</div>
+
 <div class="modal" id="settingsModal">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
@@ -933,7 +1033,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.7.0-motive-integrity';
+const APP_VERSION = 'v4.7.1-stops-per-hr';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1157,7 +1257,11 @@ function renderDistBar(dist, total, opts = {}) {
 const overviewState = {
   days: 30,            // 30 | 90 | 180 | 365 | 'all'
   viewAllOpen: false,
-  viewAllSort: 'alpha' // 'alpha' | 'stolen' | 'trend' | 'critical'
+  viewAllSort: 'alpha', // 'alpha' | 'stolen' | 'trend' | 'critical'
+  compareOpen: false,
+  compareSort: 'name',  // compare-view sort column
+  compareDir: 1,        // 1 asc, -1 desc
+  compareGroup: 'all'   // 'all' | 'company' | 'contractor'
 };
 
 function renderTrendIndicator(t30) {
@@ -1198,9 +1302,306 @@ function renderReferenceCell(key, label, ref) {
       <div class="ref-row"><span class="k">Median drive to 1st</span><span class="v">${ref.medianExpectedToFirst != null ? fmtDur(ref.medianExpectedToFirst) : '—'}</span></div>
       <div class="ref-row"><span class="k">Median morning gap</span><span class="v ${gapClass}">${fmtDur(obsGap)}</span></div>
       <div class="ref-row"><span class="k">Median on-route (1st→last)</span><span class="v">${fmtDur(ref.medianOnRouteMin)}</span></div>
+      <div class="ref-row"><span class="k">Median stops/hr</span><span class="v">${fmtSphRef(ref.medianStopsPerHourOnRoute)}</span></div>
       <div class="ref-row"><span class="k">Median last→clockOut</span><span class="v">${fmtDur(ref.medianL2C)}</span></div>
       <div class="ref-foot">model: travel + ${ref.representativeLoadPrep}m prep + ${okThr}m ok floor</div>
     </div>`;
+}
+
+// Contractors (owner-ops) combined card. They don't punch B600, so only the
+// route + throughput metrics are shown — time on route and deliveries/hr, the
+// two the operator asked for, plus stops/day for context. Tappable → opens the
+// driver comparison view scoped to contractors.
+function renderContractorCard(c) {
+  if (!c || !c.n_drivers) {
+    return `
+      <div class="ref-cell empty">
+        <h4>Contractors · owner-ops</h4>
+        <div class="ref-row"><span class="k">No contractor activity in range</span><span class="v">—</span></div>
+      </div>`;
+  }
+  return `
+    <div class="ref-cell contractor-cell" id="contractorCard">
+      <h4>Contractors · owner-ops <span class="ref-tap">tap to compare →</span></h4>
+      <div class="ref-row"><span class="k">Contractors</span><span class="v">${c.n_drivers}</span></div>
+      <div class="ref-row"><span class="k">Days observed</span><span class="v">${c.n_days}</span></div>
+      <div class="ref-row"><span class="k">Median time on route</span><span class="v">${fmtDur(c.medianOnRouteMin)}</span></div>
+      <div class="ref-row"><span class="k">Median deliveries/hr</span><span class="v">${fmtSphRef(c.medianStopsPerHourOnRoute)}</span></div>
+      <div class="ref-row"><span class="k">Median stops/day</span><span class="v">${c.medianStopsPerDay != null ? c.medianStopsPerDay : '—'}</span></div>
+      <div class="ref-foot">owner-ops don't clock in · route + throughput only</div>
+    </div>`;
+}
+
+// ---------- Compare all drivers ----------
+// Flatten the dashboard payload into one row per driver, merging the per-driver
+// medians (from the truck×load reference buckets + the contractor bucket) with
+// the stolen-$ / risk figures (from offendersRanked). Each row carries its peer
+// group's medians so the comparison view and the printable card can show
+// "you vs peers" without another round-trip.
+const CMP_BUCKET_LABELS = {
+  straight_preload: 'Straight · pre-load', straight_selfload: 'Straight · self-load',
+  tractor_preload: 'Tractor · pre-load', tractor_selfload: 'Tractor · self-load',
+  contractor: 'Contractors'
+};
+function buildCompareRows(d) {
+  const rows = {};
+  const peerByBucket = {};
+  for (const [key, ref] of Object.entries(d.referenceMetrics || {})) {
+    if (!ref) continue;
+    peerByBucket[key] = {
+      medianC2F: ref.medianC2F, medianMorningGap: ref.medianMorningGap,
+      medianOnRouteMin: ref.medianOnRouteMin, medianStopsPerHourOnRoute: ref.medianStopsPerHourOnRoute
+    };
+    for (const p of (ref.perDriverBreakdown || [])) {
+      rows[p.slug] = {
+        slug: p.slug, displayName: p.displayName, role: p.role || 'driver',
+        bucketKey: key, bucketLabel: CMP_BUCKET_LABELS[key] || key,
+        n_days: p.n_days,
+        medianC2F: p.medianC2F, medianMorningGap: p.medianMorningGap,
+        medianOnRouteMin: p.medianOnRouteMin, medianStopsPerHourOnRoute: p.medianStopsPerHourOnRoute,
+        peer: peerByBucket[key]
+      };
+    }
+  }
+  // Contractors not already placed in a truck×load bucket (unknown truck type).
+  const contractorPeer = d.contractorMetrics ? {
+    medianC2F: null, medianMorningGap: null,
+    medianOnRouteMin: d.contractorMetrics.medianOnRouteMin,
+    medianStopsPerHourOnRoute: d.contractorMetrics.medianStopsPerHourOnRoute
+  } : null;
+  for (const p of (d.contractorMetrics?.perDriverBreakdown || [])) {
+    if (rows[p.slug]) { rows[p.slug].role = 'owner_op'; continue; }
+    rows[p.slug] = {
+      slug: p.slug, displayName: p.displayName, role: 'owner_op',
+      bucketKey: 'contractor', bucketLabel: 'Contractors',
+      n_days: p.n_days,
+      medianC2F: null, medianMorningGap: null,
+      medianOnRouteMin: p.medianOnRouteMin, medianStopsPerHourOnRoute: p.medianStopsPerHourOnRoute,
+      peer: contractorPeer
+    };
+  }
+  const offMap = {};
+  for (const o of (d.offendersRanked || [])) offMap[o.slug] = o;
+  for (const row of Object.values(rows)) {
+    const o = offMap[row.slug];
+    row.stolenDollars = o?.stolenDollars || 0;
+    row.criticalDays = o?.criticalDays || 0;
+    row.highDays = o?.highDays || 0;
+    row.daysWithData = o?.daysWithData || 0;
+    row.truckType = o?.truckType || row.truckType || null;
+    if (o?.role) row.role = o.role;
+  }
+  return Object.values(rows);
+}
+
+const CMP_SORTERS = {
+  name:       r => (r.displayName || '').toLowerCase(),
+  days:       r => r.n_days || 0,
+  c2f:        r => (r.medianC2F == null ? Infinity : r.medianC2F),
+  morningGap: r => (r.medianMorningGap == null ? Infinity : r.medianMorningGap),
+  onRoute:    r => (r.medianOnRouteMin == null ? -Infinity : r.medianOnRouteMin),
+  stopsPerHr: r => (r.medianStopsPerHourOnRoute == null ? -Infinity : r.medianStopsPerHourOnRoute),
+  stolen:     r => r.stolenDollars || 0
+};
+
+function renderCompareAll(section, d) {
+  const allRows = buildCompareRows(d);
+  const grp = overviewState.compareGroup;
+  const filtered = allRows.filter(r =>
+    grp === 'all' ? true : grp === 'contractor' ? r.role === 'owner_op' : r.role !== 'owner_op');
+  const sortFn = CMP_SORTERS[overviewState.compareSort] || CMP_SORTERS.name;
+  filtered.sort((a, b) => {
+    const va = sortFn(a), vb = sortFn(b);
+    if (va < vb) return -1 * overviewState.compareDir;
+    if (va > vb) return 1 * overviewState.compareDir;
+    return 0;
+  });
+
+  const caret = (key) => overviewState.compareSort === key
+    ? `<span class="sort-caret">${overviewState.compareDir === 1 ? '▲' : '▼'}</span>` : '';
+
+  // A metric cell with a "vs peer" delta beneath the value.
+  const cell = (val, peer, fmtVal, fmtMag, higherIsBetter) => {
+    if (val == null || Number.isNaN(val)) return `<td><span class="v">—</span></td>`;
+    let deltaHtml = '';
+    if (typeof peer === 'number') {
+      const diff = val - peer;
+      if (Math.abs(diff) >= (fmtMag === fmtSphMag ? 0.01 : 0.5)) {
+        const better = higherIsBetter ? diff > 0 : diff < 0;
+        const sign = diff > 0 ? '+' : '−';
+        deltaHtml = `<span class="delta ${better ? 'better' : 'worse'}">${sign}${fmtMag(diff)}</span>`;
+      }
+    }
+    return `<td><span class="v">${fmtVal(val)}</span>${deltaHtml}</td>`;
+  };
+
+  const bodyRows = filtered.map(r => {
+    const isContractor = r.role === 'owner_op';
+    const typeBadge = isContractor
+      ? `<span class="cmp-type contractor">owner-op</span>`
+      : `<span class="cmp-type company">company</span>`;
+    return `
+      <tr>
+        <td>
+          <span class="cmp-name">${escapeHtml(r.displayName || r.slug)}</span>${typeBadge}
+        </td>
+        <td><span class="v">${r.n_days}</span></td>
+        ${cell(r.medianC2F, r.peer?.medianC2F, fmtDur, fmtMinMag, false)}
+        ${cell(r.medianMorningGap, r.peer?.medianMorningGap, fmtDur, fmtMinMag, false)}
+        ${cell(r.medianOnRouteMin, r.peer?.medianOnRouteMin, fmtDur, fmtMinMag, false)}
+        ${cell(r.medianStopsPerHourOnRoute, r.peer?.medianStopsPerHourOnRoute, fmtSphRef, fmtSphMag, true)}
+        <td><span class="v">${r.stolenDollars > 0 ? fmt$(r.stolenDollars) : '—'}</span></td>
+        <td><button class="cmp-card-btn" data-report-slug="${r.slug}">Card</button></td>
+      </tr>`;
+  }).join('');
+
+  section.innerHTML = `
+    <div class="compare-wrap">
+      <div class="compare-controls">
+        <div class="compare-seg" id="compareGroupSeg">
+          <button data-grp="all" class="${grp === 'all' ? 'active' : ''}">All</button>
+          <button data-grp="company" class="${grp === 'company' ? 'active' : ''}">Company</button>
+          <button data-grp="contractor" class="${grp === 'contractor' ? 'active' : ''}">Contractors</button>
+        </div>
+        <span class="compare-note">medians over ${d.rangeMeta?.days === 'all' ? 'all time' : d.rangeMeta?.days + 'd'} · Δ = vs same-bucket peers · tap a column to sort</span>
+      </div>
+      <div class="compare-table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th data-sort="name">Driver ${caret('name')}</th>
+              <th data-sort="days">Days ${caret('days')}</th>
+              <th data-sort="c2f">Clock→1st ${caret('c2f')}</th>
+              <th data-sort="morningGap">Morning gap ${caret('morningGap')}</th>
+              <th data-sort="onRoute">On-route ${caret('onRoute')}</th>
+              <th data-sort="stopsPerHr">Stops/hr ${caret('stopsPerHr')}</th>
+              <th data-sort="stolen">Unexplained $ ${caret('stolen')}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${bodyRows || `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:var(--s-4)">No drivers in this group.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // Group filter.
+  section.querySelectorAll('#compareGroupSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      overviewState.compareGroup = btn.dataset.grp;
+      renderCompareAll(section, d);
+    });
+  });
+  // Column sort — toggles direction when re-clicking the active column.
+  section.querySelectorAll('.compare-table thead th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (overviewState.compareSort === key) overviewState.compareDir *= -1;
+      else { overviewState.compareSort = key; overviewState.compareDir = (key === 'name') ? 1 : -1; }
+      renderCompareAll(section, d);
+    });
+  });
+  // Printable card buttons.
+  section.querySelectorAll('.cmp-card-btn[data-report-slug]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDriverReportCard(btn.dataset.reportSlug, d);
+    });
+  });
+}
+
+// Magnitude formatters for the "vs peer" deltas (sign is added by the caller).
+const fmtMinMag = (m) => fmtDur(Math.abs(Math.round(m)));
+const fmtSphMag = (v) => Math.abs(v).toFixed(2);
+
+// ---------- Printable driver report card ----------
+// A one-page, print-optimized "report card" for a single driver: their medians
+// vs their peer group, framed for a performance-improvement conversation.
+function openDriverReportCard(slug, d) {
+  const rows = buildCompareRows(d);
+  const r = rows.find(x => x.slug === slug);
+  const modal = document.getElementById('reportModal');
+  const body = document.getElementById('reportBody');
+  if (!r) {
+    body.innerHTML = `<div class="report-card"><p>No comparison data for this driver in the selected range.</p></div>`;
+    modal.classList.add('open');
+    return;
+  }
+  const isContractor = r.role === 'owner_op';
+  const rangeText = d.rangeMeta?.days === 'all' ? 'all time' : `last ${d.rangeMeta?.days} days`;
+
+  // One metric row: label, driver value, peer median, verdict.
+  const metric = (label, val, peer, fmtVal, higherIsBetter, note) => {
+    let youTxt = (val == null || Number.isNaN(val)) ? '—' : fmtVal(val);
+    let peerTxt = (peer == null || Number.isNaN(peer)) ? '—' : fmtVal(peer);
+    let verdict = '<span class="rc-m-verdict neutral">—</span>';
+    if (typeof val === 'number' && typeof peer === 'number') {
+      const diff = val - peer;
+      if (Math.abs(diff) < (fmtVal === fmtSphRef ? 0.05 : 1)) {
+        verdict = '<span class="rc-m-verdict neutral">on par</span>';
+      } else {
+        const better = higherIsBetter ? diff > 0 : diff < 0;
+        verdict = `<span class="rc-m-verdict ${better ? 'better' : 'worse'}">${better ? '▲ better' : '▼ worse'}</span>`;
+      }
+    }
+    return `
+      <div class="rc-metric-row">
+        <div class="rc-m-label">${label}${note ? `<br><span style="font-weight:400;color:#94a3b8;font-size:10px">${note}</span>` : ''}</div>
+        <div class="rc-m-you">${youTxt}</div>
+        <div class="rc-m-peer">${peerTxt}</div>
+        <div>${verdict}</div>
+      </div>`;
+  };
+
+  const peer = r.peer || {};
+  const clockRows = isContractor ? '' : `
+    ${metric('Clock-in → 1st delivery', r.medianC2F, peer.medianC2F, fmtDur, false, 'time from punch to first stop')}
+    ${metric('Morning gap', r.medianMorningGap, peer.medianMorningGap, fmtDur, false, 'unexplained time before route')}`;
+
+  body.innerHTML = `
+    <div class="report-card">
+      <div class="report-actions">
+        <button onclick="window.print()" class="primary">Print / Save PDF</button>
+        <button onclick="closeDriverReportCard()">Close</button>
+      </div>
+      <div class="rc-head">
+        <div>
+          <div class="rc-title">${escapeHtml(r.displayName || r.slug)}</div>
+          <div class="rc-sub">${isContractor ? 'Owner-operator' : 'Company driver'}${r.truckType && r.truckType !== 'unknown' ? ' · ' + escapeHtml(r.truckType) : ''} · ${r.n_days} days · ${rangeText}</div>
+        </div>
+        <div class="rc-brand">SENTINEL<span>Performance card</span></div>
+      </div>
+
+      <div class="rc-summary">
+        These are ${escapeHtml((r.displayName || 'this driver').split(' ')[0])}'s median numbers over the ${rangeText}, next to the median for their peer group (<strong>${escapeHtml(r.bucketLabel)}</strong>). Peers are the fairest yardstick — same truck, same kind of route. Use this for a coaching conversation, not a gotcha.
+      </div>
+
+      <div class="rc-section-title">Metric · You vs peer median</div>
+      <div class="rc-metrics">
+        <div class="rc-metric-row header">
+          <div>Metric</div><div style="text-align:right">This driver</div><div style="text-align:right">Peer median</div><div style="text-align:right">Verdict</div>
+        </div>
+        ${clockRows}
+        ${metric('Time on route (1st → last)', r.medianOnRouteMin, peer.medianOnRouteMin, fmtDur, false, 'active delivering window')}
+        ${metric('Deliveries per hour', r.medianStopsPerHourOnRoute, peer.medianStopsPerHourOnRoute, fmtSphRef, true, 'throughput while on route')}
+      </div>
+
+      ${r.stolenDollars > 0 ? `
+        <div class="rc-section-title">Flagged this period</div>
+        <div class="rc-summary">
+          <strong>${fmt$(r.stolenDollars)}</strong> in unexplained time · ${r.criticalDays} critical day${r.criticalDays === 1 ? '' : 's'} · ${r.highDays} high day${r.highDays === 1 ? '' : 's'}.
+          ${isContractor ? 'Note: owner-ops are not scored on clock-in gaps (no time-clock punch); this reflects route-level signals only.' : ''}
+        </div>` : ''}
+
+      <div class="rc-note">
+        Lower is better for time-based rows (clock-in→1st, morning gap, time on route); higher is better for deliveries/hour.
+        "Verdict" compares this driver to the median of their peer group. Medians resist one-off bad days.
+        Generated by SENTINEL · ${escapeHtml(new Date().toISOString().slice(0, 10))}.
+      </div>
+    </div>`;
+  modal.classList.add('open');
+}
+function closeDriverReportCard() {
+  document.getElementById('reportModal').classList.remove('open');
 }
 
 // Reference-metrics drilldown state — tracks which cell is open, the
@@ -1564,6 +1965,11 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
           ${renderReferenceCell('tractor_preload', 'Tractor · pre-load', d.referenceMetrics?.tractor_preload)}
           ${renderReferenceCell('tractor_selfload', 'Tractor · self-load', d.referenceMetrics?.tractor_selfload)}
         </div>
+        <div class="ref-grid" style="margin-top:var(--s-2)">
+          ${renderContractorCard(d.contractorMetrics)}
+        </div>
+        <button class="viewall-toggle" id="compareToggle">▸ Compare all drivers</button>
+        <div id="compareSection" style="display:none"></div>
       </div>
 
       ${d.baselines ? `
@@ -1648,6 +2054,45 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
 
     if (overviewState.viewAllOpen) {
       renderViewAll(document.getElementById('viewAllSection'), d);
+    }
+
+    // Compare-all-drivers toggle. Opens the full comparison table (every driver
+    // in one place, sortable, with peer-median context).
+    const compareToggle = document.getElementById('compareToggle');
+    if (compareToggle) {
+      compareToggle.addEventListener('click', () => {
+        overviewState.compareOpen = !overviewState.compareOpen;
+        const section = document.getElementById('compareSection');
+        if (overviewState.compareOpen) {
+          section.style.display = '';
+          renderCompareAll(section, d);
+          compareToggle.textContent = '▾ Hide comparison';
+          section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          section.style.display = 'none';
+          compareToggle.textContent = '▸ Compare all drivers';
+        }
+      });
+    }
+    if (overviewState.compareOpen) {
+      const section = document.getElementById('compareSection');
+      section.style.display = '';
+      compareToggle.textContent = '▾ Hide comparison';
+      renderCompareAll(section, d);
+    }
+
+    // Contractor card → open the comparison view scoped to contractors.
+    const contractorCard = document.getElementById('contractorCard');
+    if (contractorCard) {
+      contractorCard.addEventListener('click', () => {
+        overviewState.compareGroup = 'contractor';
+        overviewState.compareOpen = true;
+        const section = document.getElementById('compareSection');
+        section.style.display = '';
+        if (compareToggle) compareToggle.textContent = '▾ Hide comparison';
+        renderCompareAll(section, d);
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     }
 
     // Subtle "refreshed" indicator when fresh data replaced a cached render.
@@ -2847,6 +3292,10 @@ document.getElementById('refDetailModal').addEventListener('click', (ev) => {
   // Tap on the backdrop (the .modal element itself) closes; taps inside the
   // .modal-sheet bubble through but ignore.
   if (ev.target === ev.currentTarget) closeReferenceDetailModal();
+});
+document.getElementById('reportModal').addEventListener('click', (ev) => {
+  // Backdrop tap closes the printable report card.
+  if (ev.target === ev.currentTarget) closeDriverReportCard();
 });
 async function runMaintenance(endpoint, statusId, btnId, doneLabel) {
   const statusEl = document.getElementById(statusId);
