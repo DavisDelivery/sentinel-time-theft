@@ -87,11 +87,12 @@ body {
   display: flex; padding-bottom: env(safe-area-inset-bottom);
 }
 .tab {
-  flex: 1; background: transparent; border: 0; color: var(--text-3); cursor: pointer;
-  padding: var(--s-3) var(--s-2) var(--s-4); font-family: inherit; font-size: var(--fs-xs);
-  font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  flex: 1; min-width: 0; background: transparent; border: 0; color: var(--text-3); cursor: pointer;
+  padding: var(--s-3) var(--s-1) var(--s-4); font-family: inherit; font-size: 9px;
+  font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
   border-top: 2px solid transparent; transition: all 0.15s;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tab .ti svg { width: 18px; height: 18px; }
 .tab.active { color: var(--text); border-top-color: var(--brand); }
@@ -663,7 +664,6 @@ body {
   margin-top: 2px; text-transform: none; letter-spacing: 0;
 }
 .ref-cell.contractor-cell {
-  grid-column: 1 / -1;
   border-color: var(--brand); background: var(--brand-2);
 }
 .ref-cell.contractor-cell h4 { color: var(--brand); }
@@ -732,7 +732,8 @@ body {
 .rc-brand span { display: block; font-size: 9px; color: #94a3b8; font-weight: 600; letter-spacing: 0.06em; }
 .rc-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin: 18px 0 8px; }
 .rc-metrics { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
-.rc-metric-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.1fr; gap: 0; border-bottom: 1px solid #e5e7eb; }
+.rc-metric-row { display: grid; grid-template-columns: 1.5fr 0.9fr 0.9fr 0.7fr 0.9fr; gap: 0; border-bottom: 1px solid #e5e7eb; }
+.rc-metric-row .rc-m-rank { color: #64748b; text-align: right; font-weight: 600; }
 .rc-metric-row:last-child { border-bottom: none; }
 .rc-metric-row.header { background: #f3f4f6; }
 .rc-metric-row > div { padding: 9px 12px; font-size: 12px; font-feature-settings: 'tnum'; }
@@ -746,6 +747,11 @@ body {
 .rc-m-verdict.neutral { color: #64748b; }
 .rc-note { font-size: 10px; color: #94a3b8; margin-top: 14px; line-height: 1.5; }
 .rc-summary { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #334155; line-height: 1.55; }
+.rc-goals { margin-top: 4px; }
+.rc-goal-line { border-bottom: 1px solid #cbd5e1; height: 26px; }
+.rc-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 28px; }
+.rc-sig-line { border-bottom: 1px solid #0f172a; height: 24px; }
+.rc-sig-label { font-size: 10px; color: #64748b; margin-top: 4px; }
 
 @media print {
   body * { visibility: hidden !important; }
@@ -943,6 +949,12 @@ body {
   </div>
 </div>
 
+<div class="page" id="page-performance">
+  <div id="performanceContent">
+    <div class="loading">Loading performance data</div>
+  </div>
+</div>
+
 <div class="page" id="page-anomalies">
   <div id="anomaliesContent">
     <div class="loading">Loading anomalies</div>
@@ -961,6 +973,10 @@ body {
   <button class="tab" data-page="investigate">
     <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
     Investigate
+  </button>
+  <button class="tab" data-page="performance">
+    <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
+    Performance
   </button>
   <button class="tab" data-page="profile">
     <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
@@ -1033,7 +1049,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.7.1-stops-per-hr';
+const APP_VERSION = 'v4.8.0-performance-tab';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1257,11 +1273,7 @@ function renderDistBar(dist, total, opts = {}) {
 const overviewState = {
   days: 30,            // 30 | 90 | 180 | 365 | 'all'
   viewAllOpen: false,
-  viewAllSort: 'alpha', // 'alpha' | 'stolen' | 'trend' | 'critical'
-  compareOpen: false,
-  compareSort: 'name',  // compare-view sort column
-  compareDir: 1,        // 1 asc, -1 desc
-  compareGroup: 'all'   // 'all' | 'company' | 'contractor'
+  viewAllSort: 'alpha' // 'alpha' | 'stolen' | 'trend' | 'critical'
 };
 
 function renderTrendIndicator(t30) {
@@ -1332,7 +1344,7 @@ function renderContractorCard(c) {
     </div>`;
 }
 
-// ---------- Compare all drivers ----------
+// ---------- Performance tab: compare all drivers + printable report ----------
 // Flatten the dashboard payload into one row per driver, merging the per-driver
 // medians (from the truck×load reference buckets + the contractor bucket) with
 // the stolen-$ / risk figures (from offendersRanked). Each row carries its peer
@@ -1343,40 +1355,52 @@ const CMP_BUCKET_LABELS = {
   tractor_preload: 'Tractor · pre-load', tractor_selfload: 'Tractor · self-load',
   contractor: 'Contractors'
 };
+// Metric keys copied per driver row and per peer-median block — one list so the
+// row builder, the peer builder, and the rank computation can't drift apart.
+const CMP_METRIC_KEYS = [
+  'medianC2F', 'medianExpectedToFirst', 'medianMorningGap',
+  'medianOnRouteMin', 'medianStopsPerHourOnRoute', 'medianStopsPerDay',
+  'medianAfternoonGap', 'medianL2C'
+];
 function buildCompareRows(d) {
   const rows = {};
   const peerByBucket = {};
   for (const [key, ref] of Object.entries(d.referenceMetrics || {})) {
     if (!ref) continue;
-    peerByBucket[key] = {
-      medianC2F: ref.medianC2F, medianMorningGap: ref.medianMorningGap,
-      medianOnRouteMin: ref.medianOnRouteMin, medianStopsPerHourOnRoute: ref.medianStopsPerHourOnRoute
-    };
+    const peer = {};
+    for (const k of CMP_METRIC_KEYS) peer[k] = (typeof ref[k] === 'number') ? ref[k] : null;
+    peerByBucket[key] = peer;
     for (const p of (ref.perDriverBreakdown || [])) {
-      rows[p.slug] = {
+      const row = {
         slug: p.slug, displayName: p.displayName, role: p.role || 'driver',
         bucketKey: key, bucketLabel: CMP_BUCKET_LABELS[key] || key,
         n_days: p.n_days,
-        medianC2F: p.medianC2F, medianMorningGap: p.medianMorningGap,
-        medianOnRouteMin: p.medianOnRouteMin, medianStopsPerHourOnRoute: p.medianStopsPerHourOnRoute,
         peer: peerByBucket[key]
       };
+      for (const k of CMP_METRIC_KEYS) row[k] = (typeof p[k] === 'number') ? p[k] : null;
+      rows[p.slug] = row;
     }
   }
   // Contractors not already placed in a truck×load bucket (unknown truck type).
-  const contractorPeer = d.contractorMetrics ? {
-    medianC2F: null, medianMorningGap: null,
-    medianOnRouteMin: d.contractorMetrics.medianOnRouteMin,
-    medianStopsPerHourOnRoute: d.contractorMetrics.medianStopsPerHourOnRoute
+  const cm = d.contractorMetrics;
+  const contractorPeer = cm ? {
+    medianC2F: null, medianExpectedToFirst: null, medianMorningGap: null,
+    medianOnRouteMin: cm.medianOnRouteMin,
+    medianStopsPerHourOnRoute: cm.medianStopsPerHourOnRoute,
+    medianStopsPerDay: cm.medianStopsPerDay,
+    medianAfternoonGap: null, medianL2C: null
   } : null;
-  for (const p of (d.contractorMetrics?.perDriverBreakdown || [])) {
+  for (const p of (cm?.perDriverBreakdown || [])) {
     if (rows[p.slug]) { rows[p.slug].role = 'owner_op'; continue; }
     rows[p.slug] = {
       slug: p.slug, displayName: p.displayName, role: 'owner_op',
       bucketKey: 'contractor', bucketLabel: 'Contractors',
       n_days: p.n_days,
-      medianC2F: null, medianMorningGap: null,
-      medianOnRouteMin: p.medianOnRouteMin, medianStopsPerHourOnRoute: p.medianStopsPerHourOnRoute,
+      medianC2F: null, medianExpectedToFirst: null, medianMorningGap: null,
+      medianOnRouteMin: (typeof p.medianOnRouteMin === 'number') ? p.medianOnRouteMin : null,
+      medianStopsPerHourOnRoute: (typeof p.medianStopsPerHourOnRoute === 'number') ? p.medianStopsPerHourOnRoute : null,
+      medianStopsPerDay: (typeof p.medianStopsPerDay === 'number') ? p.medianStopsPerDay : null,
+      medianAfternoonGap: null, medianL2C: null,
       peer: contractorPeer
     };
   }
@@ -1388,10 +1412,30 @@ function buildCompareRows(d) {
     row.criticalDays = o?.criticalDays || 0;
     row.highDays = o?.highDays || 0;
     row.daysWithData = o?.daysWithData || 0;
+    row.days = o?.days || row.n_days;
+    row.trend30d = o?.trend30d || null;
     row.truckType = o?.truckType || row.truckType || null;
     if (o?.role) row.role = o.role;
   }
   return Object.values(rows);
+}
+
+// Rank a driver within their peer bucket on one metric. Returns
+// { rank, of } (1 = best) or null when the driver or bucket can't speak.
+// Contractors rank within the contractor pool; company drivers within their
+// truck×load bucket.
+function rankInBucket(d, row, metricKey, higherIsBetter) {
+  const breakdown = row.bucketKey === 'contractor'
+    ? d.contractorMetrics?.perDriverBreakdown
+    : d.referenceMetrics?.[row.bucketKey]?.perDriverBreakdown;
+  if (!Array.isArray(breakdown)) return null;
+  const vals = breakdown
+    .filter(p => typeof p[metricKey] === 'number')
+    .map(p => ({ slug: p.slug, v: p[metricKey] }))
+    .sort((a, b) => higherIsBetter ? b.v - a.v : a.v - b.v);
+  const idx = vals.findIndex(x => x.slug === row.slug);
+  if (idx < 0 || vals.length < 2) return null;
+  return { rank: idx + 1, of: vals.length };
 }
 
 const CMP_SORTERS = {
@@ -1401,24 +1445,70 @@ const CMP_SORTERS = {
   morningGap: r => (r.medianMorningGap == null ? Infinity : r.medianMorningGap),
   onRoute:    r => (r.medianOnRouteMin == null ? -Infinity : r.medianOnRouteMin),
   stopsPerHr: r => (r.medianStopsPerHourOnRoute == null ? -Infinity : r.medianStopsPerHourOnRoute),
+  stopsPerDay: r => (r.medianStopsPerDay == null ? -Infinity : r.medianStopsPerDay),
   stolen:     r => r.stolenDollars || 0
 };
 
+// ---------- Performance tab ----------
+const performanceState = {
+  days: 90,        // 30 | 90 | 180 | 365 | 'all'
+  sort: 'name', dir: 1,
+  group: 'all',    // 'all' | 'company' | 'contractor'
+  payload: null
+};
+function navigateToPerformance() {
+  document.querySelector('.tab[data-page="performance"]').click();
+}
+async function loadPerformance() {
+  const container = document.getElementById('performanceContent');
+  container.innerHTML = '<div class="loading">Loading performance data</div>';
+  try {
+    const d = await api('dashboard', { days: performanceState.days });
+    performanceState.payload = d;
+    renderPerformance(container, d);
+  } catch (e) {
+    if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
+  }
+}
+function renderPerformance(container, d) {
+  const rangeText = performanceState.days === 'all' ? 'all time' : `${performanceState.days}d`;
+  container.innerHTML = `
+    <div class="section">
+      <div class="section-head">
+        <h2>Driver Performance · ${rangeText}</h2>
+        <div class="aux">medians vs peer group · tap a driver for their printable card</div>
+      </div>
+      <div class="range-chips" style="margin-bottom:var(--s-3)">
+        ${[30, 90, 180, 365, 'all'].map(v =>
+          `<button class="range-chip ${performanceState.days === v ? 'active' : ''}" data-perf-range="${v}">${rangeLabel(v)}</button>`).join('')}
+      </div>
+      <div id="perfTable"></div>
+    </div>`;
+  container.querySelectorAll('[data-perf-range]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const v = btn.dataset.perfRange;
+      performanceState.days = (v === 'all') ? 'all' : parseInt(v, 10);
+      loadPerformance();
+    });
+  });
+  renderCompareAll(document.getElementById('perfTable'), d);
+}
+
 function renderCompareAll(section, d) {
   const allRows = buildCompareRows(d);
-  const grp = overviewState.compareGroup;
+  const grp = performanceState.group;
   const filtered = allRows.filter(r =>
     grp === 'all' ? true : grp === 'contractor' ? r.role === 'owner_op' : r.role !== 'owner_op');
-  const sortFn = CMP_SORTERS[overviewState.compareSort] || CMP_SORTERS.name;
+  const sortFn = CMP_SORTERS[performanceState.sort] || CMP_SORTERS.name;
   filtered.sort((a, b) => {
     const va = sortFn(a), vb = sortFn(b);
-    if (va < vb) return -1 * overviewState.compareDir;
-    if (va > vb) return 1 * overviewState.compareDir;
+    if (va < vb) return -1 * performanceState.dir;
+    if (va > vb) return 1 * performanceState.dir;
     return 0;
   });
 
-  const caret = (key) => overviewState.compareSort === key
-    ? `<span class="sort-caret">${overviewState.compareDir === 1 ? '▲' : '▼'}</span>` : '';
+  const caret = (key) => performanceState.sort === key
+    ? `<span class="sort-caret">${performanceState.dir === 1 ? '▲' : '▼'}</span>` : '';
 
   // A metric cell with a "vs peer" delta beneath the value.
   const cell = (val, peer, fmtVal, fmtMag, higherIsBetter) => {
@@ -1441,7 +1531,7 @@ function renderCompareAll(section, d) {
       ? `<span class="cmp-type contractor">owner-op</span>`
       : `<span class="cmp-type company">company</span>`;
     return `
-      <tr>
+      <tr data-row-slug="${r.slug}">
         <td>
           <span class="cmp-name">${escapeHtml(r.displayName || r.slug)}</span>${typeBadge}
         </td>
@@ -1450,8 +1540,9 @@ function renderCompareAll(section, d) {
         ${cell(r.medianMorningGap, r.peer?.medianMorningGap, fmtDur, fmtMinMag, false)}
         ${cell(r.medianOnRouteMin, r.peer?.medianOnRouteMin, fmtDur, fmtMinMag, false)}
         ${cell(r.medianStopsPerHourOnRoute, r.peer?.medianStopsPerHourOnRoute, fmtSphRef, fmtSphMag, true)}
+        ${cell(r.medianStopsPerDay, r.peer?.medianStopsPerDay, (v) => String(v), (v) => String(Math.abs(Math.round(v))), true)}
         <td><span class="v">${r.stolenDollars > 0 ? fmt$(r.stolenDollars) : '—'}</span></td>
-        <td><button class="cmp-card-btn" data-report-slug="${r.slug}">Card</button></td>
+        <td><button class="cmp-card-btn" data-report-slug="${r.slug}">Print card</button></td>
       </tr>`;
   }).join('');
 
@@ -1463,7 +1554,7 @@ function renderCompareAll(section, d) {
           <button data-grp="company" class="${grp === 'company' ? 'active' : ''}">Company</button>
           <button data-grp="contractor" class="${grp === 'contractor' ? 'active' : ''}">Contractors</button>
         </div>
-        <span class="compare-note">medians over ${d.rangeMeta?.days === 'all' ? 'all time' : d.rangeMeta?.days + 'd'} · Δ = vs same-bucket peers · tap a column to sort</span>
+        <span class="compare-note">Δ = vs same-bucket peers · tap a column to sort · tap a row for the printable card</span>
       </div>
       <div class="compare-table-wrap">
         <table class="compare-table">
@@ -1474,12 +1565,13 @@ function renderCompareAll(section, d) {
               <th data-sort="c2f">Clock→1st ${caret('c2f')}</th>
               <th data-sort="morningGap">Morning gap ${caret('morningGap')}</th>
               <th data-sort="onRoute">On-route ${caret('onRoute')}</th>
-              <th data-sort="stopsPerHr">Stops/hr ${caret('stopsPerHr')}</th>
+              <th data-sort="stopsPerHr">Del/hr ${caret('stopsPerHr')}</th>
+              <th data-sort="stopsPerDay">Stops/day ${caret('stopsPerDay')}</th>
               <th data-sort="stolen">Unexplained $ ${caret('stolen')}</th>
               <th></th>
             </tr>
           </thead>
-          <tbody>${bodyRows || `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:var(--s-4)">No drivers in this group.</td></tr>`}</tbody>
+          <tbody>${bodyRows || `<tr><td colspan="9" style="text-align:center;color:var(--text-3);padding:var(--s-4)">No drivers in this group.</td></tr>`}</tbody>
         </table>
       </div>
     </div>`;
@@ -1487,7 +1579,7 @@ function renderCompareAll(section, d) {
   // Group filter.
   section.querySelectorAll('#compareGroupSeg button').forEach(btn => {
     btn.addEventListener('click', () => {
-      overviewState.compareGroup = btn.dataset.grp;
+      performanceState.group = btn.dataset.grp;
       renderCompareAll(section, d);
     });
   });
@@ -1495,12 +1587,15 @@ function renderCompareAll(section, d) {
   section.querySelectorAll('.compare-table thead th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.dataset.sort;
-      if (overviewState.compareSort === key) overviewState.compareDir *= -1;
-      else { overviewState.compareSort = key; overviewState.compareDir = (key === 'name') ? 1 : -1; }
+      if (performanceState.sort === key) performanceState.dir *= -1;
+      else { performanceState.sort = key; performanceState.dir = (key === 'name') ? 1 : -1; }
       renderCompareAll(section, d);
     });
   });
-  // Printable card buttons.
+  // Whole row (or its button) opens the printable report card.
+  section.querySelectorAll('tr[data-row-slug]').forEach(tr => {
+    tr.addEventListener('click', () => openDriverReportCard(tr.dataset.rowSlug, d));
+  });
   section.querySelectorAll('.cmp-card-btn[data-report-slug]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1514,28 +1609,36 @@ const fmtMinMag = (m) => fmtDur(Math.abs(Math.round(m)));
 const fmtSphMag = (v) => Math.abs(v).toFixed(2);
 
 // ---------- Printable driver report card ----------
-// A one-page, print-optimized "report card" for a single driver: their medians
-// vs their peer group, framed for a performance-improvement conversation.
+// A one-page, print-optimized "report card" for a single driver: every metric
+// we track, side-by-side with their peer group's median and their rank within
+// it — framed for sitting down with the driver for a performance conversation.
 function openDriverReportCard(slug, d) {
   const rows = buildCompareRows(d);
   const r = rows.find(x => x.slug === slug);
   const modal = document.getElementById('reportModal');
   const body = document.getElementById('reportBody');
   if (!r) {
-    body.innerHTML = `<div class="report-card"><p>No comparison data for this driver in the selected range.</p></div>`;
+    body.innerHTML = `<div class="report-card"><p style="padding:20px">No comparison data for this driver in the selected range.</p><div class="report-actions"><button onclick="closeDriverReportCard()">Close</button></div></div>`;
     modal.classList.add('open');
     return;
   }
   const isContractor = r.role === 'owner_op';
   const rangeText = d.rangeMeta?.days === 'all' ? 'all time' : `last ${d.rangeMeta?.days} days`;
+  const peer = r.peer || {};
 
-  // One metric row: label, driver value, peer median, verdict.
-  const metric = (label, val, peer, fmtVal, higherIsBetter, note) => {
-    let youTxt = (val == null || Number.isNaN(val)) ? '—' : fmtVal(val);
-    let peerTxt = (peer == null || Number.isNaN(peer)) ? '—' : fmtVal(peer);
-    let verdict = '<span class="rc-m-verdict neutral">—</span>';
-    if (typeof val === 'number' && typeof peer === 'number') {
-      const diff = val - peer;
+  // One metric row: label, driver value, peer median, rank-in-group, verdict.
+  const metric = (label, key, fmtVal, higherIsBetter, note) => {
+    const val = r[key], pv = peer[key];
+    const youTxt = (val == null || Number.isNaN(val)) ? '—' : fmtVal(val);
+    const peerTxt = (pv == null || Number.isNaN(pv)) ? '—' : fmtVal(pv);
+    // higherIsBetter === null marks a context row (e.g. expected drive):
+    // shown for the conversation, but never ranked or judged.
+    const isContext = higherIsBetter === null;
+    const rk = isContext ? null : rankInBucket(d, r, key, higherIsBetter);
+    const rankTxt = rk ? `${rk.rank} of ${rk.of}` : '—';
+    let verdict = `<span class="rc-m-verdict neutral">${isContext ? 'context' : '—'}</span>`;
+    if (!isContext && typeof val === 'number' && typeof pv === 'number') {
+      const diff = val - pv;
       if (Math.abs(diff) < (fmtVal === fmtSphRef ? 0.05 : 1)) {
         verdict = '<span class="rc-m-verdict neutral">on par</span>';
       } else {
@@ -1548,14 +1651,55 @@ function openDriverReportCard(slug, d) {
         <div class="rc-m-label">${label}${note ? `<br><span style="font-weight:400;color:#94a3b8;font-size:10px">${note}</span>` : ''}</div>
         <div class="rc-m-you">${youTxt}</div>
         <div class="rc-m-peer">${peerTxt}</div>
+        <div class="rc-m-rank">${rankTxt}</div>
         <div>${verdict}</div>
       </div>`;
   };
+  const header = () => `
+    <div class="rc-metric-row header">
+      <div>Metric</div><div style="text-align:right">This driver</div><div style="text-align:right">Peer median</div><div style="text-align:right">Rank</div><div style="text-align:right">Verdict</div>
+    </div>`;
 
-  const peer = r.peer || {};
-  const clockRows = isContractor ? '' : `
-    ${metric('Clock-in → 1st delivery', r.medianC2F, peer.medianC2F, fmtDur, false, 'time from punch to first stop')}
-    ${metric('Morning gap', r.medianMorningGap, peer.medianMorningGap, fmtDur, false, 'unexplained time before route')}`;
+  // Route performance applies to everyone; clock discipline only to company
+  // drivers (owner-ops don't punch B600).
+  const routeSection = `
+    <div class="rc-section-title">Route performance · vs ${escapeHtml(r.bucketLabel)} peers</div>
+    <div class="rc-metrics">
+      ${header()}
+      ${metric('Time on route (1st → last)', 'medianOnRouteMin', fmtDur, false, 'active delivering window')}
+      ${metric('Deliveries per hour', 'medianStopsPerHourOnRoute', fmtSphRef, true, 'throughput while on route')}
+      ${metric('Stops per day', 'medianStopsPerDay', (v) => String(v), true, 'completed deliveries per working day')}
+    </div>`;
+
+  const clockSection = isContractor ? '' : `
+    <div class="rc-section-title">Clock discipline · vs ${escapeHtml(r.bucketLabel)} peers</div>
+    <div class="rc-metrics">
+      ${header()}
+      ${metric('Clock-in → 1st delivery', 'medianC2F', fmtDur, false, 'punch to first stop — includes load/prep')}
+      ${metric('Expected drive to 1st', 'medianExpectedToFirst', fmtDur, null, 'Google typical-traffic estimate — context, not judged')}
+      ${metric('Morning gap', 'medianMorningGap', fmtDur, false, 'unexplained time before route')}
+      ${metric('Afternoon gap', 'medianAfternoonGap', fmtDur, false, 'unexplained time after last delivery')}
+      ${metric('Last delivery → clock-out', 'medianL2C', fmtDur, false, 'includes return drive + wrap-up')}
+    </div>`;
+
+  // Accountability: flagged totals + 30-day direction.
+  const t = r.trend30d;
+  const trendTxt = (t && (t.current || t.prior))
+    ? (t.delta < 0
+        ? `<span style="color:#15803d;font-weight:700">improving</span> — ${fmt$(Math.abs(t.delta))} less than the prior 30 days`
+        : t.delta > 0
+          ? `<span style="color:#b91c1c;font-weight:700">worsening</span> — ${fmt$(t.delta)} more than the prior 30 days`
+          : 'flat vs the prior 30 days')
+    : null;
+  const accountabilitySection = (r.stolenDollars > 0 || trendTxt) ? `
+    <div class="rc-section-title">Accountability</div>
+    <div class="rc-summary">
+      ${r.stolenDollars > 0
+        ? `<strong>${fmt$(r.stolenDollars)}</strong> in unexplained time over ${r.daysWithData || r.n_days} days with data · ${r.criticalDays} critical day${r.criticalDays === 1 ? '' : 's'} · ${r.highDays} high day${r.highDays === 1 ? '' : 's'}.`
+        : 'No unexplained time flagged in this period.'}
+      ${trendTxt ? `<br>Last 30 days: ${trendTxt}.` : ''}
+      ${isContractor ? '<br>Note: owner-ops are not scored on clock-in gaps (no time-clock punch); figures reflect route-level signals only.' : ''}
+    </div>` : '';
 
   body.innerHTML = `
     <div class="report-card">
@@ -1566,35 +1710,33 @@ function openDriverReportCard(slug, d) {
       <div class="rc-head">
         <div>
           <div class="rc-title">${escapeHtml(r.displayName || r.slug)}</div>
-          <div class="rc-sub">${isContractor ? 'Owner-operator' : 'Company driver'}${r.truckType && r.truckType !== 'unknown' ? ' · ' + escapeHtml(r.truckType) : ''} · ${r.n_days} days · ${rangeText}</div>
+          <div class="rc-sub">${isContractor ? 'Owner-operator' : 'Company driver'}${r.truckType && r.truckType !== 'unknown' ? ' · ' + escapeHtml(r.truckType) : ''} · ${r.n_days} days observed · ${rangeText} · peer group: ${escapeHtml(r.bucketLabel)} (${(rankInBucket(d, r, 'medianOnRouteMin', false)?.of) || '—'} drivers)</div>
         </div>
         <div class="rc-brand">SENTINEL<span>Performance card</span></div>
       </div>
 
       <div class="rc-summary">
-        These are ${escapeHtml((r.displayName || 'this driver').split(' ')[0])}'s median numbers over the ${rangeText}, next to the median for their peer group (<strong>${escapeHtml(r.bucketLabel)}</strong>). Peers are the fairest yardstick — same truck, same kind of route. Use this for a coaching conversation, not a gotcha.
+        These are ${escapeHtml((r.displayName || 'this driver').split(' ')[0])}'s median numbers over the ${rangeText}, next to the median for their peer group. Peers are the fairest yardstick — same truck, same kind of route. Medians resist one-off bad days; a "worse" here is a pattern, not an accident.
       </div>
 
-      <div class="rc-section-title">Metric · You vs peer median</div>
-      <div class="rc-metrics">
-        <div class="rc-metric-row header">
-          <div>Metric</div><div style="text-align:right">This driver</div><div style="text-align:right">Peer median</div><div style="text-align:right">Verdict</div>
-        </div>
-        ${clockRows}
-        ${metric('Time on route (1st → last)', r.medianOnRouteMin, peer.medianOnRouteMin, fmtDur, false, 'active delivering window')}
-        ${metric('Deliveries per hour', r.medianStopsPerHourOnRoute, peer.medianStopsPerHourOnRoute, fmtSphRef, true, 'throughput while on route')}
-      </div>
+      ${routeSection}
+      ${clockSection}
+      ${accountabilitySection}
 
-      ${r.stolenDollars > 0 ? `
-        <div class="rc-section-title">Flagged this period</div>
-        <div class="rc-summary">
-          <strong>${fmt$(r.stolenDollars)}</strong> in unexplained time · ${r.criticalDays} critical day${r.criticalDays === 1 ? '' : 's'} · ${r.highDays} high day${r.highDays === 1 ? '' : 's'}.
-          ${isContractor ? 'Note: owner-ops are not scored on clock-in gaps (no time-clock punch); this reflects route-level signals only.' : ''}
-        </div>` : ''}
+      <div class="rc-section-title">Goals for next review</div>
+      <div class="rc-goals">
+        <div class="rc-goal-line"></div>
+        <div class="rc-goal-line"></div>
+        <div class="rc-goal-line"></div>
+      </div>
+      <div class="rc-signatures">
+        <div><div class="rc-sig-line"></div><div class="rc-sig-label">Driver signature · date</div></div>
+        <div><div class="rc-sig-line"></div><div class="rc-sig-label">Manager signature · date</div></div>
+      </div>
 
       <div class="rc-note">
-        Lower is better for time-based rows (clock-in→1st, morning gap, time on route); higher is better for deliveries/hour.
-        "Verdict" compares this driver to the median of their peer group. Medians resist one-off bad days.
+        Lower is better for time rows (clock-in→1st, gaps, time on route, last→clock-out); higher is better for deliveries/hour and stops/day.
+        "Rank" is this driver's position within their peer group on that metric (1 = best). "Expected drive to 1st" is context (route difficulty), not a judged metric.
         Generated by SENTINEL · ${escapeHtml(new Date().toISOString().slice(0, 10))}.
       </div>
     </div>`;
@@ -1964,12 +2106,8 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
           ${renderReferenceCell('straight_selfload', 'Straight · self-load', d.referenceMetrics?.straight_selfload)}
           ${renderReferenceCell('tractor_preload', 'Tractor · pre-load', d.referenceMetrics?.tractor_preload)}
           ${renderReferenceCell('tractor_selfload', 'Tractor · self-load', d.referenceMetrics?.tractor_selfload)}
-        </div>
-        <div class="ref-grid" style="margin-top:var(--s-2)">
           ${renderContractorCard(d.contractorMetrics)}
         </div>
-        <button class="viewall-toggle" id="compareToggle">▸ Compare all drivers</button>
-        <div id="compareSection" style="display:none"></div>
       </div>
 
       ${d.baselines ? `
@@ -2056,42 +2194,12 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
       renderViewAll(document.getElementById('viewAllSection'), d);
     }
 
-    // Compare-all-drivers toggle. Opens the full comparison table (every driver
-    // in one place, sortable, with peer-median context).
-    const compareToggle = document.getElementById('compareToggle');
-    if (compareToggle) {
-      compareToggle.addEventListener('click', () => {
-        overviewState.compareOpen = !overviewState.compareOpen;
-        const section = document.getElementById('compareSection');
-        if (overviewState.compareOpen) {
-          section.style.display = '';
-          renderCompareAll(section, d);
-          compareToggle.textContent = '▾ Hide comparison';
-          section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        } else {
-          section.style.display = 'none';
-          compareToggle.textContent = '▸ Compare all drivers';
-        }
-      });
-    }
-    if (overviewState.compareOpen) {
-      const section = document.getElementById('compareSection');
-      section.style.display = '';
-      compareToggle.textContent = '▾ Hide comparison';
-      renderCompareAll(section, d);
-    }
-
-    // Contractor card → open the comparison view scoped to contractors.
+    // Contractor card → jump to the Performance tab scoped to contractors.
     const contractorCard = document.getElementById('contractorCard');
     if (contractorCard) {
       contractorCard.addEventListener('click', () => {
-        overviewState.compareGroup = 'contractor';
-        overviewState.compareOpen = true;
-        const section = document.getElementById('compareSection');
-        section.style.display = '';
-        if (compareToggle) compareToggle.textContent = '▾ Hide comparison';
-        renderCompareAll(section, d);
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        performanceState.group = 'contractor';
+        navigateToPerformance();
       });
     }
 
@@ -3004,6 +3112,7 @@ const pages = {
   overview: { el: document.getElementById('page-overview'), loader: loadOverview, loaded: false },
   audit: { el: document.getElementById('page-audit'), loader: loadAudit, loaded: false },
   investigate: { el: document.getElementById('page-investigate'), loader: loadInvestigateInit, loaded: false },
+  performance: { el: document.getElementById('page-performance'), loader: loadPerformance, loaded: false },
   profile: { el: document.getElementById('page-profile'), loader: loadProfileInit, loaded: false },
   anomalies: { el: document.getElementById('page-anomalies'), loader: loadAnomalies, loaded: false }
 };
@@ -3013,7 +3122,7 @@ document.querySelectorAll('.tab').forEach(t => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
     document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
     pages[page].el.classList.add('active');
-    if (!pages[page].loaded || page === 'overview') {
+    if (!pages[page].loaded || page === 'overview' || page === 'performance') {
       pages[page].loader();
       pages[page].loaded = true;
     }

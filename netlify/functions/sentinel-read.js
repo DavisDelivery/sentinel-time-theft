@@ -640,6 +640,7 @@ async function dashboard(db, days) {
               slug, displayName: meta.displayName, role: meta.role || 'driver',
               n_days: 0,
               c2f: [], morningGap: [], l2c: [], afternoonGap: [], onRoute: [], stopsPerHr: [],
+              stops: [],
               expToFirst: [], expFromLast: []
             };
           }
@@ -653,6 +654,7 @@ async function dashboard(db, days) {
           if (typeof r.afternoonGapMin === 'number') pd.afternoonGap.push(r.afternoonGapMin);
           if (onRouteMin != null) pd.onRoute.push(onRouteMin);
           if (stopsPerHr != null) pd.stopsPerHr.push(stopsPerHr);
+          if (typeof r.completedStops === 'number') pd.stops.push(r.completedStops);
         }
       }
     }
@@ -733,7 +735,8 @@ async function dashboard(db, days) {
         medianL2C: median(pd.l2c.slice()),
         medianAfternoonGap: median(pd.afternoonGap.slice()),
         medianOnRouteMin: median(pd.onRoute.slice()),
-        medianStopsPerHourOnRoute: medianFloat(pd.stopsPerHr.slice())
+        medianStopsPerHourOnRoute: medianFloat(pd.stopsPerHr.slice()),
+        medianStopsPerDay: median(pd.stops.slice())
       }))
       .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
     refMetricsOut[key] = {
