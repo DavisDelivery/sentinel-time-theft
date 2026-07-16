@@ -716,8 +716,21 @@ body {
 }
 .report-modal.open { display: flex; }
 .report-card {
-  background: #fff; color: #0f172a; width: 100%; max-width: 640px; border-radius: 12px;
-  padding: 28px 32px; margin: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  /* Print-first light surface with its own viz token scope (reference palette). */
+  --rc-surface: #ffffff;
+  --rc-ink: #0b0b0b;
+  --rc-ink-2: #52514e;
+  --rc-muted: #898781;
+  --rc-grid: #e1e0d9;
+  --rc-baseline: #c3c2b7;
+  --rc-series: #2a78d6;      /* driver — categorical slot 1, validated on #fff */
+  --rc-peer: #b9b7b0;        /* de-emphasis context gray */
+  --rc-good: #006300;        /* success text (light surface) */
+  --rc-bad: #d03b3b;         /* critical */
+  background: var(--rc-surface); color: var(--rc-ink); width: 100%; max-width: 780px;
+  border-radius: 12px; padding: 26px 30px; margin: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
 }
 .report-actions { display: flex; gap: var(--s-2); justify-content: flex-end; margin-bottom: var(--s-3); }
 .report-actions button {
@@ -725,33 +738,64 @@ body {
   border-radius: 7px; padding: 7px 14px; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
 }
 .report-actions button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
-.rc-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
-.rc-title { font-size: 22px; font-weight: 800; color: #0f172a; }
-.rc-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
-.rc-brand { font-size: 11px; font-weight: 800; letter-spacing: 0.14em; color: #1e5b92; text-transform: uppercase; }
-.rc-brand span { display: block; font-size: 9px; color: #94a3b8; font-weight: 600; letter-spacing: 0.06em; }
-.rc-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin: 18px 0 8px; }
-.rc-metrics { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
-.rc-metric-row { display: grid; grid-template-columns: 1.5fr 0.9fr 0.9fr 0.7fr 0.9fr; gap: 0; border-bottom: 1px solid #e5e7eb; }
-.rc-metric-row .rc-m-rank { color: #64748b; text-align: right; font-weight: 600; }
-.rc-metric-row:last-child { border-bottom: none; }
-.rc-metric-row.header { background: #f3f4f6; }
-.rc-metric-row > div { padding: 9px 12px; font-size: 12px; font-feature-settings: 'tnum'; }
-.rc-metric-row.header > div { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
-.rc-metric-row .rc-m-label { font-weight: 600; color: #0f172a; }
-.rc-metric-row .rc-m-you { font-weight: 700; color: #0f172a; text-align: right; }
-.rc-metric-row .rc-m-peer { color: #64748b; text-align: right; }
-.rc-metric-row .rc-m-verdict { text-align: right; font-weight: 700; }
-.rc-m-verdict.better { color: #15803d; }
-.rc-m-verdict.worse { color: #b91c1c; }
-.rc-m-verdict.neutral { color: #64748b; }
-.rc-note { font-size: 10px; color: #94a3b8; margin-top: 14px; line-height: 1.5; }
-.rc-summary { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #334155; line-height: 1.55; }
+.rc-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--rc-ink); padding-bottom: 12px; margin-bottom: 14px; }
+.rc-title { font-size: 24px; font-weight: 750; color: var(--rc-ink); letter-spacing: -0.01em; }
+.rc-sub { font-size: 11.5px; color: var(--rc-ink-2); margin-top: 3px; }
+.rc-brand { font-size: 11px; font-weight: 800; letter-spacing: 0.14em; color: #1e5b92; text-transform: uppercase; text-align: right; }
+.rc-brand span { display: block; font-size: 8.5px; color: var(--rc-muted); font-weight: 600; letter-spacing: 0.06em; }
+.rc-section-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--rc-ink-2); margin: 20px 0 2px; }
+.rc-section-sub { font-size: 10px; color: var(--rc-muted); margin-bottom: 8px; }
+.rc-note { font-size: 9.5px; color: var(--rc-muted); margin-top: 14px; line-height: 1.5; }
+.rc-summary { font-size: 11.5px; color: var(--rc-ink-2); line-height: 1.55; }
 .rc-goals { margin-top: 4px; }
-.rc-goal-line { border-bottom: 1px solid #cbd5e1; height: 26px; }
-.rc-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 28px; }
-.rc-sig-line { border-bottom: 1px solid #0f172a; height: 24px; }
-.rc-sig-label { font-size: 10px; color: #64748b; margin-top: 4px; }
+.rc-goal-line { border-bottom: 1px solid var(--rc-baseline); height: 26px; }
+.rc-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 26px; }
+.rc-sig-line { border-bottom: 1px solid var(--rc-ink); height: 24px; }
+.rc-sig-label { font-size: 9.5px; color: var(--rc-muted); margin-top: 4px; }
+
+/* KPI stat-tile row */
+.rc-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+.rc-kpi { border: 1px solid var(--rc-grid); border-radius: 8px; padding: 10px 12px; }
+.rc-kpi .k { font-size: 9px; font-weight: 600; color: var(--rc-ink-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.rc-kpi .v { font-size: 21px; font-weight: 650; color: var(--rc-ink); margin-top: 3px; line-height: 1.1; }
+.rc-kpi .d { font-size: 9.5px; font-weight: 600; margin-top: 3px; color: var(--rc-muted); }
+.rc-kpi .d.up { color: var(--rc-good); }
+.rc-kpi .d.down { color: var(--rc-bad); }
+
+/* Dot-strip peer distribution rows */
+.rc-strip-panel { border: 1px solid var(--rc-grid); border-radius: 8px; padding: 8px 14px 4px; }
+.rc-strip-legend { display: flex; gap: 14px; align-items: center; font-size: 9.5px; color: var(--rc-ink-2); padding: 4px 0 6px; border-bottom: 1px solid var(--rc-grid); }
+.rc-strip-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.rc-strip-legend .better { margin-left: auto; color: var(--rc-muted); font-weight: 600; }
+.rc-strip-row { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--rc-grid); padding: 3px 0; }
+.rc-strip-row:last-child { border-bottom: none; }
+.rc-strip-label { width: 158px; flex: none; }
+.rc-strip-label .m { font-size: 11px; font-weight: 600; color: var(--rc-ink); line-height: 1.25; }
+.rc-strip-label .r { font-size: 9px; color: var(--rc-muted); }
+.rc-strip-svg { flex: 1; min-width: 0; }
+
+/* Trend chart row */
+.rc-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rc-chart { border: 1px solid var(--rc-grid); border-radius: 8px; padding: 10px 12px 6px; min-width: 0; }
+.rc-chart .t { font-size: 10.5px; font-weight: 650; color: var(--rc-ink); }
+.rc-chart .s { font-size: 9px; color: var(--rc-muted); margin-bottom: 4px; }
+.rc-chart svg { width: 100%; height: auto; display: block; }
+
+/* Table-view twin */
+.rc-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.rc-table th {
+  text-align: right; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--rc-ink-2); border-bottom: 1px solid var(--rc-baseline); padding: 5px 8px;
+}
+.rc-table th:first-child { text-align: left; padding-left: 0; }
+.rc-table td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--rc-grid); font-variant-numeric: tabular-nums; color: var(--rc-ink); }
+.rc-table td:first-child { text-align: left; padding-left: 0; color: var(--rc-ink); font-weight: 600; }
+.rc-table td .sub { display: block; font-size: 8.5px; color: var(--rc-muted); font-weight: 400; }
+.rc-table td.peer { color: var(--rc-ink-2); }
+.rc-table td.good { color: var(--rc-good); font-weight: 650; }
+.rc-table td.bad { color: var(--rc-bad); font-weight: 650; }
+.rc-table td.neutral { color: var(--rc-muted); }
+.rc-table tr:last-child td { border-bottom: none; }
 
 @media print {
   body * { visibility: hidden !important; }
@@ -760,9 +804,9 @@ body {
     position: absolute; inset: 0; background: #fff; display: block !important;
     padding: 0; overflow: visible;
   }
-  .report-card { box-shadow: none; max-width: none; width: 100%; margin: 0; border-radius: 0; padding: 0.4in 0.5in; }
+  .report-card { box-shadow: none; max-width: none; width: 100%; margin: 0; border-radius: 0; padding: 0.35in 0.45in; }
   .report-actions { display: none !important; }
-  .rc-metric-row { break-inside: avoid; }
+  .rc-kpis, .rc-strip-panel, .rc-charts, .rc-table tr, .rc-signatures { break-inside: avoid; }
 }
 
 .ref-detail-summary { margin-bottom: var(--s-4); }
@@ -1049,7 +1093,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.8.0-performance-tab';
+const APP_VERSION = 'v4.8.1-report-charts';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1609,97 +1653,299 @@ const fmtMinMag = (m) => fmtDur(Math.abs(Math.round(m)));
 const fmtSphMag = (v) => Math.abs(v).toFixed(2);
 
 // ---------- Printable driver report card ----------
-// A one-page, print-optimized "report card" for a single driver: every metric
-// we track, side-by-side with their peer group's median and their rank within
-// it — framed for sitting down with the driver for a performance conversation.
-function openDriverReportCard(slug, d) {
-  const rows = buildCompareRows(d);
-  const r = rows.find(x => x.slug === slug);
+// A print-first, one-page analyst report for a single driver. Charts are inline
+// SVG styled with the card's own viz tokens (reference palette, validated):
+// the driver is the emphasis series (blue), peers are de-emphasis gray context.
+// Every chart has a table-view twin (the "Full numbers" table) so no value is
+// gated behind hover; native <title> tooltips enhance on screen.
+
+// Metric definitions shared by the strip panel and the table. lowerIsBetter
+// drives both the verdict and the strip's right-is-better normalization.
+const RC_METRICS = [
+  { key: 'medianOnRouteMin',          label: 'Time on route',      sub: '1st → last delivery',      fmt: (v) => fmtDur(v), lowerIsBetter: true,  group: 'route' },
+  { key: 'medianStopsPerHourOnRoute', label: 'Deliveries / hour',  sub: 'throughput on route',      fmt: (v) => fmtSphRef(v), lowerIsBetter: false, group: 'route' },
+  { key: 'medianStopsPerDay',         label: 'Stops / day',        sub: 'completed deliveries',     fmt: (v) => String(v), lowerIsBetter: false, group: 'route' },
+  { key: 'medianC2F',                 label: 'Clock-in → 1st',     sub: 'includes load/prep',       fmt: (v) => fmtDur(v), lowerIsBetter: true,  group: 'clock' },
+  { key: 'medianMorningGap',          label: 'Morning gap',        sub: 'unexplained before route', fmt: (v) => fmtDur(v), lowerIsBetter: true,  group: 'clock' },
+  { key: 'medianAfternoonGap',        label: 'Afternoon gap',      sub: 'unexplained after route',  fmt: (v) => fmtDur(v), lowerIsBetter: true,  group: 'clock' },
+  { key: 'medianL2C',                 label: 'Last → clock-out',   sub: 'return drive + wrap-up',   fmt: (v) => fmtDur(v), lowerIsBetter: true,  group: 'clock' }
+];
+
+// Peer values for one metric from the driver's bucket breakdown.
+function rcPeerValues(d, row, key) {
+  const breakdown = row.bucketKey === 'contractor'
+    ? d.contractorMetrics?.perDriverBreakdown
+    : d.referenceMetrics?.[row.bucketKey]?.perDriverBreakdown;
+  if (!Array.isArray(breakdown)) return [];
+  return breakdown
+    .filter(p => typeof p[key] === 'number')
+    .map(p => ({ slug: p.slug, name: p.displayName || p.slug, v: p[key] }));
+}
+
+// Dot-strip distribution: peers as gray dots, bucket median as a tick, this
+// driver as the emphasized dot, axis normalized so RIGHT is always better.
+function rcDotStrip(all, selfSlug, median, lowerIsBetter, fmt) {
+  const W = 520, H = 44, X1 = 18, X2 = 502, TY = 26;
+  const vals = all.map(p => p.v).concat(typeof median === 'number' ? [median] : []);
+  if (!vals.length) return '';
+  let vmin = Math.min(...vals), vmax = Math.max(...vals);
+  if (vmin === vmax) { vmin -= 1; vmax += 1; }
+  const xOf = (v) => {
+    const t = (v - vmin) / (vmax - vmin);
+    return lowerIsBetter ? X1 + (1 - t) * (X2 - X1) : X1 + t * (X2 - X1);
+  };
+  const self = all.find(p => p.slug === selfSlug);
+  const peers = all.filter(p => p.slug !== selfSlug);
+  const endL = lowerIsBetter ? vmax : vmin;  // left end = worst
+  const endR = lowerIsBetter ? vmin : vmax;  // right end = best
+  let s = `<svg class="rc-strip-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">`;
+  s += `<line x1="${X1}" y1="${TY}" x2="${X2}" y2="${TY}" stroke="var(--rc-grid)" stroke-width="1"/>`;
+  if (typeof median === 'number') {
+    const mx = xOf(median);
+    s += `<rect x="${(mx - 0.75).toFixed(1)}" y="${TY - 9}" width="1.5" height="18" fill="var(--rc-ink-2)"><title>Peer median — ${fmt(median)}</title></rect>`;
+  }
+  for (const p of peers) {
+    s += `<circle cx="${xOf(p.v).toFixed(1)}" cy="${TY}" r="4" fill="var(--rc-peer)" stroke="var(--rc-surface)" stroke-width="2"><title>${escapeHtml(p.name)} — ${fmt(p.v)}</title></circle>`;
+  }
+  if (self) {
+    const sx = xOf(self.v);
+    s += `<circle cx="${sx.toFixed(1)}" cy="${TY}" r="6" fill="var(--rc-series)" stroke="var(--rc-surface)" stroke-width="2"><title>${escapeHtml(self.name)} — ${fmt(self.v)}</title></circle>`;
+    const lx = Math.max(24, Math.min(W - 24, sx));
+    s += `<text x="${lx.toFixed(1)}" y="11" text-anchor="middle" font-size="10" font-weight="700" fill="var(--rc-ink)">${fmt(self.v)}</text>`;
+  }
+  s += `<text x="${X1 - 4}" y="${H - 3}" text-anchor="start" font-size="8" fill="var(--rc-muted)">${fmt(endL)}</text>`;
+  s += `<text x="${X2 + 4}" y="${H - 3}" text-anchor="end" font-size="8" fill="var(--rc-muted)">${fmt(endR)}</text>`;
+  return s + '</svg>';
+}
+
+const rcNiceStep = (raw) => {
+  const mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+  for (const m of [1, 2, 2.5, 5, 10]) { if (raw <= m * mag) return m * mag; }
+  return 10 * mag;
+};
+const rcMD = (ymd) => `${+ymd.slice(5, 7)}/${+ymd.slice(8, 10)}`;
+
+// Shared frame for the two daily charts: hairline grid + y ticks + baseline
+// + first/last date labels. Returns geometry + prefix markup.
+function rcChartFrame(n, maxV) {
+  const W = 340, H = 132, L = 34, R = 10, T = 14, B = 20;
+  const pw = W - L - R, ph = H - T - B;
+  const step = rcNiceStep(maxV / 3);
+  const yMax = Math.max(step, Math.ceil(maxV / step) * step);
+  const yOf = (v) => T + ph - (v / yMax) * ph;
+  const xOf = (i) => n <= 1 ? L + pw / 2 : L + (i / (n - 1)) * pw;
+  let g = '';
+  for (let v = step; v <= yMax + 1e-9; v += step) {
+    const y = yOf(v).toFixed(1);
+    g += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}" stroke="var(--rc-grid)" stroke-width="1"/>`;
+    g += `<text x="${L - 5}" y="${(+y + 3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--rc-muted)" style="font-variant-numeric:tabular-nums">${step < 1 ? v.toFixed(1) : Math.round(v)}</text>`;
+  }
+  g += `<line x1="${L}" y1="${T + ph}" x2="${W - R}" y2="${T + ph}" stroke="var(--rc-baseline)" stroke-width="1"/>`;
+  return { W, H, L, R, T, B, pw, ph, yMax, yOf, xOf, grid: g };
+}
+
+// Daily line chart (deliveries/hr) with a peer-median reference hairline.
+function rcLineChart(points, refVal, fmtV) {
+  if (points.length < 2) return '';
+  const maxV = Math.max(...points.map(p => p.v), typeof refVal === 'number' ? refVal : 0) * 1.12;
+  const f = rcChartFrame(points.length, maxV);
+  const coords = points.map((p, i) => [f.xOf(i), f.yOf(p.v)]);
+  const line = coords.map(c => `${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ');
+  const area = `M${f.L},${(f.T + f.ph).toFixed(1)} L${line.replace(/ /g, ' L')} L${(f.W - f.R).toFixed(1)},${(f.T + f.ph).toFixed(1)} Z`;
+  let s = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img">${f.grid}`;
+  if (typeof refVal === 'number' && refVal <= f.yMax) {
+    const ry = f.yOf(refVal).toFixed(1);
+    s += `<line x1="${f.L}" y1="${ry}" x2="${f.W - f.R}" y2="${ry}" stroke="var(--rc-baseline)" stroke-width="1"/>`;
+    s += `<text x="${f.W - f.R}" y="${(+ry - 3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--rc-muted)">peer ${fmtV(refVal)}</text>`;
+  }
+  s += `<path d="${area}" fill="var(--rc-series)" opacity="0.10"/>`;
+  s += `<polyline points="${line}" fill="none" stroke="var(--rc-series)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const last = coords[coords.length - 1];
+  s += `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4" fill="var(--rc-series)" stroke="var(--rc-surface)" stroke-width="2"/>`;
+  const ly = Math.max(f.T + 6, last[1] - 7);
+  s += `<text x="${(last[0] - 2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="end" font-size="9" font-weight="700" fill="var(--rc-ink)">${fmtV(points[points.length - 1].v)}</text>`;
+  points.forEach((p, i) => {
+    s += `<circle cx="${coords[i][0].toFixed(1)}" cy="${coords[i][1].toFixed(1)}" r="8" fill="transparent"><title>${rcMD(p.d)} — ${fmtV(p.v)}</title></circle>`;
+  });
+  s += `<text x="${f.L}" y="${f.H - 6}" text-anchor="start" font-size="8" fill="var(--rc-muted)">${rcMD(points[0].d)}</text>`;
+  s += `<text x="${f.W - f.R}" y="${f.H - 6}" text-anchor="end" font-size="8" fill="var(--rc-muted)">${rcMD(points[points.length - 1].d)}</text>`;
+  return s + '</svg>';
+}
+
+// Daily column chart (unexplained minutes). Rounded data-end, square baseline.
+function rcColChart(points, fmtV) {
+  if (points.length < 2) return '';
+  const maxV = Math.max(...points.map(p => p.v), 1) * 1.12;
+  const f = rcChartFrame(points.length, maxV);
+  const n = points.length;
+  const slot = f.pw / n;
+  const bw = Math.max(1.5, Math.min(16, slot - 2));
+  let s = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img">${f.grid}`;
+  points.forEach((p, i) => {
+    const x = f.L + i * slot + (slot - bw) / 2;
+    const y = f.yOf(p.v), h = f.T + f.ph - y;
+    const title = `<title>${rcMD(p.d)} — ${fmtV(p.v)}</title>`;
+    if (h < 0.75) {
+      s += `<rect x="${x.toFixed(1)}" y="${(f.T + f.ph - 1).toFixed(1)}" width="${bw.toFixed(1)}" height="1" fill="var(--rc-peer)">${title}</rect>`;
+    } else if (bw >= 6 && h > 3) {
+      const r = Math.min(4, bw / 2, h);
+      s += `<path d="M${x.toFixed(1)},${(y + h).toFixed(1)} V${(y + r).toFixed(1)} Q${x.toFixed(1)},${y.toFixed(1)} ${(x + r).toFixed(1)},${y.toFixed(1)} H${(x + bw - r).toFixed(1)} Q${(x + bw).toFixed(1)},${y.toFixed(1)} ${(x + bw).toFixed(1)},${(y + r).toFixed(1)} V${(y + h).toFixed(1)} Z" fill="var(--rc-series)">${title}</path>`;
+    } else {
+      s += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--rc-series)">${title}</rect>`;
+    }
+  });
+  s += `<text x="${f.L}" y="${f.H - 6}" text-anchor="start" font-size="8" fill="var(--rc-muted)">${rcMD(points[0].d)}</text>`;
+  s += `<text x="${f.W - f.R}" y="${f.H - 6}" text-anchor="end" font-size="8" fill="var(--rc-muted)">${rcMD(points[n - 1].d)}</text>`;
+  return s + '</svg>';
+}
+
+async function openDriverReportCard(slug, d) {
   const modal = document.getElementById('reportModal');
   const body = document.getElementById('reportBody');
+  modal.classList.add('open');
+  body.innerHTML = `<div class="report-card"><div class="loading">Building performance card</div></div>`;
+
+  const rows = buildCompareRows(d);
+  const r = rows.find(x => x.slug === slug);
   if (!r) {
-    body.innerHTML = `<div class="report-card"><p style="padding:20px">No comparison data for this driver in the selected range.</p><div class="report-actions"><button onclick="closeDriverReportCard()">Close</button></div></div>`;
-    modal.classList.add('open');
+    body.innerHTML = `<div class="report-card"><div class="report-actions"><button onclick="closeDriverReportCard()">Close</button></div><p>No comparison data for this driver in the selected range.</p></div>`;
     return;
   }
   const isContractor = r.role === 'owner_op';
   const rangeText = d.rangeMeta?.days === 'all' ? 'all time' : `last ${d.rangeMeta?.days} days`;
   const peer = r.peer || {};
+  const firstName = escapeHtml((r.displayName || 'this driver').split(' ')[0]);
 
-  // One metric row: label, driver value, peer median, rank-in-group, verdict.
-  const metric = (label, key, fmtVal, higherIsBetter, note) => {
-    const val = r[key], pv = peer[key];
-    const youTxt = (val == null || Number.isNaN(val)) ? '—' : fmtVal(val);
-    const peerTxt = (pv == null || Number.isNaN(pv)) ? '—' : fmtVal(pv);
-    // higherIsBetter === null marks a context row (e.g. expected drive):
-    // shown for the conversation, but never ranked or judged.
-    const isContext = higherIsBetter === null;
-    const rk = isContext ? null : rankInBucket(d, r, key, higherIsBetter);
-    const rankTxt = rk ? `${rk.rank} of ${rk.of}` : '—';
-    let verdict = `<span class="rc-m-verdict neutral">${isContext ? 'context' : '—'}</span>`;
-    if (!isContext && typeof val === 'number' && typeof pv === 'number') {
-      const diff = val - pv;
-      if (Math.abs(diff) < (fmtVal === fmtSphRef ? 0.05 : 1)) {
-        verdict = '<span class="rc-m-verdict neutral">on par</span>';
-      } else {
-        const better = higherIsBetter ? diff > 0 : diff < 0;
-        verdict = `<span class="rc-m-verdict ${better ? 'better' : 'worse'}">${better ? '▲ better' : '▼ worse'}</span>`;
-      }
-    }
-    return `
-      <div class="rc-metric-row">
-        <div class="rc-m-label">${label}${note ? `<br><span style="font-weight:400;color:#94a3b8;font-size:10px">${note}</span>` : ''}</div>
-        <div class="rc-m-you">${youTxt}</div>
-        <div class="rc-m-peer">${peerTxt}</div>
-        <div class="rc-m-rank">${rankTxt}</div>
-        <div>${verdict}</div>
-      </div>`;
-  };
-  const header = () => `
-    <div class="rc-metric-row header">
-      <div>Metric</div><div style="text-align:right">This driver</div><div style="text-align:right">Peer median</div><div style="text-align:right">Rank</div><div style="text-align:right">Verdict</div>
-    </div>`;
+  // Daily series for the trend charts (best-effort — the card renders without
+  // them if the fetch fails or the driver has too few days).
+  let daily = [];
+  try {
+    const dd = await api('byDriver', { driverSlug: slug });
+    const startDate = d.rangeMeta?.startDate || '';
+    daily = (dd.records || [])
+      .filter(x => x.date && (!startDate || x.date >= startDate))
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  } catch (_) { daily = []; }
+  const MIN_SPAN = 15 * 60 * 1000;
+  const dphSeries = daily.map(x => {
+    if (!x.firstDeliveryTime || !x.lastDeliveryTime || typeof x.completedStops !== 'number' || x.completedStops < 2) return null;
+    const f = Date.parse(x.firstDeliveryTime), l = Date.parse(x.lastDeliveryTime);
+    if (!Number.isFinite(f) || !Number.isFinite(l) || l - f < MIN_SPAN) return null;
+    return { d: x.date, v: x.completedStops / ((l - f) / 3600000) };
+  }).filter(Boolean);
+  const stolenSeries = daily
+    .filter(x => typeof x.stolenMinutes === 'number' || x.nuvizzMatched || x.b600Matched)
+    .map(x => ({ d: x.date, v: typeof x.stolenMinutes === 'number' ? x.stolenMinutes : 0 }));
 
-  // Route performance applies to everyone; clock discipline only to company
-  // drivers (owner-ops don't punch B600).
-  const routeSection = `
-    <div class="rc-section-title">Route performance · vs ${escapeHtml(r.bucketLabel)} peers</div>
-    <div class="rc-metrics">
-      ${header()}
-      ${metric('Time on route (1st → last)', 'medianOnRouteMin', fmtDur, false, 'active delivering window')}
-      ${metric('Deliveries per hour', 'medianStopsPerHourOnRoute', fmtSphRef, true, 'throughput while on route')}
-      ${metric('Stops per day', 'medianStopsPerDay', (v) => String(v), true, 'completed deliveries per working day')}
-    </div>`;
+  // Applicable metrics + ranks. Contractors are judged on route metrics only.
+  const metrics = RC_METRICS.filter(m => !isContractor || m.group === 'route');
+  const ranks = {};
+  for (const m of metrics) ranks[m.key] = rankInBucket(d, r, m.key, !m.lowerIsBetter);
+  const rankVals = Object.values(ranks).filter(Boolean);
+  const medianRank = rankVals.length
+    ? rankVals.map(x => x.rank).sort((a, b) => a - b)[Math.floor(rankVals.length / 2)]
+    : null;
+  const groupSize = rankVals.length ? Math.max(...rankVals.map(x => x.of)) : null;
 
-  const clockSection = isContractor ? '' : `
-    <div class="rc-section-title">Clock discipline · vs ${escapeHtml(r.bucketLabel)} peers</div>
-    <div class="rc-metrics">
-      ${header()}
-      ${metric('Clock-in → 1st delivery', 'medianC2F', fmtDur, false, 'punch to first stop — includes load/prep')}
-      ${metric('Expected drive to 1st', 'medianExpectedToFirst', fmtDur, null, 'Google typical-traffic estimate — context, not judged')}
-      ${metric('Morning gap', 'medianMorningGap', fmtDur, false, 'unexplained time before route')}
-      ${metric('Afternoon gap', 'medianAfternoonGap', fmtDur, false, 'unexplained time after last delivery')}
-      ${metric('Last delivery → clock-out', 'medianL2C', fmtDur, false, 'includes return drive + wrap-up')}
-    </div>`;
-
-  // Accountability: flagged totals + 30-day direction.
+  // KPI tiles. Delta color: class "up" renders good-green, "down" renders bad-red.
+  const kpi = (label, value, deltaHtml) => `
+    <div class="rc-kpi"><div class="k">${label}</div><div class="v">${value}</div>${deltaHtml || '<div class="d">&nbsp;</div>'}</div>`;
+  const dph = r.medianStopsPerHourOnRoute, dphP = peer.medianStopsPerHourOnRoute;
+  const dphDelta = (typeof dph === 'number' && typeof dphP === 'number')
+    ? `<div class="d ${dph >= dphP ? 'up' : 'down'}">${dph >= dphP ? '▲' : '▼'} ${Math.abs(dph - dphP).toFixed(2)} vs peers</div>` : '';
+  const onr = r.medianOnRouteMin, onrP = peer.medianOnRouteMin;
+  const onrDelta = (typeof onr === 'number' && typeof onrP === 'number')
+    ? `<div class="d ${onr <= onrP ? 'up' : 'down'}">${onr <= onrP ? '▲' : '▼'} ${fmtDur(Math.abs(Math.round(onr - onrP)))} vs peers</div>` : '';
   const t = r.trend30d;
+  const stolenDelta = (t && (t.current || t.prior))
+    ? `<div class="d ${t.delta <= 0 ? 'up' : 'down'}">${t.delta <= 0 ? '▲' : '▼'} ${fmt$(Math.abs(t.delta))} vs prior 30d</div>` : '';
+  const kpiRow = `
+    <div class="rc-kpis">
+      ${kpi('Deliveries / hour', typeof dph === 'number' ? fmtSphRef(dph) : '—', dphDelta)}
+      ${kpi('Time on route', typeof onr === 'number' ? fmtDur(onr) : '—', onrDelta)}
+      ${kpi('Unexplained time', r.stolenDollars > 0 ? fmt$(r.stolenDollars) : '$0', stolenDelta)}
+      ${kpi('Peer standing', medianRank ? `${medianRank} of ${groupSize}` : '—', `<div class="d">median rank · ${rankVals.length} metrics</div>`)}
+    </div>`;
+
+  // Dot-strip panel.
+  const stripRows = metrics.map(m => {
+    const all = rcPeerValues(d, r, m.key);
+    if (!all.length || typeof r[m.key] !== 'number') return '';
+    const rk = ranks[m.key];
+    return `
+      <div class="rc-strip-row">
+        <div class="rc-strip-label">
+          <div class="m">${m.label}</div>
+          <div class="r">${m.sub}${rk ? ` · rank ${rk.rank} of ${rk.of}` : ''}</div>
+        </div>
+        ${rcDotStrip(all, r.slug, peer[m.key], m.lowerIsBetter, m.fmt)}
+      </div>`;
+  }).join('');
+  const stripPanel = stripRows ? `
+    <div class="rc-section-title">Standing among peers · ${escapeHtml(r.bucketLabel)}</div>
+    <div class="rc-section-sub">Each dot is one driver in the peer group. Axis is normalized so right is always better.</div>
+    <div class="rc-strip-panel">
+      <div class="rc-strip-legend">
+        <span class="lg"><svg width="14" height="12"><circle cx="7" cy="6" r="5" fill="var(--rc-series)" stroke="var(--rc-surface)" stroke-width="1.5"/></svg>${firstName}</span>
+        <span class="lg"><svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="var(--rc-peer)" stroke="var(--rc-surface)" stroke-width="1.5"/></svg>Peers</span>
+        <span class="lg"><svg width="10" height="12"><rect x="4" y="1" width="1.5" height="10" fill="var(--rc-ink-2)"/></svg>Peer median</span>
+        <span class="better">better →</span>
+      </div>
+      ${stripRows}
+    </div>` : '';
+
+  // Daily trend charts.
+  const chartsRow = (dphSeries.length >= 3 || stolenSeries.length >= 3) ? `
+    <div class="rc-section-title">Daily trend · ${rangeText}</div>
+    <div class="rc-charts">
+      ${dphSeries.length >= 3 ? `
+        <div class="rc-chart">
+          <div class="t">Deliveries per hour, by day</div>
+          <div class="s">${firstName} vs the peer-median reference line</div>
+          ${rcLineChart(dphSeries, dphP, (v) => v.toFixed(2))}
+        </div>` : ''}
+      ${stolenSeries.length >= 3 ? `
+        <div class="rc-chart">
+          <div class="t">Unexplained minutes, by day</div>
+          <div class="s">flagged time beyond expected travel + prep</div>
+          ${rcColChart(stolenSeries, (v) => `${Math.round(v)}m`)}
+        </div>` : ''}
+    </div>` : '';
+
+  // Table-view twin — every metric, plus the expected-drive context row.
+  const tableRows = metrics.map(m => {
+    const v = r[m.key], pv = peer[m.key], rk = ranks[m.key];
+    const has = typeof v === 'number' && typeof pv === 'number';
+    const diff = has ? v - pv : null;
+    const onPar = has && Math.abs(diff) < (m.key === 'medianStopsPerHourOnRoute' ? 0.05 : 1);
+    const better = has && !onPar && (m.lowerIsBetter ? diff < 0 : diff > 0);
+    const dTxt = !has ? '—' : onPar ? 'on par'
+      : `${diff > 0 ? '+' : '−'}${m.key === 'medianStopsPerHourOnRoute' ? Math.abs(diff).toFixed(2) : fmtDur(Math.abs(Math.round(diff)))}`;
+    const vClass = !has || onPar ? 'neutral' : better ? 'good' : 'bad';
+    const verdict = !has ? '—' : onPar ? 'on par' : better ? '▲ better' : '▼ worse';
+    return `<tr>
+      <td>${m.label}<span class="sub">${m.sub}</span></td>
+      <td>${typeof v === 'number' ? m.fmt(v) : '—'}</td>
+      <td class="peer">${typeof pv === 'number' ? m.fmt(pv) : '—'}</td>
+      <td class="${vClass}">${dTxt}</td>
+      <td class="peer">${rk ? `${rk.rank} / ${rk.of}` : '—'}</td>
+      <td class="${vClass}">${verdict}</td>
+    </tr>`;
+  }).join('');
+  const expRow = (!isContractor && typeof r.medianExpectedToFirst === 'number') ? `<tr>
+      <td>Expected drive to 1st<span class="sub">Google typical traffic — context, not judged</span></td>
+      <td>${fmtDur(r.medianExpectedToFirst)}</td>
+      <td class="peer">${typeof peer.medianExpectedToFirst === 'number' ? fmtDur(peer.medianExpectedToFirst) : '—'}</td>
+      <td class="neutral">—</td><td class="neutral">—</td><td class="neutral">context</td>
+    </tr>` : '';
+
   const trendTxt = (t && (t.current || t.prior))
     ? (t.delta < 0
-        ? `<span style="color:#15803d;font-weight:700">improving</span> — ${fmt$(Math.abs(t.delta))} less than the prior 30 days`
+        ? `<span style="color:var(--rc-good);font-weight:700">improving</span> — ${fmt$(Math.abs(t.delta))} less than the prior 30 days`
         : t.delta > 0
-          ? `<span style="color:#b91c1c;font-weight:700">worsening</span> — ${fmt$(t.delta)} more than the prior 30 days`
+          ? `<span style="color:var(--rc-bad);font-weight:700">worsening</span> — ${fmt$(t.delta)} more than the prior 30 days`
           : 'flat vs the prior 30 days')
     : null;
-  const accountabilitySection = (r.stolenDollars > 0 || trendTxt) ? `
-    <div class="rc-section-title">Accountability</div>
-    <div class="rc-summary">
-      ${r.stolenDollars > 0
-        ? `<strong>${fmt$(r.stolenDollars)}</strong> in unexplained time over ${r.daysWithData || r.n_days} days with data · ${r.criticalDays} critical day${r.criticalDays === 1 ? '' : 's'} · ${r.highDays} high day${r.highDays === 1 ? '' : 's'}.`
-        : 'No unexplained time flagged in this period.'}
-      ${trendTxt ? `<br>Last 30 days: ${trendTxt}.` : ''}
-      ${isContractor ? '<br>Note: owner-ops are not scored on clock-in gaps (no time-clock punch); figures reflect route-level signals only.' : ''}
-    </div>` : '';
 
   body.innerHTML = `
     <div class="report-card">
@@ -1710,37 +1956,42 @@ function openDriverReportCard(slug, d) {
       <div class="rc-head">
         <div>
           <div class="rc-title">${escapeHtml(r.displayName || r.slug)}</div>
-          <div class="rc-sub">${isContractor ? 'Owner-operator' : 'Company driver'}${r.truckType && r.truckType !== 'unknown' ? ' · ' + escapeHtml(r.truckType) : ''} · ${r.n_days} days observed · ${rangeText} · peer group: ${escapeHtml(r.bucketLabel)} (${(rankInBucket(d, r, 'medianOnRouteMin', false)?.of) || '—'} drivers)</div>
+          <div class="rc-sub">${isContractor ? 'Owner-operator' : 'Company driver'}${r.truckType && r.truckType !== 'unknown' ? ' · ' + escapeHtml(r.truckType) : ''} · ${r.n_days} days observed · ${rangeText} · peer group: ${escapeHtml(r.bucketLabel)}</div>
         </div>
-        <div class="rc-brand">SENTINEL<span>Performance card</span></div>
+        <div class="rc-brand">SENTINEL<span>Performance report</span></div>
       </div>
-
       <div class="rc-summary">
-        These are ${escapeHtml((r.displayName || 'this driver').split(' ')[0])}'s median numbers over the ${rangeText}, next to the median for their peer group. Peers are the fairest yardstick — same truck, same kind of route. Medians resist one-off bad days; a "worse" here is a pattern, not an accident.
+        ${firstName}'s medians over the ${rangeText}, measured against the <strong>${escapeHtml(r.bucketLabel)}</strong> peer group — same truck, same kind of route. Medians resist one-off bad days: a gap here is a pattern, not an accident.
       </div>
-
-      ${routeSection}
-      ${clockSection}
-      ${accountabilitySection}
-
+      ${kpiRow}
+      ${stripPanel}
+      ${chartsRow}
+      <div class="rc-section-title">Full numbers</div>
+      <table class="rc-table">
+        <thead><tr><th>Metric</th><th>${firstName}</th><th>Peer median</th><th>Δ</th><th>Rank</th><th>Verdict</th></tr></thead>
+        <tbody>${tableRows}${expRow}</tbody>
+      </table>
+      ${(r.stolenDollars > 0 || trendTxt) ? `
+        <div class="rc-section-title">Accountability</div>
+        <div class="rc-summary">
+          ${r.stolenDollars > 0
+            ? `<strong>${fmt$(r.stolenDollars)}</strong> in unexplained time over ${r.daysWithData || r.n_days} days with data · ${r.criticalDays} critical day${r.criticalDays === 1 ? '' : 's'} · ${r.highDays} high day${r.highDays === 1 ? '' : 's'}.`
+            : 'No unexplained time flagged in this period.'}
+          ${trendTxt ? `<br>Last 30 days: ${trendTxt}.` : ''}
+          ${isContractor ? '<br>Owner-ops are not scored on clock-in gaps (no time-clock punch); figures reflect route-level signals only.' : ''}
+        </div>` : ''}
       <div class="rc-section-title">Goals for next review</div>
-      <div class="rc-goals">
-        <div class="rc-goal-line"></div>
-        <div class="rc-goal-line"></div>
-        <div class="rc-goal-line"></div>
-      </div>
+      <div class="rc-goals"><div class="rc-goal-line"></div><div class="rc-goal-line"></div><div class="rc-goal-line"></div></div>
       <div class="rc-signatures">
         <div><div class="rc-sig-line"></div><div class="rc-sig-label">Driver signature · date</div></div>
         <div><div class="rc-sig-line"></div><div class="rc-sig-label">Manager signature · date</div></div>
       </div>
-
       <div class="rc-note">
-        Lower is better for time rows (clock-in→1st, gaps, time on route, last→clock-out); higher is better for deliveries/hour and stops/day.
-        "Rank" is this driver's position within their peer group on that metric (1 = best). "Expected drive to 1st" is context (route difficulty), not a judged metric.
+        Time metrics (clock-in→1st, gaps, time on route, last→clock-out): lower is better. Throughput (deliveries/hour, stops/day): higher is better.
+        Rank is this driver's position within the peer group on that metric (1 = best). "Expected drive to 1st" is route-difficulty context, not a judged metric.
         Generated by SENTINEL · ${escapeHtml(new Date().toISOString().slice(0, 10))}.
       </div>
     </div>`;
-  modal.classList.add('open');
 }
 function closeDriverReportCard() {
   document.getElementById('reportModal').classList.remove('open');
