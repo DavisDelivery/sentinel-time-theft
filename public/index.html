@@ -668,6 +668,36 @@ body {
 }
 .ref-cell.contractor-cell h4 { color: var(--brand); }
 
+/* ============ Performance tab fleet summary ============ */
+/* Page-level viz scope: same tokens as the report card, so the rc-* chart
+   builders and tiles render identically here. */
+.perf-viz {
+  --rc-surface: #ffffff;
+  --rc-ink: #0b0b0b;
+  --rc-ink-2: #52514e;
+  --rc-muted: #898781;
+  --rc-grid: #e1e0d9;
+  --rc-baseline: #c3c2b7;
+  --rc-series: #2a78d6;
+  --rc-series-2: #008300;
+  --rc-peer: #b9b7b0;
+  --rc-good: #006300;
+  --rc-bad: #d03b3b;
+}
+.perf-viz .rc-kpi { background: var(--rc-surface); }
+.perf-viz .rc-kpis { margin: 0 0 var(--s-3); }
+.perf-viz .rc-charts { margin-bottom: var(--s-3); }
+.perf-viz .rc-chart { background: var(--rc-surface); }
+.perf-fleet-strip { background: var(--rc-surface); border: 1px solid var(--rc-grid); border-radius: 8px; padding: 8px 14px 4px; margin-bottom: var(--s-3); }
+.perf-fleet-strip .t { font-size: 10.5px; font-weight: 650; color: var(--rc-ink); }
+.perf-fleet-strip .s { font-size: 9px; color: var(--rc-muted); }
+.perf-fleet-strip > svg { width: 100%; height: auto; display: block; }
+.perf-controls { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--s-3); }
+@media (max-width: 700px) {
+  .perf-viz .rc-kpis { grid-template-columns: 1fr 1fr; }
+  .perf-viz .rc-charts { grid-template-columns: 1fr; }
+}
+
 /* ============ Compare-all-drivers view ============ */
 .compare-wrap { margin-top: var(--s-3); }
 .compare-controls {
@@ -1093,7 +1123,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.8.1-report-charts';
+const APP_VERSION = 'v4.8.2-fleet-summary';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1514,25 +1544,137 @@ async function loadPerformance() {
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
   }
 }
+// Fleet-wide distribution strip: every driver's median deliveries/hr as a dot,
+// company drivers in slot-1 blue, contractors in slot-2 green (color follows
+// the entity — a group filter never repaints survivors), fleet median as a tick.
+function perfFleetStrip(items, median, fmt) {
+  const W = 720, H = 46, X1 = 18, X2 = 702, TY = 27;
+  const vals = items.map(p => p.v).concat(typeof median === 'number' ? [median] : []);
+  if (!vals.length) return '';
+  let vmin = Math.min(...vals), vmax = Math.max(...vals);
+  if (vmin === vmax) { vmin -= 1; vmax += 1; }
+  const xOf = (v) => X1 + ((v - vmin) / (vmax - vmin)) * (X2 - X1);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  s += `<line x1="${X1}" y1="${TY}" x2="${X2}" y2="${TY}" stroke="var(--rc-grid)" stroke-width="1"/>`;
+  if (typeof median === 'number') {
+    const mx = xOf(median);
+    s += `<rect x="${(mx - 0.75).toFixed(1)}" y="${TY - 10}" width="1.5" height="20" fill="var(--rc-ink-2)"><title>Fleet median — ${fmt(median)}</title></rect>`;
+    s += `<text x="${Math.max(30, Math.min(W - 30, mx)).toFixed(1)}" y="11" text-anchor="middle" font-size="9" font-weight="700" fill="var(--rc-ink)">${fmt(median)}</text>`;
+  }
+  for (const p of items) {
+    const fill = p.role === 'owner_op' ? 'var(--rc-series-2)' : 'var(--rc-series)';
+    s += `<circle cx="${xOf(p.v).toFixed(1)}" cy="${TY}" r="4.5" fill="${fill}" stroke="var(--rc-surface)" stroke-width="2"><title>${escapeHtml(p.name)} — ${fmt(p.v)}</title></circle>`;
+  }
+  s += `<text x="${X1 - 4}" y="${H - 3}" text-anchor="start" font-size="8" fill="var(--rc-muted)">${fmt(vmin)}</text>`;
+  s += `<text x="${X2 + 4}" y="${H - 3}" text-anchor="end" font-size="8" fill="var(--rc-muted)">${fmt(vmax)}</text>`;
+  return s + '</svg>';
+}
+
+const perfMedian = (arr) => {
+  const v = arr.filter(x => typeof x === 'number').sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+
 function renderPerformance(container, d) {
   const rangeText = performanceState.days === 'all' ? 'all time' : `${performanceState.days}d`;
+  const grp = performanceState.group;
+  const grpLabel = grp === 'all' ? 'whole fleet' : grp === 'company' ? 'company drivers' : 'contractors';
+
+  // Group-filtered aggregates from the per-driver comparison rows.
+  const allRows = buildCompareRows(d);
+  const rows = allRows.filter(r =>
+    grp === 'all' ? true : grp === 'contractor' ? r.role === 'owner_op' : r.role !== 'owner_op');
+  const dphMed = perfMedian(rows.map(r => r.medianStopsPerHourOnRoute));
+  const onrMed = perfMedian(rows.map(r => r.medianOnRouteMin));
+  const stolenTotal = rows.reduce((s, r) => s + (r.stolenDollars || 0), 0);
+
+  // Daily fleet series for the selected group.
+  const daily = d.dailyPerformance || [];
+  const dphSeries = daily
+    .map(x => ({ d: x.date, v: grp === 'all' ? x.dphMedianAll : grp === 'company' ? x.dphMedianCompany : x.dphMedianContractor }))
+    .filter(x => typeof x.v === 'number');
+  const stolenSeries = daily
+    .map(x => ({
+      d: x.date,
+      v: grp === 'all' ? (x.stolenDollarsCompany + x.stolenDollarsContractor)
+        : grp === 'company' ? x.stolenDollarsCompany : x.stolenDollarsContractor,
+      scored: grp === 'all' ? (x.scoredCompany + x.scoredContractor)
+        : grp === 'company' ? x.scoredCompany : x.scoredContractor
+    }))
+    .filter(x => x.scored > 0);
+  const dphRangeMed = perfMedian(dphSeries.map(x => x.v));
+
+  const stripItems = rows
+    .filter(r => typeof r.medianStopsPerHourOnRoute === 'number')
+    .map(r => ({ slug: r.slug, name: r.displayName || r.slug, v: r.medianStopsPerHourOnRoute, role: r.role }));
+  const twoSeries = grp === 'all';
+
   container.innerHTML = `
-    <div class="section">
+    <div class="section perf-viz">
       <div class="section-head">
         <h2>Driver Performance · ${rangeText}</h2>
         <div class="aux">medians vs peer group · tap a driver for their printable card</div>
       </div>
-      <div class="range-chips" style="margin-bottom:var(--s-3)">
-        ${[30, 90, 180, 365, 'all'].map(v =>
-          `<button class="range-chip ${performanceState.days === v ? 'active' : ''}" data-perf-range="${v}">${rangeLabel(v)}</button>`).join('')}
+      <div class="perf-controls">
+        <div class="range-chips" style="margin:0">
+          ${[30, 90, 180, 365, 'all'].map(v =>
+            `<button class="range-chip ${performanceState.days === v ? 'active' : ''}" data-perf-range="${v}">${rangeLabel(v)}</button>`).join('')}
+        </div>
+        <div class="compare-seg" id="perfGroupSeg">
+          <button data-grp="all" class="${grp === 'all' ? 'active' : ''}">All</button>
+          <button data-grp="company" class="${grp === 'company' ? 'active' : ''}">Company</button>
+          <button data-grp="contractor" class="${grp === 'contractor' ? 'active' : ''}">Contractors</button>
+        </div>
       </div>
+
+      <div class="rc-kpis">
+        <div class="rc-kpi"><div class="k">Drivers</div><div class="v">${rows.length}</div><div class="d">${grpLabel} · ${rangeText}</div></div>
+        <div class="rc-kpi"><div class="k">Median deliveries / hr</div><div class="v">${dphMed != null ? fmtSphRef(dphMed) : '—'}</div><div class="d">median of driver medians</div></div>
+        <div class="rc-kpi"><div class="k">Median time on route</div><div class="v">${onrMed != null ? fmtDur(Math.round(onrMed)) : '—'}</div><div class="d">1st → last delivery</div></div>
+        <div class="rc-kpi"><div class="k">Unexplained time</div><div class="v">${fmt$(stolenTotal)}</div><div class="d">total flagged · ${grpLabel}</div></div>
+      </div>
+
+      ${(dphSeries.length >= 3 || stolenSeries.length >= 3) ? `
+      <div class="rc-charts">
+        ${dphSeries.length >= 3 ? `
+          <div class="rc-chart">
+            <div class="t">Fleet deliveries per hour, by day</div>
+            <div class="s">daily median across ${grpLabel} · reference = range median</div>
+            ${rcLineChart(dphSeries, dphRangeMed, (v) => v.toFixed(2), 'median')}
+          </div>` : ''}
+        ${stolenSeries.length >= 3 ? `
+          <div class="rc-chart">
+            <div class="t">Unexplained $, by day</div>
+            <div class="s">flagged dollars across ${grpLabel}</div>
+            ${rcColChart(stolenSeries, (v) => fmt$(v))}
+          </div>` : ''}
+      </div>` : ''}
+
+      ${stripItems.length >= 3 ? `
+      <div class="perf-fleet-strip">
+        <div class="t">Deliveries/hr spread — every driver</div>
+        <div class="s">${twoSeries
+          ? `<svg width="11" height="10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4" fill="var(--rc-series)"/></svg> company &nbsp; <svg width="11" height="10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4" fill="var(--rc-series-2)"/></svg> contractor &nbsp; | fleet median`
+          : `each dot is one driver · | = median`} · hover a dot for the name</div>
+        ${perfFleetStrip(stripItems, dphMed, (v) => v.toFixed(2))}
+      </div>` : ''}
+
       <div id="perfTable"></div>
     </div>`;
+
   container.querySelectorAll('[data-perf-range]').forEach(btn => {
     btn.addEventListener('click', () => {
       const v = btn.dataset.perfRange;
       performanceState.days = (v === 'all') ? 'all' : parseInt(v, 10);
       loadPerformance();
+    });
+  });
+  container.querySelectorAll('#perfGroupSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      performanceState.group = btn.dataset.grp;
+      renderPerformance(container, d);
     });
   });
   renderCompareAll(document.getElementById('perfTable'), d);
@@ -1593,11 +1735,6 @@ function renderCompareAll(section, d) {
   section.innerHTML = `
     <div class="compare-wrap">
       <div class="compare-controls">
-        <div class="compare-seg" id="compareGroupSeg">
-          <button data-grp="all" class="${grp === 'all' ? 'active' : ''}">All</button>
-          <button data-grp="company" class="${grp === 'company' ? 'active' : ''}">Company</button>
-          <button data-grp="contractor" class="${grp === 'contractor' ? 'active' : ''}">Contractors</button>
-        </div>
         <span class="compare-note">Δ = vs same-bucket peers · tap a column to sort · tap a row for the printable card</span>
       </div>
       <div class="compare-table-wrap">
@@ -1620,13 +1757,6 @@ function renderCompareAll(section, d) {
       </div>
     </div>`;
 
-  // Group filter.
-  section.querySelectorAll('#compareGroupSeg button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      performanceState.group = btn.dataset.grp;
-      renderCompareAll(section, d);
-    });
-  });
   // Column sort — toggles direction when re-clicking the active column.
   section.querySelectorAll('.compare-table thead th[data-sort]').forEach(th => {
     th.addEventListener('click', () => {
@@ -1744,8 +1874,9 @@ function rcChartFrame(n, maxV) {
   return { W, H, L, R, T, B, pw, ph, yMax, yOf, xOf, grid: g };
 }
 
-// Daily line chart (deliveries/hr) with a peer-median reference hairline.
-function rcLineChart(points, refVal, fmtV) {
+// Daily line chart (deliveries/hr) with a reference hairline. The reference
+// label sits at the LEFT edge — the right edge belongs to the end-dot label.
+function rcLineChart(points, refVal, fmtV, refLabel = 'peer') {
   if (points.length < 2) return '';
   const maxV = Math.max(...points.map(p => p.v), typeof refVal === 'number' ? refVal : 0) * 1.12;
   const f = rcChartFrame(points.length, maxV);
@@ -1754,9 +1885,12 @@ function rcLineChart(points, refVal, fmtV) {
   const area = `M${f.L},${(f.T + f.ph).toFixed(1)} L${line.replace(/ /g, ' L')} L${(f.W - f.R).toFixed(1)},${(f.T + f.ph).toFixed(1)} Z`;
   let s = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img">${f.grid}`;
   if (typeof refVal === 'number' && refVal <= f.yMax) {
-    const ry = f.yOf(refVal).toFixed(1);
-    s += `<line x1="${f.L}" y1="${ry}" x2="${f.W - f.R}" y2="${ry}" stroke="var(--rc-baseline)" stroke-width="1"/>`;
-    s += `<text x="${f.W - f.R}" y="${(+ry - 3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--rc-muted)">peer ${fmtV(refVal)}</text>`;
+    const ry = f.yOf(refVal);
+    // Put the label on whichever side of the hairline the first data point
+    // isn't — keeps it off the line when the series starts near the reference.
+    const labelBelow = coords[0][1] < ry;
+    s += `<line x1="${f.L}" y1="${ry.toFixed(1)}" x2="${f.W - f.R}" y2="${ry.toFixed(1)}" stroke="var(--rc-baseline)" stroke-width="1"/>`;
+    s += `<text x="${f.L + 3}" y="${(labelBelow ? ry + 9 : ry - 3).toFixed(1)}" text-anchor="start" font-size="8" fill="var(--rc-muted)">${refLabel} ${fmtV(refVal)}</text>`;
   }
   s += `<path d="${area}" fill="var(--rc-series)" opacity="0.10"/>`;
   s += `<polyline points="${line}" fill="none" stroke="var(--rc-series)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;

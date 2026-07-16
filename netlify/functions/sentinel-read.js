@@ -509,6 +509,23 @@ async function dashboard(db, days) {
     perDriver: {}
   };
 
+  // Per-date fleet aggregates for the Performance tab's summary charts:
+  // unexplained $ summed and deliveries/hr medianed for each calendar day in
+  // range, split company vs contractor so the tab's group filter stays honest
+  // (medians can't be combined client-side, so "all" gets its own median).
+  const dailyMap = {};
+  const dailyOf = (date) => {
+    if (!dailyMap[date]) {
+      dailyMap[date] = {
+        date,
+        scoredCompany: 0, scoredContractor: 0,
+        stolenDollarsCompany: 0, stolenDollarsContractor: 0,
+        dphAll: [], dphCompany: [], dphContractor: []
+      };
+    }
+    return dailyMap[date];
+  };
+
   for (const r of rows) {
     if (r.date) allDatesPresent.add(r.date);
     const slug = r.driverSlug;
@@ -582,6 +599,23 @@ async function dashboard(db, days) {
       if (onRouteMs != null && onRouteMs >= MIN_ROUTE_SPAN_MS
           && typeof r.completedStops === 'number' && r.completedStops >= 2) {
         stopsPerHr = r.completedStops / (onRouteMs / 3600000);
+      }
+
+      // Daily fleet aggregates (Performance tab summary charts).
+      if (r.date) {
+        const day = dailyOf(r.date);
+        const isOwnerOp = meta.role === 'owner_op';
+        if (isOwnerOp) {
+          day.scoredContractor++;
+          day.stolenDollarsContractor += r.stolenDollars || 0;
+        } else {
+          day.scoredCompany++;
+          day.stolenDollarsCompany += r.stolenDollars || 0;
+        }
+        if (stopsPerHr != null) {
+          day.dphAll.push(stopsPerHr);
+          (isOwnerOp ? day.dphContractor : day.dphCompany).push(stopsPerHr);
+        }
       }
 
       // Contractors (owner_ops): combined bucket. They ALSO fall through into
@@ -787,12 +821,28 @@ async function dashboard(db, days) {
       .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''))
   };
 
+  // Finalize the per-date fleet aggregates: medians from the collected arrays,
+  // dollars rounded, sorted by date.
+  const dailyPerformance = Object.values(dailyMap)
+    .map(day => ({
+      date: day.date,
+      scoredCompany: day.scoredCompany,
+      scoredContractor: day.scoredContractor,
+      stolenDollarsCompany: +day.stolenDollarsCompany.toFixed(2),
+      stolenDollarsContractor: +day.stolenDollarsContractor.toFixed(2),
+      dphMedianAll: medianFloat(day.dphAll),
+      dphMedianCompany: medianFloat(day.dphCompany),
+      dphMedianContractor: medianFloat(day.dphContractor)
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   return {
     rangeMeta: {
       days: typeof days === 'number' ? days : 'all',
       startDate, endDate: todayStr,
       totalAvailable: rows.length
     },
+    dailyPerformance,
     totalDriverDays: offendersRanked.reduce((s, o) => s + o.days, 0),
     datesPresent: [...datesPresent].sort(),
     allDatesPresent: [...allDatesPresent].sort(),
