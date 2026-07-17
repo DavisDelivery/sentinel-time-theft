@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#ffffff">
 <title>SENTINEL</title>
+<!-- Favicons — SVG for modern Chrome/desktop, PNG fallbacks, apple-touch-icon for iOS home screen (iOS ignores SVG favicons). -->
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="SENTINEL">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -686,11 +694,13 @@ body {
 }
 .perf-viz .rc-kpi { background: var(--rc-surface); }
 .perf-viz .rc-kpis { margin: 0 0 var(--s-3); }
-.perf-viz .rc-charts { margin-bottom: var(--s-3); }
+/* Cap chart width so the SVG (and its in-SVG title + axis text) never scales
+   past a comfortable reading size on wide monitors. */
+.perf-viz .rc-charts { margin-bottom: var(--s-3); max-width: 1120px; }
 .perf-viz .rc-chart { background: var(--rc-surface); }
-.perf-fleet-strip { background: var(--rc-surface); border: 1px solid var(--rc-grid); border-radius: 8px; padding: 8px 14px 4px; margin-bottom: var(--s-3); }
-.perf-fleet-strip .t { font-size: 10.5px; font-weight: 650; color: var(--rc-ink); }
-.perf-fleet-strip .s { font-size: 9px; color: var(--rc-muted); }
+.perf-fleet-strip { background: var(--rc-surface); border: 1px solid var(--rc-grid); border-radius: 8px; padding: 10px 16px 6px; margin-bottom: var(--s-3); max-width: 1120px; }
+.perf-fleet-strip .t { font-size: 13px; font-weight: 700; color: var(--rc-ink); }
+.perf-fleet-strip .s { font-size: 10px; color: var(--rc-muted); margin-top: 1px; }
 .perf-fleet-strip > svg { width: 100%; height: auto; display: block; }
 .perf-controls { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--s-3); }
 @media (max-width: 700px) {
@@ -1123,7 +1133,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.8.2-fleet-summary';
+const APP_VERSION = 'v4.8.3-chart-titles-favicon';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1640,15 +1650,11 @@ function renderPerformance(container, d) {
       <div class="rc-charts">
         ${dphSeries.length >= 3 ? `
           <div class="rc-chart">
-            <div class="t">Fleet deliveries per hour, by day</div>
-            <div class="s">daily median across ${grpLabel} · reference = range median</div>
-            ${rcLineChart(dphSeries, dphRangeMed, (v) => v.toFixed(2), 'median')}
+            ${rcLineChart(dphSeries, dphRangeMed, (v) => v.toFixed(2), 'median', 'Fleet deliveries per hour, by day', `daily median across ${grpLabel} · reference = range median`)}
           </div>` : ''}
         ${stolenSeries.length >= 3 ? `
           <div class="rc-chart">
-            <div class="t">Unexplained $, by day</div>
-            <div class="s">flagged dollars across ${grpLabel}</div>
-            ${rcColChart(stolenSeries, (v) => fmt$(v))}
+            ${rcColChart(stolenSeries, (v) => fmt$(v), 'Unexplained $, by day', `flagged dollars across ${grpLabel}`)}
           </div>` : ''}
       </div>` : ''}
 
@@ -1857,18 +1863,31 @@ const rcMD = (ymd) => `${+ymd.slice(5, 7)}/${+ymd.slice(8, 10)}`;
 
 // Shared frame for the two daily charts: hairline grid + y ticks + baseline
 // + first/last date labels. Returns geometry + prefix markup.
-function rcChartFrame(n, maxV) {
-  const W = 340, H = 132, L = 34, R = 10, T = 14, B = 20;
-  const pw = W - L - R, ph = H - T - B;
+// Shared chart frame. The title + subtitle live INSIDE the SVG so they scale
+// with the axis labels — an HTML title outside the SVG stays a fixed pixel size
+// while the SVG scales to its container, and the two diverge badly on wide
+// layouts (the fleet charts render ~2.7× their viewBox). Everything-in-one-SVG
+// keeps title and axis proportional at any width; CSS caps the render width so
+// nothing balloons.
+function rcChartFrame(n, maxV, opts = {}) {
+  const hasTitle = !!opts.title;
+  const titleBand = hasTitle ? 30 : 0;
+  const W = 380, L = 36, R = 12, B = 20, T = 12 + titleBand, ph = 112;
+  const H = T + ph + B;
+  const pw = W - L - R;
   const step = rcNiceStep(maxV / 3);
   const yMax = Math.max(step, Math.ceil(maxV / step) * step);
   const yOf = (v) => T + ph - (v / yMax) * ph;
   const xOf = (i) => n <= 1 ? L + pw / 2 : L + (i / (n - 1)) * pw;
   let g = '';
+  if (hasTitle) {
+    g += `<text x="${L}" y="15" font-size="13" font-weight="700" fill="var(--rc-ink)">${escapeHtml(opts.title)}</text>`;
+    if (opts.subtitle) g += `<text x="${L}" y="27" font-size="9" fill="var(--rc-muted)">${escapeHtml(opts.subtitle)}</text>`;
+  }
   for (let v = step; v <= yMax + 1e-9; v += step) {
     const y = yOf(v).toFixed(1);
     g += `<line x1="${L}" y1="${y}" x2="${W - R}" y2="${y}" stroke="var(--rc-grid)" stroke-width="1"/>`;
-    g += `<text x="${L - 5}" y="${(+y + 3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--rc-muted)" style="font-variant-numeric:tabular-nums">${step < 1 ? v.toFixed(1) : Math.round(v)}</text>`;
+    g += `<text x="${L - 5}" y="${(+y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--rc-muted)" style="font-variant-numeric:tabular-nums">${step < 1 ? v.toFixed(1) : Math.round(v)}</text>`;
   }
   g += `<line x1="${L}" y1="${T + ph}" x2="${W - R}" y2="${T + ph}" stroke="var(--rc-baseline)" stroke-width="1"/>`;
   return { W, H, L, R, T, B, pw, ph, yMax, yOf, xOf, grid: g };
@@ -1876,10 +1895,10 @@ function rcChartFrame(n, maxV) {
 
 // Daily line chart (deliveries/hr) with a reference hairline. The reference
 // label sits at the LEFT edge — the right edge belongs to the end-dot label.
-function rcLineChart(points, refVal, fmtV, refLabel = 'peer') {
+function rcLineChart(points, refVal, fmtV, refLabel = 'peer', title = '', subtitle = '') {
   if (points.length < 2) return '';
   const maxV = Math.max(...points.map(p => p.v), typeof refVal === 'number' ? refVal : 0) * 1.12;
-  const f = rcChartFrame(points.length, maxV);
+  const f = rcChartFrame(points.length, maxV, { title, subtitle });
   const coords = points.map((p, i) => [f.xOf(i), f.yOf(p.v)]);
   const line = coords.map(c => `${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ');
   const area = `M${f.L},${(f.T + f.ph).toFixed(1)} L${line.replace(/ /g, ' L')} L${(f.W - f.R).toFixed(1)},${(f.T + f.ph).toFixed(1)} Z`;
@@ -1897,20 +1916,20 @@ function rcLineChart(points, refVal, fmtV, refLabel = 'peer') {
   const last = coords[coords.length - 1];
   s += `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4" fill="var(--rc-series)" stroke="var(--rc-surface)" stroke-width="2"/>`;
   const ly = Math.max(f.T + 6, last[1] - 7);
-  s += `<text x="${(last[0] - 2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="end" font-size="9" font-weight="700" fill="var(--rc-ink)">${fmtV(points[points.length - 1].v)}</text>`;
+  s += `<text x="${(last[0] - 2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="end" font-size="10" font-weight="700" fill="var(--rc-ink)">${fmtV(points[points.length - 1].v)}</text>`;
   points.forEach((p, i) => {
     s += `<circle cx="${coords[i][0].toFixed(1)}" cy="${coords[i][1].toFixed(1)}" r="8" fill="transparent"><title>${rcMD(p.d)} — ${fmtV(p.v)}</title></circle>`;
   });
-  s += `<text x="${f.L}" y="${f.H - 6}" text-anchor="start" font-size="8" fill="var(--rc-muted)">${rcMD(points[0].d)}</text>`;
-  s += `<text x="${f.W - f.R}" y="${f.H - 6}" text-anchor="end" font-size="8" fill="var(--rc-muted)">${rcMD(points[points.length - 1].d)}</text>`;
+  s += `<text x="${f.L}" y="${f.H - 5}" text-anchor="start" font-size="9" fill="var(--rc-muted)">${rcMD(points[0].d)}</text>`;
+  s += `<text x="${f.W - f.R}" y="${f.H - 5}" text-anchor="end" font-size="9" fill="var(--rc-muted)">${rcMD(points[points.length - 1].d)}</text>`;
   return s + '</svg>';
 }
 
 // Daily column chart (unexplained minutes). Rounded data-end, square baseline.
-function rcColChart(points, fmtV) {
+function rcColChart(points, fmtV, title = '', subtitle = '') {
   if (points.length < 2) return '';
   const maxV = Math.max(...points.map(p => p.v), 1) * 1.12;
-  const f = rcChartFrame(points.length, maxV);
+  const f = rcChartFrame(points.length, maxV, { title, subtitle });
   const n = points.length;
   const slot = f.pw / n;
   const bw = Math.max(1.5, Math.min(16, slot - 2));
@@ -1928,8 +1947,8 @@ function rcColChart(points, fmtV) {
       s += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--rc-series)">${title}</rect>`;
     }
   });
-  s += `<text x="${f.L}" y="${f.H - 6}" text-anchor="start" font-size="8" fill="var(--rc-muted)">${rcMD(points[0].d)}</text>`;
-  s += `<text x="${f.W - f.R}" y="${f.H - 6}" text-anchor="end" font-size="8" fill="var(--rc-muted)">${rcMD(points[n - 1].d)}</text>`;
+  s += `<text x="${f.L}" y="${f.H - 5}" text-anchor="start" font-size="9" fill="var(--rc-muted)">${rcMD(points[0].d)}</text>`;
+  s += `<text x="${f.W - f.R}" y="${f.H - 5}" text-anchor="end" font-size="9" fill="var(--rc-muted)">${rcMD(points[n - 1].d)}</text>`;
   return s + '</svg>';
 }
 
@@ -2034,15 +2053,11 @@ async function openDriverReportCard(slug, d) {
     <div class="rc-charts">
       ${dphSeries.length >= 3 ? `
         <div class="rc-chart">
-          <div class="t">Deliveries per hour, by day</div>
-          <div class="s">${firstName} vs the peer-median reference line</div>
-          ${rcLineChart(dphSeries, dphP, (v) => v.toFixed(2))}
+          ${rcLineChart(dphSeries, dphP, (v) => v.toFixed(2), 'peer', 'Deliveries per hour, by day', `${firstName} vs the peer-median reference line`)}
         </div>` : ''}
       ${stolenSeries.length >= 3 ? `
         <div class="rc-chart">
-          <div class="t">Unexplained minutes, by day</div>
-          <div class="s">flagged time beyond expected travel + prep</div>
-          ${rcColChart(stolenSeries, (v) => `${Math.round(v)}m`)}
+          ${rcColChart(stolenSeries, (v) => `${Math.round(v)}m`, 'Unexplained minutes, by day', 'flagged time beyond expected travel + prep')}
         </div>` : ''}
     </div>` : '';
 
