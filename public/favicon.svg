@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="SENTINEL shield">
+  <defs>
+    <linearGradient id="body" x1="32" y1="6" x2="32" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e04a44"/>
+      <stop offset="1" stop-color="#a31d1a"/>
+    </linearGradient>
+  </defs>
+  <path d="M15 9 H49 A5 5 0 0 1 54 14 V32 C54 44.5 44 53.5 32 58 C20 53.5 10 44.5 10 32 V14 A5 5 0 0 1 15 9 Z"
+        fill="url(#body)" stroke="#7c1512" stroke-width="1.5"/>
+  <path d="M15 9 H49 A5 5 0 0 1 54 14 V32 C54 44.5 44 53.5 32 58 C20 53.5 10 44.5 10 32 V14 A5 5 0 0 1 15 9 Z"
+        fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="1.5" transform="translate(0 1.5) scale(1)"/>
+  <path d="M23 32.5 L29.5 39 L42 25" fill="none" stroke="#ffffff" stroke-width="5.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
