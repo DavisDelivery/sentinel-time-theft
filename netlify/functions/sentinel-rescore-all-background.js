@@ -89,7 +89,21 @@ function buildProgressText(processed, total) {
   return `${processed.toLocaleString()}/${total.toLocaleString()} records (${pct}%)`;
 }
 
-export default async (req) => {
+// Our own function URL, for self-chaining. Prefer Netlify's canonical site URL
+// over req.url (which can be a localhost shim in some runtimes).
+function selfUrlFromReq(req) {
+  const u = new URL(req.url);
+  let origin = u.origin;
+  try {
+    if (typeof Netlify !== 'undefined' && Netlify?.env?.get) {
+      const envUrl = Netlify.env.get('URL') || Netlify.env.get('DEPLOY_URL');
+      if (envUrl) origin = envUrl.replace(/\/$/, '');
+    }
+  } catch (_) {}
+  return `${origin}${u.pathname}`;
+}
+
+export default async (req, context) => {
   const t0 = Date.now();
   const db = getDb();
 
@@ -248,14 +262,26 @@ export default async (req) => {
       console.log(`[rescore-bg] superseded at wall-budget exit (myEpoch=${myEpoch}, doc.epoch=${guard.currentEpoch})`);
       return new Response(JSON.stringify({ superseded: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-    status.progressText = buildProgressText(status.processed, status.totalRecords) + ' — wall budget exhausted, retrigger to resume';
+    status.progressText = buildProgressText(status.processed, status.totalRecords) + ' — chaining to next invocation';
     status.totalStolen.before = +status.totalStolen.before.toFixed(2);
     status.totalStolen.after = +status.totalStolen.after.toFixed(2);
     status.totalStolen.delta = +(status.totalStolen.after - status.totalStolen.before).toFixed(2);
+    // state stays 'running' with the checkpoint cursor, so the successor's
+    // isResume path picks up exactly where this one stopped.
     await writeCheckpoint(db, status);
-    console.warn(`[rescore-bg] wall budget exhausted at cursor=${status.cursor}/${status.totalRecords} — retrigger via /api/sentinel-rescore-all to resume from cursor`);
+
+    // Self-chain (audit W3): re-invoke ourselves with an empty body so the
+    // successor resumes from cursor. Previously we just stopped, leaving the
+    // collection split across two engine versions once it outgrew one wall
+    // budget. Mirrors the historical-backfill worker's proven chaining.
+    const selfUrl = selfUrlFromReq(req);
+    console.log(`[rescore-bg] wall budget exhausted at cursor=${status.cursor}/${status.totalRecords} — chaining ${selfUrl}`);
+    const fire = fetch(selfUrl, { method: 'POST', body: '{}' })
+      .catch(e => console.error('[rescore-bg] self-reinvoke failed:', e.message));
+    if (context && typeof context.waitUntil === 'function') context.waitUntil(fire);
+    else await fire;
     return new Response(JSON.stringify({
-      state: 'wall_exhausted',
+      state: 'chained',
       processed: status.processed,
       totalRecords: status.totalRecords,
       progressText: status.progressText

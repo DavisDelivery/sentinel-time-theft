@@ -151,11 +151,18 @@ async function getB600Punch(db, employee, date) {
   return null;
 }
 
+const NUVIZZ_DAY_LIMIT = 2000;
 async function getNuvizzStops(db, employee, date) {
   const rows = await db.listDocs('nuvizz_rows_raw', {
     where: [{ field: 'delivery_date', op: '==', value: date }],
-    limit: 2000
+    limit: NUVIZZ_DAY_LIMIT
   });
+  // Single-page read (no pagination on where-queries). On an unusually busy day
+  // this can cut off in doc-id order, under-counting a driver's stops. Surface
+  // it rather than silently scoring with missing deliveries (audit W2).
+  if (rows.length >= NUVIZZ_DAY_LIMIT) {
+    console.warn(`[nuvizz] ${date} hit NUVIZZ_DAY_LIMIT=${NUVIZZ_DAY_LIMIT} — stop counts may be truncated; paginate this read.`);
+  }
   const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
   // Match NuVizz's raw["driver name"] against every name we know for this
   // driver, not just externalIds.nuvizz. SCHEMA documents an `aliases` fallback
