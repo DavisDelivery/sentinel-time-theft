@@ -143,7 +143,7 @@ export default async (req, context) => {
     db.listAllDocs('sentinelDriverDays'),
     loadAllBaselines(db),
     loadDefaults(db),
-    db.listAllDocs('employees', { fields: ['loadPrepMin', 'wrapUpMin', 'truckType'] })
+    db.listAllDocs('employees', { fields: ['loadPrepMin', 'wrapUpMin', 'truckType', 'role'] })
   ]);
   const employeesBySlug = {};
   for (const e of employees) {

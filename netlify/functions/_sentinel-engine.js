@@ -13,7 +13,12 @@
 //   minutesBetween(a, b)          → number
 //   classifyGap(gapMin, t)        → 'ok' | 'warn' | 'flag' | 'critical'
 
-const VERSION = 'v4.9.0-risk-band-floor';
+const VERSION = 'v5.0.0-detection-integrity';
+
+// D7: minimum load-prep credit when Motive measured a faster yard departure
+// than the driver's allowance. Pre-trip inspection + paperwork happen even
+// when GPS shows a quick exit, so never charge below this floor.
+const MIN_PREP_CREDIT_MIN = 10;
 
 // Per-driver load-prep / wrap-up overrides land on /employees/{slug} and flow
 // through scoreDriverDay via the optional `loadPrepMin` / `wrapUpMin` input
@@ -102,6 +107,52 @@ function riskLevelOf(score) {
 }
 
 /**
+ * D2/D3: route unscoreable-but-not-empty days into a distinct 'review' band.
+ *
+ * A day where at least one feed matched but nothing could actually be scored
+ * used to fall through riskLevelOf(0) → 'clean', which painted three very
+ * different situations green:
+ *   - deliveries with no punch (missed punch or B600 name mismatch — the
+ *     driver's paid hours are unknown, so time theft is unmeasurable)
+ *   - a punch with zero recorded deliveries (paid hours, no work product —
+ *     the classic ghost day)
+ *   - punch + deliveries present but no travel data / broken anchors, so no
+ *     gap was computable
+ * None of those are "clean"; they are "a human needs to look". The band never
+ * overrides a real charge: any component that scored (riskScore > 0 or a
+ * scored flag) keeps its earned level.
+ *
+ * `expectPunch === false` (owner-ops, who never punch B600) suppresses the
+ * no-punch reason — a contractor day without a punch is normal, not review.
+ *
+ * Mutates and returns rec. Shared by scan Phase B (which re-derives the level
+ * after in-route scoring); _sentinel-rescore.js carries a mirrored copy to
+ * stay self-contained.
+ */
+export function applyReviewBand(rec, { expectPunch = true } = {}) {
+  const SCORED = ['ok', 'warn', 'flag', 'critical'];
+  const reasons = [];
+  if (rec.nuvizzMatched && !rec.b600Matched && expectPunch) reasons.push('no_punch_with_deliveries');
+  if (rec.b600Matched && !rec.nuvizzMatched) reasons.push('punch_without_deliveries');
+  if (rec.b600Matched && rec.nuvizzMatched
+      && !SCORED.includes(rec.morningFlag)
+      && !SCORED.includes(rec.afternoonFlag)
+      && !SCORED.includes(rec.inRouteFlag)) {
+    const dh = rec.dataHealth || [];
+    const anchorBroken = dh.includes('first_delivery_before_clockin')
+      || dh.includes('last_delivery_after_clockout_unfiltered')
+      || dh.includes('shift_negative_clockout_before_clockin');
+    reasons.push(anchorBroken ? 'anchor_anomaly' : 'no_travel_data');
+  }
+  rec.reviewReasons = reasons;
+  if (reasons.length > 0 && (rec.riskScore || 0) === 0
+      && (rec.riskLevel === 'clean' || rec.riskLevel == null)) {
+    rec.riskLevel = 'review';
+  }
+  return rec;
+}
+
+/**
  * Main scoring entrypoint.
  *
  * input: {
@@ -148,14 +199,33 @@ export function scoreDriverDay(input) {
     expectedTravelMinFromLast, expectedTravelMinFromLastSource = 'skipped',
     googleTravelMinToFirst = null, motiveDriveMinToFirst = null,
     googleTravelMinFromLast = null, motiveDriveMinFromLast = null,
+    role = null, expectPunch = true,
     defaults
   } = input;
 
   // Human label for which source set the expected travel time.
   const srcLbl = (s) => s === 'motive' ? ' (Motive GPS)'
+    : s === 'motive_capped' ? ' (Motive GPS, capped at typical +50%)'
     : (s === 'google' || s === 'cache' || s === 'api') ? ' (Google typical)' : '';
 
-  const loadPrepMin = resolveOverride(input, defaults, 'loadPrepMin');
+  // D7: load-prep credit. The allowance is the per-driver/default config
+  // value; when Motive reliably measured the yard departure (clock-in → first
+  // drive that left the yard), an unused chunk of the allowance is not
+  // credited — a self-loader with a 60m allowance who left after 8 minutes
+  // did not spend 60 minutes loading. Floor at MIN_PREP_CREDIT_MIN, never
+  // exceed the allowance (sitting longer than the allowance is what the
+  // morning gap already charges).
+  const loadPrepAllowanceMin = resolveOverride(input, defaults, 'loadPrepMin');
+  const measuredPrepMin = (typeof input.measuredPrepMin === 'number'
+    && Number.isFinite(input.measuredPrepMin) && input.measuredPrepMin >= 0)
+    ? Math.round(input.measuredPrepMin) : null;
+  const loadPrepMin = (measuredPrepMin != null)
+    ? Math.min(loadPrepAllowanceMin, Math.max(MIN_PREP_CREDIT_MIN, measuredPrepMin))
+    : loadPrepAllowanceMin;
+  const loadPrepSource = loadPrepMin < loadPrepAllowanceMin ? 'measured' : 'allowance';
+  const prepLbl = loadPrepSource === 'measured'
+    ? ` load prep (GPS-measured; allowance ${loadPrepAllowanceMin} min)`
+    : ' load prep';
   const wrapUpMin = resolveOverride(input, defaults, 'wrapUpMin');
 
   const out = {
@@ -165,6 +235,7 @@ export function scoreDriverDay(input) {
     date,
     scanId,
     truckType,
+    role,
 
     clockIn,
     clockOut,
@@ -188,6 +259,9 @@ export function scoreDriverDay(input) {
     motiveDriveMinToFirst: motiveDriveMinToFirst ?? null,
     travelSourceToFirst: expectedTravelMinToFirstSource,
     loadPrepMin,
+    loadPrepAllowanceMin,
+    measuredPrepMin,
+    loadPrepSource,
     morningGapMin: null,
     morningFlag: 'no_data',
     morningSeveritySource: 'static',
@@ -261,7 +335,7 @@ export function scoreDriverDay(input) {
         out.flags.push({
           kind: 'morning_gap',
           severity: out.morningFlag,
-          evidence: `clockIn ${clockIn} → first delivery ${firstDeliveryCustomer || 'unknown'} at ${firstDeliveryTime.toISOString().slice(11, 16)} (${clockInToFirstMin} min). Expected travel ${expectedTravelMinToFirst} min${srcLbl(expectedTravelMinToFirstSource)} + ${loadPrepMin} min load prep = ${expectedTotal} min. Unexplained: ${gap} min.`,
+          evidence: `clockIn ${clockIn} → first delivery ${firstDeliveryCustomer || 'unknown'} at ${firstDeliveryTime.toISOString().slice(11, 16)} (${clockInToFirstMin} min). Expected travel ${expectedTravelMinToFirst} min${srcLbl(expectedTravelMinToFirstSource)} + ${loadPrepMin} min${prepLbl} = ${expectedTotal} min. Unexplained: ${gap} min.`,
           deltaMin: gap
         });
       }
@@ -332,6 +406,10 @@ export function scoreDriverDay(input) {
   const wage = (defaults.wageRates[truckType] != null) ? defaults.wageRates[truckType] : defaults.wageRates.unknown;
   out.stolenDollars = +((out.stolenMinutes / 60) * wage).toFixed(2);
 
+  // D2/D3: unscoreable-but-not-empty days become 'review', never 'clean'.
+  // Scan Phase B re-applies this after in-route scoring mutates the level.
+  applyReviewBand(out, { expectPunch });
+
   return out;
 }
 
@@ -392,9 +470,10 @@ export function runSelfTest() {
     expect: { morningFlag: 'critical', stolenMinutes: 165, stolenDollars: 63.25 }
   });
 
-  // Case 3: no data — driver clocked in but no stops at all
+  // Case 3: ghost day — driver clocked in but no stops at all. D3: paid hours
+  // with zero recorded deliveries is 'review', not 'clean'.
   cases.push({
-    name: 'no nuvizz stops',
+    name: 'no nuvizz stops → review',
     input: {
       driverSlug: 'test_nodata', displayName: 'Ghost', date: '2026-04-27', scanId: 'test',
       truckType: 'tractor',
@@ -405,7 +484,65 @@ export function runSelfTest() {
       expectedTravelMinToFirst: null, expectedTravelMinFromLast: null,
       defaults
     },
-    expect: { morningFlag: 'no_data', dataHealthIncludes: 'nuvizz_no_stops' }
+    expect: { morningFlag: 'no_data', riskLevel: 'review', dataHealthIncludes: 'nuvizz_no_stops' }
+  });
+
+  // Case 4 (D7): measured prep smaller than allowance grows the morning gap.
+  // clockInToFirst = 240; allowance 60 but GPS shows a 12-min departure →
+  // prep credit 12; expected = 30 + 12 = 42; gap = 198 (vs 150 with allowance).
+  cases.push({
+    name: 'measured prep < allowance (D7)',
+    input: {
+      driverSlug: 'test_prep', displayName: 'Fast Exit', date: '2026-04-27', scanId: 'test',
+      truckType: 'straight',
+      clockIn: '06:00', clockOut: '17:00', b600Matched: true,
+      firstDeliveryTime: parseNuvizzDeliveryEnd('4/27/26 10:00 AM'),
+      firstDeliveryAddr: '100 Main St', firstDeliveryCustomer: 'X',
+      lastDeliveryTime: parseNuvizzDeliveryEnd('4/27/26 04:00 PM'),
+      lastDeliveryAddr: '200 Other St', lastDeliveryCustomer: 'Y',
+      completedStops: 8, nuvizzMatched: true,
+      expectedTravelMinToFirst: 30, expectedTravelMinToFirstSource: 'motive',
+      expectedTravelMinFromLast: 30, expectedTravelMinFromLastSource: 'motive',
+      loadPrepMin: 60, measuredPrepMin: 12,
+      defaults
+    },
+    expect: { loadPrepMin: 12, loadPrepAllowanceMin: 60, loadPrepSource: 'measured', morningGapMin: 198, morningFlag: 'critical' }
+  });
+
+  // Case 5 (D3): deliveries but no punch → review for a company driver…
+  cases.push({
+    name: 'no punch with deliveries → review',
+    input: {
+      driverSlug: 'test_nopunch', displayName: 'No Punch', date: '2026-04-27', scanId: 'test',
+      truckType: 'straight',
+      clockIn: null, clockOut: null, b600Matched: false,
+      firstDeliveryTime: parseNuvizzDeliveryEnd('4/27/26 09:00 AM'),
+      firstDeliveryAddr: '100 Main St', firstDeliveryCustomer: 'X',
+      lastDeliveryTime: parseNuvizzDeliveryEnd('4/27/26 03:00 PM'),
+      lastDeliveryAddr: '200 Other St', lastDeliveryCustomer: 'Y',
+      completedStops: 6, nuvizzMatched: true,
+      expectedTravelMinToFirst: null, expectedTravelMinFromLast: null,
+      defaults
+    },
+    expect: { riskLevel: 'review' }
+  });
+
+  // …but NOT for an owner-op (they never punch B600).
+  cases.push({
+    name: 'owner-op no punch stays clean',
+    input: {
+      driverSlug: 'test_ownerop', displayName: 'Owner Op', date: '2026-04-27', scanId: 'test',
+      truckType: 'tractor', role: 'owner_op', expectPunch: false,
+      clockIn: null, clockOut: null, b600Matched: false,
+      firstDeliveryTime: parseNuvizzDeliveryEnd('4/27/26 09:00 AM'),
+      firstDeliveryAddr: '100 Main St', firstDeliveryCustomer: 'X',
+      lastDeliveryTime: parseNuvizzDeliveryEnd('4/27/26 03:00 PM'),
+      lastDeliveryAddr: '200 Other St', lastDeliveryCustomer: 'Y',
+      completedStops: 6, nuvizzMatched: true,
+      expectedTravelMinToFirst: null, expectedTravelMinFromLast: null,
+      defaults
+    },
+    expect: { riskLevel: 'clean' }
   });
 
   const results = cases.map(c => {

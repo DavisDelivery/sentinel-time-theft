@@ -27,7 +27,15 @@
 // output. Math is unchanged; rescore restamps every record so historical
 // evidence picks up the new format.
 
-export const ENGINE_VERSION = 'v4.9.0-risk-band-floor';
+export const ENGINE_VERSION = 'v5.0.0-detection-integrity';
+
+// Dual-source travel gating + prep credit — keep in sync with
+// _sentinel-scan.js / _sentinel-engine.js (this module is deliberately
+// import-free / self-contained).
+const MOTIVE_FLOOR_RATIO = 0.5;    // D6: Motive below half of Google typical = partial GPS → use Google
+const SLOW_ROLL_RATIO = 1.5;       // D4: credit GPS drive only up to 1.5× typical…
+const SLOW_ROLL_GRACE_MIN = 10;    //     …or typical + 10 min, whichever is larger
+const MIN_PREP_CREDIT_MIN = 10;    // D7: never charge prep credit below a pre-trip-inspection floor
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
@@ -112,8 +120,60 @@ function extractDetourNote(record) {
 // Label for which source set the expected travel time on a stored record.
 function travelSrcLabel(src) {
   if (src === 'motive') return ' (Motive GPS)';
+  if (src === 'motive_capped') return ' (Motive GPS, capped at typical +50%)';
   if (src === 'google' || src === 'cache' || src === 'api') return ' (Google typical)';
   return '';
+}
+
+// D4/D6: re-derive the effective expected travel for one leg from the stored
+// dual-source figures, mirroring the scan's pickLeg. Legacy records
+// (pre-dual-source: neither google* nor motive* stored) keep their stored
+// effective value untouched — returns null to signal "no re-derivation".
+function reEffectiveTravel(record, googleKey, motiveKey, periodsKey) {
+  const google = (typeof record[googleKey] === 'number') ? record[googleKey] : null;
+  const motive = (typeof record[motiveKey] === 'number') ? record[motiveKey] : null;
+  if (google == null && motive == null) return null;
+  const routeMatch = record.motive?.routeMatch === true;
+  const periods = record.motive?.[periodsKey];
+  // Older dual-source records don't store the period count — require a
+  // positive drive figure in that case (the scan only trusts legs with ≥1
+  // overlapping period, and 0-period legs store 0 minutes).
+  const motiveUsable = routeMatch && motive != null && (periods == null ? motive > 0 : periods > 0);
+  if (motiveUsable) {
+    if (google == null) return { minutes: motive, source: 'motive' };
+    if (motive < google * MOTIVE_FLOOR_RATIO) return { minutes: google, source: 'google' };
+    const cap = Math.max(Math.round(google * SLOW_ROLL_RATIO), google + SLOW_ROLL_GRACE_MIN);
+    if (motive > cap) return { minutes: cap, source: 'motive_capped' };
+    return { minutes: motive, source: 'motive' };
+  }
+  if (google != null) return { minutes: google, source: 'google' };
+  return { minutes: null, source: 'none' };
+}
+
+// D2/D3: review-band derivation — mirrored from _sentinel-engine.applyReviewBand
+// (kept local: this module is import-free by design). Routes unscoreable-but-
+// not-empty days to 'review' instead of 'clean'; never overrides a real charge.
+function applyReviewBand(rec, { expectPunch = true } = {}) {
+  const SCORED = ['ok', 'warn', 'flag', 'critical'];
+  const reasons = [];
+  if (rec.nuvizzMatched && !rec.b600Matched && expectPunch) reasons.push('no_punch_with_deliveries');
+  if (rec.b600Matched && !rec.nuvizzMatched) reasons.push('punch_without_deliveries');
+  if (rec.b600Matched && rec.nuvizzMatched
+      && !SCORED.includes(rec.morningFlag)
+      && !SCORED.includes(rec.afternoonFlag)
+      && !SCORED.includes(rec.inRouteFlag)) {
+    const dh = rec.dataHealth || [];
+    const anchorBroken = dh.includes('first_delivery_before_clockin')
+      || dh.includes('last_delivery_after_clockout_unfiltered')
+      || dh.includes('shift_negative_clockout_before_clockin');
+    reasons.push(anchorBroken ? 'anchor_anomaly' : 'no_travel_data');
+  }
+  rec.reviewReasons = reasons;
+  if (reasons.length > 0 && (rec.riskScore || 0) === 0
+      && (rec.riskLevel === 'clean' || rec.riskLevel == null)) {
+    rec.riskLevel = 'review';
+  }
+  return rec;
 }
 
 function buildEvidenceMorning({ record, prep, gap }) {
@@ -122,8 +182,11 @@ function buildEvidenceMorning({ record, prep, gap }) {
   const travel = record.expectedTravelMinToFirst;
   const src = travelSrcLabel(record.travelSourceToFirst || record.expectedTravelMinToFirstSource);
   const expectedTotal = (travel != null) ? travel + prep : null;
+  const prepLbl = record.loadPrepSource === 'measured'
+    ? ` load prep (GPS-measured; allowance ${fmtDur(record.loadPrepAllowanceMin)})`
+    : ' load prep';
   const prefix = `clockIn ${fmtTime(record.clockIn)} → first delivery ${customer} at ${timeStr} (${fmtDur(record.clockInToFirstMin)}).`;
-  const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)}${src} + ${fmtDur(prep)} load prep = ${fmtDur(expectedTotal)}.` : '';
+  const expectedStr = expectedTotal != null ? `Expected travel ${fmtDur(travel)}${src} + ${fmtDur(prep)}${prepLbl} = ${fmtDur(expectedTotal)}.` : '';
   return `${prefix} ${expectedStr} Unexplained: ${fmtDur(gap)}. (static threshold)`;
 }
 
@@ -179,9 +242,21 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
   // Always derive from the current employee config + defaults — the value
   // baked into the record at scan time may be stale relative to a roster
   // edit since. Stamp the value used so the record self-documents.
-  const loadPrep = resolveOverride(employee, defaults, 'loadPrepMin');
+  // D7: when the record carries a reliable GPS-measured yard departure, the
+  // prep credit is min(allowance, max(floor, measured)) — unused allowance
+  // is not granted. Mirrors _sentinel-engine.scoreDriverDay.
+  const loadPrepAllowance = resolveOverride(employee, defaults, 'loadPrepMin');
+  const measuredPrep = (typeof record.measuredPrepMin === 'number' && record.measuredPrepMin >= 0
+      && record.motive?.routeMatch === true)
+    ? Math.round(record.measuredPrepMin) : null;
+  const loadPrep = (measuredPrep != null)
+    ? Math.min(loadPrepAllowance, Math.max(MIN_PREP_CREDIT_MIN, measuredPrep))
+    : loadPrepAllowance;
   const wrapUp = resolveOverride(employee, defaults, 'wrapUpMin');
   next.loadPrepMin = loadPrep;
+  next.loadPrepAllowanceMin = loadPrepAllowance;
+  next.measuredPrepMin = measuredPrep;
+  next.loadPrepSource = loadPrep < loadPrepAllowance ? 'measured' : 'allowance';
   next.wrapUpMin = wrapUp;
 
   // Truck-type override: if /employees has a per-driver truckType (operator-
@@ -193,6 +268,37 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
     next.truckType = employee.truckType;
   }
 
+  // D4/D6: re-derive the effective expected travel per leg from the stored
+  // dual-source figures (Google typical vs Motive actual) with the same
+  // floor + slow-roll cap the scan applies. Legacy records without the
+  // dual-source fields keep their stored effective value.
+  const effToFirst = reEffectiveTravel(record, 'googleTravelMinToFirst', 'motiveDriveMinToFirst', 'morningPeriods');
+  if (effToFirst) {
+    next.expectedTravelMinToFirst = effToFirst.minutes;
+    next.expectedTravelMinToFirstSource = effToFirst.source;
+    next.travelSourceToFirst = effToFirst.source;
+  }
+  const effFromLast = reEffectiveTravel(record, 'googleTravelMinFromLast', 'motiveDriveMinFromLast', 'afternoonPeriods');
+  if (effFromLast) {
+    next.expectedTravelMinFromLast = effFromLast.minutes;
+    next.expectedTravelMinFromLastSource = effFromLast.source;
+    next.travelSourceFromLast = effFromLast.source;
+  }
+  // Refresh the slow-roll dataHealth notes to match the re-derived sources
+  // (drop stale ones; re-add current ones).
+  {
+    const dh = Array.isArray(next.dataHealth)
+      ? next.dataHealth.filter(s => !/^slow_roll_/.test(String(s)))
+      : [];
+    if (effToFirst?.source === 'motive_capped' && typeof record.motiveDriveMinToFirst === 'number') {
+      dh.push(`slow_roll_to_first:${record.motiveDriveMinToFirst - effToFirst.minutes}`);
+    }
+    if (effFromLast?.source === 'motive_capped' && typeof record.motiveDriveMinFromLast === 'number') {
+      dh.push(`slow_roll_from_last:${record.motiveDriveMinFromLast - effFromLast.minutes}`);
+    }
+    next.dataHealth = dh;
+  }
+
   // Re-derive gaps from raw inputs. If the raw inputs aren't present
   // (e.g. no first-delivery time → clockInToFirstMin null), gap is null and
   // the flag stays no_data. A NEGATIVE anchor delta (first delivery before
@@ -200,11 +306,11 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
   // engine deliberately suppresses to no_data at scan time — mirror that here
   // so a rescore doesn't resurrect it as a bogus "ok" and lose the dataHealth
   // signal.
-  const reMorningGap = (record.clockInToFirstMin != null && record.clockInToFirstMin >= 0 && record.expectedTravelMinToFirst != null)
-    ? record.clockInToFirstMin - record.expectedTravelMinToFirst - loadPrep
+  const reMorningGap = (record.clockInToFirstMin != null && record.clockInToFirstMin >= 0 && next.expectedTravelMinToFirst != null)
+    ? record.clockInToFirstMin - next.expectedTravelMinToFirst - loadPrep
     : null;
-  const reAfternoonGap = (record.lastToClockOutMin != null && record.lastToClockOutMin >= 0 && record.expectedTravelMinFromLast != null)
-    ? record.lastToClockOutMin - record.expectedTravelMinFromLast - wrapUp
+  const reAfternoonGap = (record.lastToClockOutMin != null && record.lastToClockOutMin >= 0 && next.expectedTravelMinFromLast != null)
+    ? record.lastToClockOutMin - next.expectedTravelMinFromLast - wrapUp
     : null;
   next.morningGapMin = reMorningGap;
   next.afternoonGapMin = reAfternoonGap;
@@ -225,7 +331,7 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
         kind: 'morning_gap',
         severity: morningFlag,
         severitySource: 'static',
-        evidence: buildEvidenceMorning({ record, prep: loadPrep, gap: reMorningGap }),
+        evidence: buildEvidenceMorning({ record: next, prep: loadPrep, gap: reMorningGap }),
         deltaMin: reMorningGap
       });
     }
@@ -240,7 +346,7 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
     sourceCounts.static++;
     stolen += Math.max(0, reAfternoonGap - afternoonT.ok);
     if (afternoonFlag !== 'ok' && afternoonFlag !== 'no_data') {
-      let ev = buildEvidenceAfternoon({ record, wrap: wrapUp, gap: reAfternoonGap });
+      let ev = buildEvidenceAfternoon({ record: next, wrap: wrapUp, gap: reAfternoonGap });
       if (detourNote) ev += ' ' + detourNote;
       next.flags.push({
         kind: 'afternoon_gap',
@@ -293,6 +399,15 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
     if (nCrit >= 2) next.riskLevel = 'critical';
     else if (nCrit === 1 && (next.riskLevel === 'clean' || next.riskLevel === 'low' || next.riskLevel === 'medium')) next.riskLevel = 'high';
   }
+
+  // D2/D3: unscoreable-but-not-empty days become 'review', never 'clean'.
+  // The no-punch reason only applies to company drivers — resolve role from
+  // the live employee doc first, then the record's stamped role; when neither
+  // says 'driver' (owner-ops, off-roster unknowns), don't flag no-punch.
+  const role = (employee?.role === 'driver' || employee?.role === 'owner_op') ? employee.role
+    : (record.role === 'driver' || record.role === 'owner_op') ? record.role : null;
+  if (role && next.role == null) next.role = role;
+  applyReviewBand(next, { expectPunch: role === 'driver' });
 
   next.stolenMinutes = stolen;
   const wage = (defaults.wageRates[next.truckType] != null)
