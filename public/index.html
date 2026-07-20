@@ -41,6 +41,8 @@
   --low-bg: #ecfccb;
   --clean: #15803d;
   --clean-bg: #dcfce7;
+  --review: #6d5bd0;
+  --review-bg: #ece9fb;
   --nodata: #d1d5db;
 
   /* Spacing */
@@ -149,6 +151,7 @@ body {
 .dist-seg.medium { background: var(--med); }
 .dist-seg.low { background: var(--low); }
 .dist-seg.clean { background: var(--clean); }
+.dist-seg.review { background: var(--review); }
 .dist-legend { display: flex; flex-wrap: wrap; gap: var(--s-3) var(--s-4); font-size: var(--fs-xs); }
 .dist-legend .item { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
 .dist-legend .dot { width: 8px; height: 8px; border-radius: 2px; }
@@ -157,6 +160,7 @@ body {
 .dist-legend .dot.medium { background: var(--med); }
 .dist-legend .dot.low { background: var(--low); }
 .dist-legend .dot.clean { background: var(--clean); }
+.dist-legend .dot.review { background: var(--review); }
 .dist-legend .dot.no_data { background: var(--bg-3); border: 1px solid var(--line); }
 .dist-legend .item.no-data-swatch { color: var(--text-3); }
 .dist-legend .n { color: var(--text); font-weight: 600; }
@@ -212,6 +216,7 @@ body {
 .dd-strip.medium { background: var(--med); }
 .dd-strip.low { background: var(--low); }
 .dd-strip.clean { background: var(--clean); }
+.dd-strip.review { background: var(--review); }
 .dd-strip.no_data, .dd-strip.unknown { background: var(--nodata); }
 .dd-main { min-width: 0; }
 .dd-name { font-weight: 600; font-size: var(--fs-base); }
@@ -507,6 +512,7 @@ body {
 .heatmap-day.medium { background: var(--med); color: white; }
 .heatmap-day.low { background: var(--low); color: white; }
 .heatmap-day.clean { background: var(--clean); color: white; }
+.heatmap-day.review { background: var(--review); color: white; }
 .heatmap-day.no_data, .heatmap-day.unknown { background: var(--bg-3); color: var(--text-4); }
 .heatmap-day.empty { background: transparent; border: 1px dashed var(--line); color: var(--text-4); }
 .heatmap-axis { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-4); margin-top: 6px; }
@@ -1145,7 +1151,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.8.6-wiring';
+const APP_VERSION = 'v5.0.0-detection';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1326,14 +1332,14 @@ const fmtDate = d => {
   const [y, mo, da] = d.split('-');
   return `${parseInt(mo, 10)}/${parseInt(da, 10)}`;
 };
-const riskCls = lv => ['critical','high','medium','low','clean'].includes(lv) ? lv : 'no_data';
+const riskCls = lv => ['critical','high','medium','low','review','clean'].includes(lv) ? lv : 'no_data';
 const flagCls = f => ({critical:'critical',flag:'flag',warn:'warn',ok:'ok'}[f] || '');
 const flagLabel = f => ({critical:'CRIT',flag:'FLAG',warn:'WARN',ok:'OK',no_data:'—',deferred:'DEF'}[f] || '·');
 
 // ============ Risk distribution bar ============
 function renderDistBar(dist, total, opts = {}) {
   if (!total && !opts.noDataCount) return '';
-  const order = ['critical','high','medium','low','clean'];
+  const order = ['critical','high','medium','low','clean','review'];
   const segs = order.map(k => {
     const n = dist[k] || 0;
     if (n === 0) return '';
@@ -1342,11 +1348,12 @@ function renderDistBar(dist, total, opts = {}) {
   }).join('');
   // Show absolute counts inline next to the percentage so the operator gets
   // both the raw "1 critical" and the share-of-total at a glance.
+  const bandLabel = k => k === 'review' ? 'needs review' : k;
   const legendItems = order.map(k => {
     const n = dist[k] || 0;
     if (n === 0) return '';
     const pct = ((n / total) * 100).toFixed(0);
-    return `<div class="item"><span class="dot ${k}"></span><span class="n num">${n}</span> ${k} <span class="pct">(${pct}%)</span></div>`;
+    return `<div class="item"><span class="dot ${k}"></span><span class="n num">${n}</span> ${bandLabel(k)} <span class="pct">(${pct}%)</span></div>`;
   }).join('');
   // "no data" swatch — not a percentage of `total` (total is scored days),
   // just a count alongside so the operator sees the neutral squares the
@@ -1358,7 +1365,7 @@ function renderDistBar(dist, total, opts = {}) {
   // Header line: "319 days · 1 critical · 52 medium · 71 low · 194 clean"
   const headerCounts = order
     .filter(k => (dist[k] || 0) > 0)
-    .map(k => `<span class="num">${dist[k]}</span> ${k}`)
+    .map(k => `<span class="num">${dist[k]}</span> ${bandLabel(k)}`)
     .join(' · ');
   // Join the header parts conditionally so an empty headerCounts (zero scored
   // days but some no-data days) doesn't leave a dangling " ·  · " separator.
@@ -1696,6 +1703,14 @@ function renderPerformance(container, d) {
           ? `<svg width="11" height="10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4" fill="var(--rc-series)"/></svg> company &nbsp; <svg width="11" height="10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4" fill="var(--rc-series-2)"/></svg> contractor &nbsp; | fleet median`
           : `each dot is one driver · | = median`} · hover a dot for the name</div>
         ${perfFleetStrip(stripItems, dphMed, (v) => v.toFixed(2))}
+      </div>` : ''}
+
+      ${(d.offRoster?.records || 0) > 0 ? `
+      <div class="aux" style="max-width:1120px;margin-bottom:var(--s-3);color:var(--text-3)">
+        Population note: <span class="num">${d.offRoster.records}</span> scored days from
+        <span class="num">${d.offRoster.drivers}</span> off-roster driver${d.offRoster.drivers === 1 ? '' : 's'}
+        (${fmt$(d.offRoster.stolenDollars)} unexplained) count in the Overview totals but are
+        excluded from these per-driver cards — no active roster category to compare against.
       </div>` : ''}
 
       <div id="perfTable"></div>
@@ -2870,11 +2885,12 @@ function renderDetail(r) {
     const offRoute = (r.motive && r.motive.offRouteVisits && r.motive.offRouteVisits.length)
       ? ` Off-route activity recorded (${r.motive.offRouteVisits.length} location${r.motive.offRouteVisits.length === 1 ? '' : 's'}) — review below.`
       : '';
+    const isReview = r.riskLevel === 'review';
     parts.push(`
       <div class="dd-sec">
         <div class="no-signal">
-          <div class="ns-title">No signal — classified clean by default</div>
-          <div class="ns-body">${reason} Gap metrics (morning · afternoon · in-route) require a delivery anchor; without one the classifier has nothing to score, so this day reads "clean / $0" even when shift hours were logged.${offRoute}</div>
+          <div class="ns-title">${isReview ? 'No signal — flagged for review' : 'No signal — classified clean by default'}</div>
+          <div class="ns-body">${reason} Gap metrics (morning · afternoon · in-route) require a delivery anchor; without one the classifier has nothing to score, so this day ${isReview ? 'lands in the "needs review" band instead of pretending to be clean' : 'reads "clean / $0" even when shift hours were logged'}.${offRoute}</div>
         </div>
       </div>
     `);
@@ -2905,6 +2921,7 @@ function renderDetail(r) {
   // when its GPS matched the route; otherwise Google.
   const tsrcBadge = (s) => {
     if (s === 'motive') return '<span style="font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--brand);background:var(--bg-3);padding:1px 5px;border-radius:3px">MOTIVE GPS</span>';
+    if (s === 'motive_capped') return '<span style="font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--high);background:var(--high-bg);padding:1px 5px;border-radius:3px" title="GPS drive far above typical — credited only up to typical +50%; the excess stays unexplained">MOTIVE · CAPPED</span>';
     if (s === 'google' || s === 'cache' || s === 'api') return '<span style="font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--text-3);background:var(--bg-3);padding:1px 5px;border-radius:3px">GOOGLE</span>';
     return '';
   };
@@ -2982,6 +2999,20 @@ function renderDetail(r) {
         ${groupsHtml}
       </div>
     `);
+  }
+
+  // Needs-review reasons (engine v5): why this day landed in the review band
+  // instead of scoring. Human-readable expansions of the stored reason codes.
+  if (Array.isArray(r.reviewReasons) && r.reviewReasons.length) {
+    const REVIEW_LABELS = {
+      no_punch_with_deliveries: 'Deliveries recorded but no time-clock punch matched — paid hours unknown (missed punch or B600 name mismatch)',
+      punch_without_deliveries: 'Clocked in with zero recorded deliveries — paid hours with no work product on record',
+      no_travel_data: 'Punch + deliveries present but no travel estimate was available, so no gap could be measured',
+      anchor_anomaly: 'Timestamps are inconsistent (delivery before clock-in / after clock-out) — gaps not measurable'
+    };
+    const items = r.reviewReasons
+      .map(k => `<li>${escapeHtml(REVIEW_LABELS[k] || k)}</li>`).join('');
+    parts.push(`<div class="dd-sec"><div class="dh">Needs Review — Why</div><ul style="margin:6px 0 0 18px;font-size:var(--fs-sm);color:var(--text-2)">${items}</ul></div>`);
   }
 
   // Data health
@@ -3149,7 +3180,7 @@ async function loadAuditForDate(date) {
     // engine writes riskLevel 'clean' as a default, but folding those into the
     // clean bucket paints a feed gap green (same fix Investigate already has).
     const recHasData = (rec) => !!(rec.b600Matched || rec.nuvizzMatched);
-    const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
+    const dist = { critical: 0, high: 0, medium: 0, low: 0, review: 0, clean: 0 };
     let stolen$ = 0, withData = 0, withMotive = 0, noDataCount = 0;
     for (const rec of records) {
       stolen$ += rec.stolenDollars || 0;
@@ -3165,7 +3196,7 @@ async function loadAuditForDate(date) {
 
     // Group by severity bucket for visual breakdown; no-data days get their
     // own group at the end instead of masquerading as clean.
-    const groupOrder = ['critical', 'high', 'medium', 'low', 'clean', 'no data'];
+    const groupOrder = ['critical', 'high', 'medium', 'low', 'review', 'clean', 'no data'];
     const groups = Object.fromEntries(groupOrder.map(g => [g, []]));
     for (const rec of records) {
       const g = !recHasData(rec) ? 'no data'
@@ -3296,7 +3327,7 @@ async function loadDriver(slug) {
     // bucket. Hero "X flagged" matches the heatmap by construction.
     let daysFlagged = 0;
     let noDataWorkdays = 0;
-    const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
+    const dist = { critical: 0, high: 0, medium: 0, low: 0, review: 0, clean: 0 };
     for (const rec of workdayRecords) {
       if (!recHasData(rec)) { noDataWorkdays++; continue; }
       // Coalesce unknown/undefined risk levels into 'clean' so the distribution

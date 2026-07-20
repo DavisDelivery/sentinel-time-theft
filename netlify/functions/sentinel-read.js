@@ -17,7 +17,7 @@
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.4.0-overview';
+const VERSION = 'v4.5.0-review-band';
 
 // Per-driver listDocs cap. Each driver has at most one record per day; after
 // the 17-month backfill ~374 working days exist per driver. 1500 is ~7 years
@@ -41,7 +41,10 @@ const DRIVER_SLUG_RE = /^[a-z0-9_]+$/;
 
 // Whitelist for distribution/grouping keys read off stored fields. Unexpected
 // values (undefined / 'nodata' / typos) must not create stray object keys.
-const RISK_LEVELS = ['clean', 'low', 'medium', 'high', 'critical'];
+// 'review' (engine v5): a day with at least one data feed but nothing
+// scoreable — no punch with deliveries, punch without deliveries, or missing
+// travel/anchors. Distinct from 'clean' so unmeasurable days can't read green.
+const RISK_LEVELS = ['clean', 'review', 'low', 'medium', 'high', 'critical'];
 const BASELINE_CONFIDENCE_LEVELS = ['insufficient', 'low', 'medium', 'high'];
 const normRiskLevel = (v) => (RISK_LEVELS.includes(v) ? v : 'clean');
 
@@ -388,7 +391,7 @@ async function dashboard(db, days) {
         'googleTravelMinToFirst', 'googleTravelMinFromLast',
         'firstDeliveryTime', 'lastDeliveryTime',
         'totalShiftMin', 'completedStops',
-        'truckType'
+        'truckType', 'role'
       ]
     }),
     db.listDocs('sentinelBaselines', {
@@ -468,8 +471,14 @@ async function dashboard(db, days) {
   const inTrendCurrent = r => r.date && r.date >= trendCurrentStart && r.date <= todayStr;
   const inTrendPrior = r => r.date && r.date >= trendPriorStart && r.date <= trendPriorEnd;
 
-  const dist = { critical: 0, high: 0, medium: 0, low: 0, clean: 0 };
+  const dist = { critical: 0, high: 0, medium: 0, low: 0, review: 0, clean: 0 };
   let totalStolen$ = 0, totalStolenMin = 0;
+  // D8: records whose driver is not on the active roster still count in the
+  // Overview totals above but can't feed the performance cards (no truck/load
+  // category). Track them so the Performance tab can label the population gap
+  // instead of silently disagreeing with the Overview.
+  let offRosterRecords = 0, offRosterStolen$ = 0;
+  const offRosterDrivers = new Set();
   // Feed-health counters — let the UI tell "genuinely clean fleet" apart from
   // "records were written but the inputs (B600 punch / NuVizz delivery / travel
   // time) never co-occurred, so nothing was computable and everything reads
@@ -572,56 +581,72 @@ async function dashboard(db, days) {
     if (r.riskLevel === 'critical') pd.criticalDays++;
     if (r.riskLevel === 'high') pd.highDays++;
 
+    // On-route span: minutes between first and last delivery on this day.
+    // null when there's only one stop (no last different from first); the
+    // engine writes lastDeliveryTime=null in that case. Keep both the
+    // raw-millisecond span (for stops/hr division — see below) and the
+    // minute-rounded value (for the on-route median, which is displayed
+    // in "Xh Ym" form and gains nothing from sub-minute precision).
+    // Computed for EVERY record (not just active-roster ones) so the daily
+    // fleet aggregates below can include off-roster days (D8).
+    let onRouteMin = null;
+    let onRouteMs = null;
+    if (r.firstDeliveryTime && r.lastDeliveryTime) {
+      const f = Date.parse(r.firstDeliveryTime);
+      const l = Date.parse(r.lastDeliveryTime);
+      if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
+        onRouteMs = l - f;
+        onRouteMin = Math.round(onRouteMs / 60000);
+      }
+    }
+    // Stops/hr on route: throughput while actively delivering. Divide by the
+    // raw elapsed time (not the minute-rounded value, which inflated tight
+    // clusters into 60-120/hr outliers — PR #19 review #10). Require ≥2 stops
+    // and a 15-minute floor on the route span so single-cluster days can't
+    // drive medians.
+    const MIN_ROUTE_SPAN_MS = 15 * 60 * 1000;
+    let stopsPerHr = null;
+    if (onRouteMs != null && onRouteMs >= MIN_ROUTE_SPAN_MS
+        && typeof r.completedStops === 'number' && r.completedStops >= 2) {
+      stopsPerHr = r.completedStops / (onRouteMs / 3600000);
+    }
+
     // Reference-metrics bucketing — only counts records for drivers we know
-    // the category for (i.e. on the active roster). Route span + throughput are
-    // role-independent, so compute them once and feed whichever buckets apply.
+    // the category for (i.e. on the active roster).
     const meta = driverMeta[slug];
+
+    // D8: reconcile the Overview vs Performance populations. Off-roster
+    // records (drivers no longer active) count toward Overview totals but
+    // have no truck/load category, so the performance CARDS can't include
+    // them — count them so the UI can say so explicitly. The daily fleet
+    // charts CAN still include them when the record carries a stamped role
+    // (engine v5+); older off-roster records stay excluded until rescanned.
+    const effRole = meta ? meta.role
+      : (r.role === 'driver' || r.role === 'owner_op') ? r.role : null;
+    if (!meta) {
+      offRosterRecords++;
+      offRosterStolen$ += r.stolenDollars || 0;
+      if (slug) offRosterDrivers.add(slug);
+    }
+
+    // Daily fleet aggregates (Performance tab summary charts).
+    if (r.date && effRole) {
+      const day = dailyOf(r.date);
+      const isOwnerOp = effRole === 'owner_op';
+      if (isOwnerOp) {
+        day.scoredContractor++;
+        day.stolenDollarsContractor += r.stolenDollars || 0;
+      } else {
+        day.scoredCompany++;
+        day.stolenDollarsCompany += r.stolenDollars || 0;
+      }
+      if (stopsPerHr != null) {
+        day.dphAll.push(stopsPerHr);
+        (isOwnerOp ? day.dphContractor : day.dphCompany).push(stopsPerHr);
+      }
+    }
+
     if (meta) {
-      // On-route span: minutes between first and last delivery on this day.
-      // null when there's only one stop (no last different from first); the
-      // engine writes lastDeliveryTime=null in that case. Keep both the
-      // raw-millisecond span (for stops/hr division — see below) and the
-      // minute-rounded value (for the on-route median, which is displayed
-      // in "Xh Ym" form and gains nothing from sub-minute precision).
-      let onRouteMin = null;
-      let onRouteMs = null;
-      if (r.firstDeliveryTime && r.lastDeliveryTime) {
-        const f = Date.parse(r.firstDeliveryTime);
-        const l = Date.parse(r.lastDeliveryTime);
-        if (Number.isFinite(f) && Number.isFinite(l) && l > f) {
-          onRouteMs = l - f;
-          onRouteMin = Math.round(onRouteMs / 60000);
-        }
-      }
-      // Stops/hr on route: throughput while actively delivering. Divide by the
-      // raw elapsed time (not the minute-rounded value, which inflated tight
-      // clusters into 60-120/hr outliers — PR #19 review #10). Require ≥2 stops
-      // and a 15-minute floor on the route span so single-cluster days can't
-      // drive medians.
-      const MIN_ROUTE_SPAN_MS = 15 * 60 * 1000;
-      let stopsPerHr = null;
-      if (onRouteMs != null && onRouteMs >= MIN_ROUTE_SPAN_MS
-          && typeof r.completedStops === 'number' && r.completedStops >= 2) {
-        stopsPerHr = r.completedStops / (onRouteMs / 3600000);
-      }
-
-      // Daily fleet aggregates (Performance tab summary charts).
-      if (r.date) {
-        const day = dailyOf(r.date);
-        const isOwnerOp = meta.role === 'owner_op';
-        if (isOwnerOp) {
-          day.scoredContractor++;
-          day.stolenDollarsContractor += r.stolenDollars || 0;
-        } else {
-          day.scoredCompany++;
-          day.stolenDollarsCompany += r.stolenDollars || 0;
-        }
-        if (stopsPerHr != null) {
-          day.dphAll.push(stopsPerHr);
-          (isOwnerOp ? day.dphContractor : day.dphCompany).push(stopsPerHr);
-        }
-      }
-
       // Contractors (owner_ops): combined bucket. They ALSO fall through into
       // the truck×load grid below (kept visible alongside company drivers per
       // the operator's request); this bucket is what the Contractors card reads.
@@ -853,12 +878,17 @@ async function dashboard(db, days) {
     dist,
     totalStolen: { dollars: +totalStolen$.toFixed(2), minutes: totalStolenMin },
     feedHealth: {
-      scoredDays: dist.critical + dist.high + dist.medium + dist.low + dist.clean,
+      scoredDays: dist.critical + dist.high + dist.medium + dist.low + dist.review + dist.clean,
       withB600: feedWithB600,
       withNuvizz: feedWithNuvizz,
       withBoth: feedWithBoth,
       withGapData: feedWithGapData,
       noData: feedNoData
+    },
+    offRoster: {
+      records: offRosterRecords,
+      drivers: offRosterDrivers.size,
+      stolenDollars: +offRosterStolen$.toFixed(2)
     },
     topOffenders: offendersRanked.slice(0, 15),
     offendersRanked,

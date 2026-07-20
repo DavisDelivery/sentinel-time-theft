@@ -19,8 +19,24 @@
 
 import { getDb } from './_firebase-admin.js';
 import { travelFromYard, travelToYard } from './_distance.js';
-import { scoreDriverDay, parseNuvizzDeliveryEnd } from './_sentinel-engine.js';
+import { scoreDriverDay, parseNuvizzDeliveryEnd, applyReviewBand } from './_sentinel-engine.js';
 import { getDrivingPeriods, summarizePeriods } from './_motive.js';
+
+// Dual-source travel gating (keep in sync with _sentinel-rescore.js):
+//   MOTIVE_FLOOR_RATIO (D6): Motive drive time below this fraction of the
+//     Google typical figure means the GPS only caught a sliver of the real
+//     drive (confirm-time skew, coverage gap) — fall back to Google rather
+//     than let partial GPS shrink expected travel into a false accusation.
+//     Raised from 0.25: half of typical is the lowest a real completed drive
+//     plausibly lands.
+//   SLOW_ROLL_RATIO / SLOW_ROLL_GRACE_MIN (D4): Motive-as-expected used to
+//     fully excuse slow-rolling — drive 90 min on a 30-min-typical leg and
+//     the whole 90 became "expected". Credit actual GPS drive time only up
+//     to max(1.5× typical, typical + 10 min); the excess stays in the gap as
+//     unexplained time, with both figures stored on the record.
+export const MOTIVE_FLOOR_RATIO = 0.5;
+export const SLOW_ROLL_RATIO = 1.5;
+export const SLOW_ROLL_GRACE_MIN = 10;
 
 export const DEFAULT_DEFAULTS = {
   loadPrepMin: 15,
@@ -357,12 +373,39 @@ export async function scanOneDriverDay({
       const morning = sumDriveIn(clockInDt, firstDeliveryDt);
       const afternoon = sumDriveIn(lastDeliveryDt, clockOutDt);
 
+      // D7: measured load-prep — minutes from clock-in until the first drive
+      // that actually LEAVES the yard (yard-internal repositioning moves,
+      // destClass 'yard', don't count as departure). Only trusted when the
+      // GPS matched the route; the engine caps the prep credit at the
+      // driver's allowance and floors it at a pre-trip-inspection minimum.
+      let measuredPrepMin = null;
+      if (clockInDt) {
+        const departure = classified.find(p =>
+          p.startDt && p.endDt && p.endDt > clockInDt && p.destClass !== 'yard');
+        if (departure) {
+          measuredPrepMin = Math.max(0, Math.round((departure.startDt - clockInDt) / 60000));
+        }
+      }
+
       const partitionVisit = (v) => {
         if (!firstDeliveryDt || !lastDeliveryDt) return 'unknown';
         const visitStart = v._startDt;
         if (visitStart < firstDeliveryDt) return 'pre_route';
         if (visitStart > lastDeliveryDt) return 'post_route';
         return 'in_route';
+      };
+      // D5: charge in-route visits only for the minutes that actually fall
+      // inside the route window [firstDelivery, lastDelivery]. A visit whose
+      // dwell runs past the last delivery used to charge those minutes here
+      // AND again in the afternoon gap (last delivery → clockOut) — double
+      // counting the same sat-in-a-parking-lot time. `chargedMin` is the
+      // clipped figure the score uses; stationaryMin/driveMinToReach stay
+      // raw so the operator sees the full visit.
+      const routeOverlapMin = (aDt, bDt) => {
+        if (!aDt || !bDt || !firstDeliveryDt || !lastDeliveryDt) return 0;
+        const s = Math.max(aDt.getTime(), firstDeliveryDt.getTime());
+        const e = Math.min(bDt.getTime(), lastDeliveryDt.getTime());
+        return Math.max(0, Math.round((e - s) / 60000));
       };
       const offRoutePeriods = classified.filter(p => p.destClass === 'off_route');
       const offRouteVisits = offRoutePeriods.map((p) => {
@@ -380,12 +423,15 @@ export async function scanOneDriverDay({
           driveMi: p.distanceMi
         };
         visit.window = partitionVisit(visit);
+        visit.chargedMin = visit.window === 'in_route'
+          ? routeOverlapMin(p.startDt, p.endDt) + routeOverlapMin(p.endDt, next?.startDt || null)
+          : 0;
         delete visit._startDt;
         return visit;
       });
       const inRouteOffRouteMin = offRouteVisits
         .filter(v => v.window === 'in_route')
-        .reduce((s, v) => s + v.driveMinToReach + v.stationaryMin, 0);
+        .reduce((s, v) => s + v.chargedMin, 0);
 
       // ---------- Stationary pauses (for the Anomalies tab) ----------
       // A pause is the gap between the end of one drive and the start of the
@@ -431,6 +477,7 @@ export async function scanOneDriverDay({
         morningPeriods: morning.count,
         afternoonDriveMin: afternoon.min,
         afternoonPeriods: afternoon.count,
+        measuredPrepMin,
         pauses,
         flaggedPauseCount: flaggedPauses.length,
         flaggedPauseMin: flaggedPauses.reduce((s, p) => s + p.durationMin, 0),
@@ -473,14 +520,21 @@ export async function scanOneDriverDay({
   // ---------- Choose effective travel per leg ----------
   // Motive wins when its GPS matched the route AND it has driving data in that
   // leg's window; otherwise fall back to Google's typical-traffic estimate.
-  // Sanity floor: a Motive sum far below Google's estimate usually means the
-  // GPS only caught a sliver of the real drive (confirm-time skew, coverage
-  // gap, ignition-off tow), not that the drive was tiny. Partial GPS must not
-  // turn into a theft accusation — fall back to Google below 25% of its figure.
+  // D6 floor: a Motive sum far below Google's estimate usually means the GPS
+  // only caught a sliver of the real drive (confirm-time skew, coverage gap,
+  // ignition-off tow), not that the drive was tiny. Partial GPS must not turn
+  // into a theft accusation — fall back to Google below MOTIVE_FLOOR_RATIO.
+  // D4 cap: Motive far ABOVE Google is the mirror-image problem — using the
+  // actual drive as "expected" excuses slow-rolling. Credit GPS drive time
+  // only up to max(SLOW_ROLL_RATIO × typical, typical + grace); the excess
+  // stays in the gap as unexplained time.
   const pickLeg = (ok, motiveMin, motivePeriods, googleMin) => {
     if (ok && typeof motiveMin === 'number' && motivePeriods > 0) {
-      const floor = (typeof googleMin === 'number') ? googleMin * 0.25 : 0;
-      if (motiveMin >= floor) return { minutes: motiveMin, source: 'motive' };
+      if (typeof googleMin !== 'number') return { minutes: motiveMin, source: 'motive' };
+      if (motiveMin < googleMin * MOTIVE_FLOOR_RATIO) return { minutes: googleMin, source: 'google' };
+      const cap = Math.max(Math.round(googleMin * SLOW_ROLL_RATIO), googleMin + SLOW_ROLL_GRACE_MIN);
+      if (motiveMin > cap) return { minutes: cap, source: 'motive_capped', excessMin: motiveMin - cap };
+      return { minutes: motiveMin, source: 'motive' };
     }
     if (typeof googleMin === 'number') return { minutes: googleMin, source: 'google' };
     return { minutes: null, source: 'none' };
@@ -522,9 +576,21 @@ export async function scanOneDriverDay({
 
     loadPrepMin: employee.loadPrepMin,
     wrapUpMin: employee.wrapUpMin,
+    // D7: GPS-measured yard departure, only when the route matched (otherwise
+    // the dwell belongs to a different truck/driver).
+    measuredPrepMin: motiveState?.routeMatch ? motiveState.measuredPrepMin : null,
+    // D3: owner-ops never punch B600 — a no-punch day is normal for them, not
+    // a review flag. `role` is stamped on the record for population labeling.
+    role: employee.role || null,
+    expectPunch: employee.role !== 'owner_op',
 
     defaults
   });
+
+  // D4: surface the capped slow-roll excess so the operator can see how many
+  // minutes of actual GPS drive were NOT credited as expected travel.
+  if (effToFirst.source === 'motive_capped') result.dataHealth.push(`slow_roll_to_first:${effToFirst.excessMin}`);
+  if (effFromLast.source === 'motive_capped') result.dataHealth.push(`slow_roll_from_last:${effFromLast.excessMin}`);
 
   // Data-health notes (NuVizz + Motive), pushed after the record exists.
   if (nuvizzDiag.manualCompletions > 0) result.dataHealth.push(`manual_completions:${nuvizzDiag.manualCompletions}`);
@@ -548,7 +614,10 @@ export async function scanOneDriverDay({
       inRouteOffRouteMin,
       routeMatch: motiveState.routeMatch,
       morningDriveMin: motiveState.morningDriveMin,
+      morningPeriods: motiveState.morningPeriods,
       afternoonDriveMin: motiveState.afternoonDriveMin,
+      afternoonPeriods: motiveState.afternoonPeriods,
+      measuredPrepMin: motiveState.measuredPrepMin,
       pauses: motiveState.pauses,
       flaggedPauseCount: motiveState.flaggedPauseCount,
       flaggedPauseMin: motiveState.flaggedPauseMin,
@@ -619,6 +688,12 @@ export async function scanOneDriverDay({
 
     } // end routeMatch gate
   }
+
+  // D2/D3: Phase B rewrote riskLevel from the composite score, which can undo
+  // the engine's review banding (or newly warrant it once the in-route flag
+  // is known). Re-derive it from the final flags — it never overrides a real
+  // charge (any scored component keeps its earned level).
+  applyReviewBand(result, { expectPunch: employee.role !== 'owner_op' });
 
   // Write (or skip if caller asked us to suppress empty rows)
   const hasData = !!punch || allStops.length > 0;
