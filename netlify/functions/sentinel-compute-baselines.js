@@ -63,6 +63,11 @@ async function writeBaselinesInBatches(db, baselines, batchSize = 10) {
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
+  // POST-only kickoff — this recomputes every driver's baseline (expensive);
+  // a public GET let bots trigger it repeatedly (audit S4).
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed — use POST' }), { status: 405, headers: CORS });
+  }
 
   try {
     const url = new URL(req.url);

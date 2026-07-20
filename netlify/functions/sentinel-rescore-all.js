@@ -182,25 +182,15 @@ export default async (req, context) => {
       }), { status: 202, headers: CORS });
     }
 
-    // Default GET behavior — backwards-compatible with the dashboard's
-    // existing button. If a run is in flight, return its status (no double
-    // kickoff). Otherwise kick off a fresh run and return the pending status.
-    if (existing?.state === 'running') {
-      return new Response(JSON.stringify({
-        version: VERSION,
-        ok: true,
-        action: 'already_running',
-        ...dashboardShape(existing)
-      }), { status: 200, headers: CORS });
-    }
-    const pending = await kickoff(db, context, req);
+    // GET is read-only status. Kickoff requires POST — a side-effectful GET on
+    // a public URL let any prefetcher / uptime monitor / link-preview bot
+    // rewrite every stored score just by fetching the link (audit S3).
     return new Response(JSON.stringify({
       version: VERSION,
       ok: true,
-      action: 'kickoff',
-      accepted: true,
-      ...dashboardShape(pending)
-    }), { status: 202, headers: CORS });
+      action: existing?.state === 'running' ? 'already_running' : 'status',
+      ...dashboardShape(existing)
+    }), { status: 200, headers: CORS });
 
   } catch (err) {
     console.error('[sentinel-rescore-all]', err);

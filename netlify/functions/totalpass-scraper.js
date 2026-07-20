@@ -129,9 +129,14 @@ function parseCSV(text) {
 }
 
 async function fetchTimeclockData(startDate, endDate, env) {
-  const CLOCK_HOST = env.get('TOTALPASS_IP') || 'b600.atlantafreightquotes.com';
-  const CLOCK_PASSWORD = env.get('TOTALPASS_PASSWORD') || 'admin12345';
-  const CLOCK_USERNAME = env.get('TOTALPASS_USERNAME') || 'admin';
+  const CLOCK_HOST = env.get('TOTALPASS_IP');
+  const CLOCK_PASSWORD = env.get('TOTALPASS_PASSWORD');
+  const CLOCK_USERNAME = env.get('TOTALPASS_USERNAME');
+  // Fail closed — never fall back to baked-in credentials. Configure
+  // TOTALPASS_IP / TOTALPASS_USERNAME / TOTALPASS_PASSWORD in the environment.
+  if (!CLOCK_HOST || !CLOCK_USERNAME || !CLOCK_PASSWORD) {
+    throw new Error('B600 credentials not configured (set TOTALPASS_IP, TOTALPASS_USERNAME, TOTALPASS_PASSWORD)');
+  }
   const IS_TUNNEL = !CLOCK_HOST.match(/^\d+\.\d+\.\d+\.\d+$/);
   const PROTO = IS_TUNNEL ? 'https' : 'http';
   const BASE = `${PROTO}://${CLOCK_HOST}`;
@@ -247,6 +252,12 @@ async function fetchTimeclockData(startDate, endDate, env) {
 export default async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('', { status: 200, headers: CORS });
+  }
+  // POST-only. This endpoint scrapes and returns the fleet's raw B600 timecard
+  // CSV; gating it to POST stops a plain GET (bot / prefetch / crawler) from
+  // exfiltrating timecards or hammering the clock (audit S1/S4).
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed — use POST' }), { status: 405, headers: CORS });
   }
 
   const url = new URL(req.url);
