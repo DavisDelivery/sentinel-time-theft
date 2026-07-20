@@ -474,7 +474,7 @@ async function dashboard(db, days) {
   // "records were written but the inputs (B600 punch / NuVizz delivery / travel
   // time) never co-occurred, so nothing was computable and everything reads
   // clean $0." A silent all-clean dashboard otherwise hides an ingestion gap.
-  let feedWithB600 = 0, feedWithNuvizz = 0, feedWithBoth = 0, feedWithGapData = 0;
+  let feedWithB600 = 0, feedWithNuvizz = 0, feedWithBoth = 0, feedWithGapData = 0, feedNoData = 0;
   const perDriver = {};
   const datesPresent = new Set();
   const allDatesPresent = new Set();
@@ -551,6 +551,10 @@ async function dashboard(db, days) {
     if (r.nuvizzMatched) feedWithNuvizz++;
     if (r.b600Matched && r.nuvizzMatched) feedWithBoth++;
     if (typeof r.morningGapMin === 'number' || typeof r.afternoonGapMin === 'number') feedWithGapData++;
+    // Days with neither feed are "no data", not "clean" — the record still
+    // defaults to riskLevel 'clean', so the dashboard must subtract these out
+    // rather than paint an ingestion gap green (audit F3).
+    if (!r.b600Matched && !r.nuvizzMatched) feedNoData++;
 
     if (!perDriver[slug]) {
       perDriver[slug] = {
@@ -853,7 +857,8 @@ async function dashboard(db, days) {
       withB600: feedWithB600,
       withNuvizz: feedWithNuvizz,
       withBoth: feedWithBoth,
-      withGapData: feedWithGapData
+      withGapData: feedWithGapData,
+      noData: feedNoData
     },
     topOffenders: offendersRanked.slice(0, 15),
     offendersRanked,

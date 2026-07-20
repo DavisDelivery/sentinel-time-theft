@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff">
 <title>SENTINEL</title>
 <!-- Favicons — SVG for modern Chrome/desktop, PNG fallbacks, apple-touch-icon for iOS home screen (iOS ignores SVG favicons). -->
@@ -28,7 +28,7 @@
   --text: #0f172a;
   --text-2: #475569;
   --text-3: #64748b;
-  --text-4: #94a3b8;
+  --text-4: #6b7280;
   --brand: #1e5b92;
   --brand-2: #dbeafe;
   --crit: #b91c1c;
@@ -723,6 +723,18 @@ body {
 .compare-note { font-size: 10px; color: var(--text-4); margin-left: auto; }
 .compare-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
 .compare-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); white-space: nowrap; }
+/* On phones the 9-column table needed horizontal scrolling to see anything,
+   hiding the money column. Collapse to Driver / Del-per-hr / Unexplained $
+   (whole row taps to open the card). */
+@media (max-width: 700px) {
+  .compare-table th:nth-child(2), .compare-table td:nth-child(2),
+  .compare-table th:nth-child(3), .compare-table td:nth-child(3),
+  .compare-table th:nth-child(4), .compare-table td:nth-child(4),
+  .compare-table th:nth-child(5), .compare-table td:nth-child(5),
+  .compare-table th:nth-child(7), .compare-table td:nth-child(7),
+  .compare-table th:nth-child(9), .compare-table td:nth-child(9) { display: none; }
+  .compare-table th, .compare-table td { padding: 9px 8px; }
+}
 .compare-table th, .compare-table td { padding: 8px 10px; text-align: right; }
 .compare-table th:first-child, .compare-table td:first-child { text-align: left; position: sticky; left: 0; background: var(--bg-1); }
 .compare-table thead th {
@@ -1072,7 +1084,7 @@ body {
   </button>
 </nav>
 
-<div class="modal" id="refDetailModal">
+<div class="modal" id="refDetailModal" role="dialog" aria-modal="true" aria-label="Reference detail">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <div class="modal-title">
@@ -1085,11 +1097,11 @@ body {
   </div>
 </div>
 
-<div class="report-modal" id="reportModal">
+<div class="report-modal" id="reportModal" role="dialog" aria-modal="true" aria-label="Driver performance card">
   <div id="reportBody"></div>
 </div>
 
-<div class="modal" id="settingsModal">
+<div class="modal" id="settingsModal" role="dialog" aria-modal="true" aria-label="Settings">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <div class="modal-title">
@@ -1109,8 +1121,8 @@ body {
       <button class="primary" id="rescoreAll" style="margin-top:0">Re-score All Records</button>
       <div id="rescoreAllStatus" class="v mono" style="margin-top:8px;color:var(--text-3)"></div>
     </div>
-    <div class="field"><div class="l">Yard ZIP Variants</div><div class="v mono" id="yardZipsDisplay">30518, 30542</div></div>
-    <div class="field"><div class="l">Static Thresholds (min)</div><div class="v mono" style="line-height:1.6">morn ok≤30 / warn≤60 / flag≤90<br>aft ok≤30 / warn≤60 / flag≤90<br>in-route ok≤15 / warn≤30 / flag≤60</div></div>
+    <div class="field"><div class="l">Yard ZIP Variants (compiled default)</div><div class="v mono" id="yardZipsDisplay">30518, 30542</div></div>
+    <div class="field"><div class="l">Static Thresholds (compiled defaults)</div><div class="v mono" style="line-height:1.6">morn ok≤30 / warn≤60 / flag≤90<br>aft ok≤30 / warn≤60 / flag≤90<br>in-route ok≤15 / warn≤30 / flag≤60</div></div>
     <div class="field">
       <div class="l">Driver Config — Truck Type / Load Prep / Wrap Up</div>
       <div class="dc-help">
@@ -1133,7 +1145,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.8.4-security';
+const APP_VERSION = 'v4.8.5-frontend-fixes';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1342,8 +1354,13 @@ function renderDistBar(dist, total, opts = {}) {
     .filter(k => (dist[k] || 0) > 0)
     .map(k => `<span class="num">${dist[k]}</span> ${k}`)
     .join(' · ');
+  // Join the header parts conditionally so an empty headerCounts (zero scored
+  // days but some no-data days) doesn't leave a dangling " ·  · " separator.
+  const headerParts = [`<span class="num">${total}</span> scored days`];
+  if (headerCounts) headerParts.push(headerCounts);
+  if (opts.noDataCount > 0) headerParts.push(`<span class="num">${opts.noDataCount}</span> no data`);
   return `
-    <div class="dist-header"><span class="num">${total}</span> scored days · ${headerCounts}${opts.noDataCount > 0 ? ` · <span class="num">${opts.noDataCount}</span> no data` : ''}</div>
+    <div class="dist-header">${headerParts.join(' · ')}</div>
     <div class="dist-bar">${segs}</div>
     <div class="dist-legend">${legend}</div>
   `;
@@ -1522,14 +1539,18 @@ function rankInBucket(d, row, metricKey, higherIsBetter) {
   return { rank: idx + 1, of: vals.length };
 }
 
+// Sorters return the raw metric (or null when a driver doesn't have it, e.g.
+// owner-ops on clock metrics). The comparator sinks nulls to the bottom in
+// both directions, so contractors never sort to the top of a clock column as
+// if they had the worst times.
 const CMP_SORTERS = {
   name:       r => (r.displayName || '').toLowerCase(),
   days:       r => r.n_days || 0,
-  c2f:        r => (r.medianC2F == null ? Infinity : r.medianC2F),
-  morningGap: r => (r.medianMorningGap == null ? Infinity : r.medianMorningGap),
-  onRoute:    r => (r.medianOnRouteMin == null ? -Infinity : r.medianOnRouteMin),
-  stopsPerHr: r => (r.medianStopsPerHourOnRoute == null ? -Infinity : r.medianStopsPerHourOnRoute),
-  stopsPerDay: r => (r.medianStopsPerDay == null ? -Infinity : r.medianStopsPerDay),
+  c2f:        r => r.medianC2F,
+  morningGap: r => r.medianMorningGap,
+  onRoute:    r => r.medianOnRouteMin,
+  stopsPerHr: r => r.medianStopsPerHourOnRoute,
+  stopsPerDay: r => r.medianStopsPerDay,
   stolen:     r => r.stolenDollars || 0
 };
 
@@ -1543,14 +1564,18 @@ const performanceState = {
 function navigateToPerformance() {
   document.querySelector('.tab[data-page="performance"]').click();
 }
+let performanceFetchGen = 0;
 async function loadPerformance() {
   const container = document.getElementById('performanceContent');
   container.innerHTML = '<div class="loading">Loading performance data</div>';
+  const myGen = ++performanceFetchGen;
   try {
     const d = await api('dashboard', { days: performanceState.days });
+    if (myGen !== performanceFetchGen) return; // superseded by a newer range/group click
     performanceState.payload = d;
     renderPerformance(container, d);
   } catch (e) {
+    if (myGen !== performanceFetchGen) return;
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${e.message}</div>`;
   }
 }
@@ -1654,7 +1679,7 @@ function renderPerformance(container, d) {
           </div>` : ''}
         ${stolenSeries.length >= 3 ? `
           <div class="rc-chart">
-            ${rcColChart(stolenSeries, (v) => fmt$(v), 'Unexplained $, by day', `flagged dollars across ${grpLabel}`)}
+            ${rcColChart(stolenSeries, (v) => fmt$Plain(v), 'Unexplained $, by day', `flagged dollars across ${grpLabel}`)}
           </div>` : ''}
       </div>` : ''}
 
@@ -1694,6 +1719,11 @@ function renderCompareAll(section, d) {
   const sortFn = CMP_SORTERS[performanceState.sort] || CMP_SORTERS.name;
   filtered.sort((a, b) => {
     const va = sortFn(a), vb = sortFn(b);
+    const an = va == null || (typeof va === 'number' && Number.isNaN(va));
+    const bn = vb == null || (typeof vb === 'number' && Number.isNaN(vb));
+    if (an && bn) return 0;
+    if (an) return 1;   // nulls always last, regardless of direction
+    if (bn) return -1;
     if (va < vb) return -1 * performanceState.dir;
     if (va > vb) return 1 * performanceState.dir;
     return 0;
@@ -1902,7 +1932,7 @@ function rcLineChart(points, refVal, fmtV, refLabel = 'peer', title = '', subtit
   const coords = points.map((p, i) => [f.xOf(i), f.yOf(p.v)]);
   const line = coords.map(c => `${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ');
   const area = `M${f.L},${(f.T + f.ph).toFixed(1)} L${line.replace(/ /g, ' L')} L${(f.W - f.R).toFixed(1)},${(f.T + f.ph).toFixed(1)} Z`;
-  let s = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img">${f.grid}`;
+  let s = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="${escapeHtml((title || '') + (subtitle ? '. ' + subtitle : '') || 'chart')}">${f.grid}`;
   if (typeof refVal === 'number' && refVal <= f.yMax) {
     const ry = f.yOf(refVal);
     // Put the label on whichever side of the hairline the first data point
@@ -1933,7 +1963,7 @@ function rcColChart(points, fmtV, title = '', subtitle = '') {
   const n = points.length;
   const slot = f.pw / n;
   const bw = Math.max(1.5, Math.min(16, slot - 2));
-  let s = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img">${f.grid}`;
+  let s = `<svg viewBox="0 0 ${f.W} ${f.H}" role="img" aria-label="${escapeHtml((title || '') + (subtitle ? '. ' + subtitle : '') || 'chart')}">${f.grid}`;
   points.forEach((p, i) => {
     const x = f.L + i * slot + (slot - bw) / 2;
     const y = f.yOf(p.v), h = f.T + f.ph - y;
@@ -1965,7 +1995,8 @@ async function openDriverReportCard(slug, d) {
     return;
   }
   const isContractor = r.role === 'owner_op';
-  const rangeText = d.rangeMeta?.days === 'all' ? 'all time' : `last ${d.rangeMeta?.days} days`;
+  const _rmDays = d.rangeMeta?.days;
+  const rangeText = _rmDays == null ? 'the selected range' : _rmDays === 'all' ? 'all time' : `last ${_rmDays} days`;
   const peer = r.peer || {};
   const firstName = escapeHtml((r.displayName || 'this driver').split(' ')[0]);
 
@@ -1995,23 +2026,33 @@ async function openDriverReportCard(slug, d) {
   const ranks = {};
   for (const m of metrics) ranks[m.key] = rankInBucket(d, r, m.key, !m.lowerIsBetter);
   const rankVals = Object.values(ranks).filter(Boolean);
-  const medianRank = rankVals.length
-    ? rankVals.map(x => x.rank).sort((a, b) => a - b)[Math.floor(rankVals.length / 2)]
-    : null;
-  const groupSize = rankVals.length ? Math.max(...rankVals.map(x => x.of)) : null;
+  // True median (average the two middles on an even count), and a representative
+  // group size that is the median of the per-metric denominators - not the max,
+  // which could pair a rank from an 8-driver metric with a denominator of 12.
+  const medianOf = (arr) => {
+    if (!arr.length) return null;
+    const s = arr.slice().sort((a, b) => a - b), m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+  };
+  const medianRank = medianOf(rankVals.map(x => x.rank));
+  const groupSize = medianOf(rankVals.map(x => x.of));
 
   // KPI tiles. Delta color: class "up" renders good-green, "down" renders bad-red.
   const kpi = (label, value, deltaHtml) => `
     <div class="rc-kpi"><div class="k">${label}</div><div class="v">${value}</div>${deltaHtml || '<div class="d">&nbsp;</div>'}</div>`;
+  // Delta convention (consistent across the whole app): the ARROW tracks the
+  // value's direction (up = the number rose), and COLOR carries good/bad
+  // (green 'up' class = good, red 'down' = bad). So "Time on route v 20m" reads
+  // as 20m less, in green - not a green up-arrow next to a decreased number.
   const dph = r.medianStopsPerHourOnRoute, dphP = peer.medianStopsPerHourOnRoute;
   const dphDelta = (typeof dph === 'number' && typeof dphP === 'number')
     ? `<div class="d ${dph >= dphP ? 'up' : 'down'}">${dph >= dphP ? '▲' : '▼'} ${Math.abs(dph - dphP).toFixed(2)} vs peers</div>` : '';
   const onr = r.medianOnRouteMin, onrP = peer.medianOnRouteMin;
   const onrDelta = (typeof onr === 'number' && typeof onrP === 'number')
-    ? `<div class="d ${onr <= onrP ? 'up' : 'down'}">${onr <= onrP ? '▲' : '▼'} ${fmtDur(Math.abs(Math.round(onr - onrP)))} vs peers</div>` : '';
+    ? `<div class="d ${onr <= onrP ? 'up' : 'down'}">${onr >= onrP ? '▲' : '▼'} ${fmtDur(Math.abs(Math.round(onr - onrP)))} vs peers</div>` : '';
   const t = r.trend30d;
-  const stolenDelta = (t && (t.current || t.prior))
-    ? `<div class="d ${t.delta <= 0 ? 'up' : 'down'}">${t.delta <= 0 ? '▲' : '▼'} ${fmt$(Math.abs(t.delta))} vs prior 30d</div>` : '';
+  const stolenDelta = (t && (t.current || t.prior) && Number.isFinite(t.delta))
+    ? `<div class="d ${t.delta <= 0 ? 'up' : 'down'}">${t.delta >= 0 ? '▲' : '▼'} ${fmt$(Math.abs(t.delta))} vs prior 30d</div>` : '';
   const kpiRow = `
     <div class="rc-kpis">
       ${kpi('Deliveries / hour', typeof dph === 'number' ? fmtSphRef(dph) : '—', dphDelta)}
@@ -2025,13 +2066,18 @@ async function openDriverReportCard(slug, d) {
     const all = rcPeerValues(d, r, m.key);
     if (!all.length || typeof r[m.key] !== 'number') return '';
     const rk = ranks[m.key];
+    // Tick = median of the plotted dots (each driver's own median), so it
+    // actually centers the dots. Using the bucket median (a median over
+    // driver-DAYS) put the "peer median" line visibly off-center from the
+    // per-driver dots it was meant to summarize.
+    const tick = medianOf(all.map(p => p.v));
     return `
       <div class="rc-strip-row">
         <div class="rc-strip-label">
           <div class="m">${m.label}</div>
           <div class="r">${m.sub}${rk ? ` · rank ${rk.rank} of ${rk.of}` : ''}</div>
         </div>
-        ${rcDotStrip(all, r.slug, peer[m.key], m.lowerIsBetter, m.fmt)}
+        ${rcDotStrip(all, r.slug, tick, m.lowerIsBetter, m.fmt)}
       </div>`;
   }).join('');
   const stripPanel = stripRows ? `
@@ -2071,7 +2117,7 @@ async function openDriverReportCard(slug, d) {
     const dTxt = !has ? '—' : onPar ? 'on par'
       : `${diff > 0 ? '+' : '−'}${m.key === 'medianStopsPerHourOnRoute' ? Math.abs(diff).toFixed(2) : fmtDur(Math.abs(Math.round(diff)))}`;
     const vClass = !has || onPar ? 'neutral' : better ? 'good' : 'bad';
-    const verdict = !has ? '—' : onPar ? 'on par' : better ? '▲ better' : '▼ worse';
+    const verdict = !has ? '—' : onPar ? 'on par' : better ? 'better' : 'worse';
     return `<tr>
       <td>${m.label}<span class="sub">${m.sub}</span></td>
       <td>${typeof v === 'number' ? m.fmt(v) : '—'}</td>
@@ -2256,7 +2302,7 @@ function renderReferenceDetailBody(container, ref) {
             ${headerClick('onRoute', 'On route')}
             ${headerClick('stopsPerHr', 'Stops/hr')}
             ${headerClick('l2c', 'Last → clock-out')}
-            ${headerClick('deviation', 'vs typical')}
+            ${headerClick('deviation', `vs typical (${({ alpha: 'morning gap', deviation: 'morning gap', c2f: 'clock-in to 1st', morning: 'morning gap', onRoute: 'on route', stopsPerHr: 'stops/hr', l2c: 'last to clock-out' })[refDetailState.sort] || 'morning gap'})`)}
           </tr>
         </thead>
         <tbody>
@@ -2411,6 +2457,12 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
     }
     const dist = d.dist;
     const total = d.totalDriverDays || 0;
+    // No-data days (neither feed matched) default to riskLevel 'clean' in the
+    // raw dist. Split them out so the fleet headline doesn't overstate "clean"
+    // or understate the high-risk share — matching Audit/Investigate (audit F3).
+    const noDataCount = d.feedHealth?.noData || 0;
+    const scoredTotal = Math.max(0, total - noDataCount);
+    const distAdj = { ...dist, clean: Math.max(0, (dist.clean || 0) - noDataCount) };
     const datesPresent = d.datesPresent;
     // Annualize over the CALENDAR span of the selected window, not just the
     // dates that happened to have data — dividing by datesPresent.length
@@ -2463,15 +2515,15 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
         <div class="hero-row">
           <div class="item">
             <div class="v num">${fmt$Plain(annualized.toFixed(0))}</div>
-            <div class="l">Annualized</div>
+            <div class="l">Projected annual (est.)</div>
           </div>
           <div class="item">
             <div class="v num">${(dist.critical || 0) + (dist.high || 0)}</div>
             <div class="l">High-risk days</div>
           </div>
           <div class="item">
-            <div class="v num">${total > 0 ? Math.round((((dist.critical || 0) + (dist.high || 0)) / total) * 100) : 0}%</div>
-            <div class="l">of fleet-days</div>
+            <div class="v num">${scoredTotal > 0 ? Math.round((((dist.critical || 0) + (dist.high || 0)) / scoredTotal) * 100) : 0}%</div>
+            <div class="l">of scored days</div>
           </div>
         </div>
       </div>
@@ -2479,9 +2531,9 @@ function renderOverviewFromPayload(d, wasCached = false, gen = null, opts = {}) 
       <div class="section">
         <div class="section-head">
           <h2>Risk Distribution</h2>
-          <div class="aux">${total} records · ${rangeText}</div>
+          <div class="aux">${scoredTotal} scored · ${rangeText}</div>
         </div>
-        <div class="card">${renderDistBar(dist, total)}</div>
+        <div class="card">${renderDistBar(distAdj, scoredTotal, { noDataCount })}</div>
       </div>
 
       <div class="section">
@@ -3152,8 +3204,16 @@ document.getElementById('refreshDate').addEventListener('click', () => { cachedD
 
 // ============ Investigate ============
 let cachedDrivers = null;
-async function loadInvestigateInit() {
-  if (!cachedDrivers) {
+let investigateInitPromise = null;
+// Memoize the in-flight init so the tab-click loader and navigateToDriver
+// (which both fire on the first "tap to investigate") share one fetch and, more
+// importantly, attach the dropdown change-listener exactly once. Previously both
+// ran before cachedDrivers was set and each added a listener, so every later
+// dropdown pick fetched + rendered the driver twice for the rest of the session.
+function loadInvestigateInit() {
+  if (cachedDrivers) return Promise.resolve();
+  if (investigateInitPromise) return investigateInitPromise;
+  investigateInitPromise = (async () => {
     try {
       const r = await api('driverList');
       cachedDrivers = r.drivers || [];
@@ -3161,8 +3221,9 @@ async function loadInvestigateInit() {
       sel.innerHTML = '<option value="">— select driver —</option>' +
         cachedDrivers.map(d => `<option value="${escapeHtml(d.slug)}">${escapeHtml(d.fullName)}${d.defaultTruck ? ' · #' + escapeHtml(d.defaultTruck) : ''}</option>`).join('');
       sel.addEventListener('change', () => loadDriver(sel.value));
-    } catch (e) { return; }
-  }
+    } catch (e) { investigateInitPromise = null; }
+  })();
+  return investigateInitPromise;
 }
 
 let currentBaseline = null;
@@ -3447,7 +3508,8 @@ function renderProfilesList() {
 
 // ============ Tab navigation ============
 // ============ Anomalies tab (Motive GPS) ============
-const anomalyState = { days: 30, view: 'pauses' };
+const anomalyState = { days: 30, view: 'pauses', showAll: false };
+const ANOM_PAGE = 40;
 async function loadAnomalies() {
   const c = document.getElementById('anomaliesContent');
   c.innerHTML = '<div class="loading">Loading anomalies</div>';
@@ -3468,25 +3530,41 @@ function renderAnomalies(d) {
       <div class="off-main"><div class="off-name">${name}</div><div class="off-meta">${meta}</div></div>
     </div>`;
 
+  // Sort each view worst-first, then page: the worst ANOM_PAGE first with a
+  // "show all" affordance, so the feed opens as a scannable shortlist instead
+  // of an unbounded multi-thousand-row wall.
+  const paginate = (rows, mapFn, emptyMsg) => {
+    if (!rows.length) return empty(emptyMsg);
+    const total = rows.length;
+    const shown = anomalyState.showAll ? rows : rows.slice(0, ANOM_PAGE);
+    let html = shown.map(mapFn).join('');
+    if (total > ANOM_PAGE) {
+      html += anomalyState.showAll
+        ? `<button class="viewall-toggle" data-anom-showall="0">▾ Show top ${ANOM_PAGE} only</button>`
+        : `<button class="viewall-toggle" data-anom-showall="1">▸ Show all ${total.toLocaleString()} (showing worst ${ANOM_PAGE})</button>`;
+    }
+    return html;
+  };
   let list = '';
   if (anomalyState.view === 'pauses') {
-    const rows = d.topPauses || [];
-    list = rows.length ? rows.map(p => row(p.slug, fmtDur(p.durationMin),
+    const rows = (d.topPauses || []).slice().sort((a, b) => (b.durationMin || 0) - (a.durationMin || 0));
+    list = paginate(rows, p => row(p.slug, fmtDur(p.durationMin),
       `${escapeHtml(p.displayName || p.slug)} · ${dayOfWeek(p.date)} ${fmtDate(p.date)}`,
       `${escapeHtml(p.class || '?')} · ${p.atZip ? 'ZIP ' + escapeHtml(p.atZip) : 'no ZIP'}${p.atAddr ? ' · ' + escapeHtml(p.atAddr) : ''} · ${escapeHtml(p.startET || '')}–${escapeHtml(p.endET || '')}`
-    )).join('') : empty('No flagged pauses (≥30m away from stops) in this window.');
+    ), 'No flagged pauses (≥30m away from stops) in this window.');
   } else if (anomalyState.view === 'deviations') {
-    const rows = d.deviations || [];
-    list = rows.length ? rows.map(v => row(v.slug, fmtDur((v.stationaryMin || 0) + (v.driveMinToReach || 0)),
+    const rows = (d.deviations || []).slice().sort((a, b) =>
+      ((b.stationaryMin || 0) + (b.driveMinToReach || 0)) - ((a.stationaryMin || 0) + (a.driveMinToReach || 0)));
+    list = paginate(rows, v => row(v.slug, fmtDur((v.stationaryMin || 0) + (v.driveMinToReach || 0)),
       `${escapeHtml(v.displayName || v.slug)} · ${dayOfWeek(v.date)} ${fmtDate(v.date)}`,
       `off-route ${v.destZip ? 'ZIP ' + escapeHtml(v.destZip) : ''}${v.destAddr ? ' · ' + escapeHtml(v.destAddr) : ''} · ${v.stationaryMin || 0}m stopped + ${v.driveMinToReach || 0}m drive`
-    )).join('') : empty('No in-route deviations in this window.');
+    ), 'No in-route deviations in this window.');
   } else {
-    const rows = d.placePatterns || [];
-    list = rows.length ? rows.map(p => row(p.slug, `${p.count}×`,
+    const rows = (d.placePatterns || []).slice().sort((a, b) => (b.count || 0) - (a.count || 0));
+    list = paginate(rows, p => row(p.slug, `${p.count}×`,
       `${escapeHtml(p.displayName || p.slug)} · ${p.atZip ? 'ZIP ' + escapeHtml(p.atZip) : 'no ZIP'}`,
       `${p.count} days · avg ${fmtDur(p.avgMin)}${p.sampleAddr ? ' · ' + escapeHtml(p.sampleAddr) : ''}`
-    )).join('') : empty('No repeated pause locations (2+ days) in this window.');
+    ), 'No repeated pause locations (2+ days) in this window.');
   }
 
   c.innerHTML = `
@@ -3503,8 +3581,10 @@ function renderAnomalies(d) {
     <div class="aux" style="margin:var(--s-2) 0;color:var(--text-3);font-size:var(--fs-xs)">Observation only — not part of theft scoring. Tap a row to open the driver.</div>
     <div class="card card-flush">${list}</div>
   `;
-  c.querySelectorAll('[data-anom-range]').forEach(b => b.addEventListener('click', () => { anomalyState.days = +b.dataset.anomRange; loadAnomalies(); }));
-  c.querySelectorAll('[data-anom-view]').forEach(b => b.addEventListener('click', () => { anomalyState.view = b.dataset.anomView; renderAnomalies(d); }));
+  c.querySelectorAll('[data-anom-range]').forEach(b => b.addEventListener('click', () => { anomalyState.days = +b.dataset.anomRange; anomalyState.showAll = false; loadAnomalies(); }));
+  c.querySelectorAll('[data-anom-view]').forEach(b => b.addEventListener('click', () => { anomalyState.view = b.dataset.anomView; anomalyState.showAll = false; renderAnomalies(d); }));
+  const showAllBtn = c.querySelector('[data-anom-showall]');
+  if (showAllBtn) showAllBtn.addEventListener('click', () => { anomalyState.showAll = showAllBtn.dataset.anomShowall === '1'; renderAnomalies(d); });
   c.querySelectorAll('.off-row[data-slug]').forEach(r => r.addEventListener('click', () => navigateToDriver(r.dataset.slug)));
 }
 
@@ -3594,6 +3674,19 @@ function wireDriverConfigRow(row) {
     dirtyRows.add(slug);
     updateSaveAllButton();
   };
+  // Any field whose focus-captured original differs from its current value.
+  const rowChanged = () => [lpInput, wuInput, ttSelect].some(el =>
+    el && el.dataset.original !== undefined && el.dataset.original !== el.value);
+  // Re-evaluate after every edit: revert a field back to its original and the
+  // row drops out of the "unsaved" set instead of staying stuck orange.
+  const syncDirty = () => {
+    if (rowChanged()) markUnsaved();
+    else if (dirtyRows.has(slug)) {
+      dirtyRows.delete(slug);
+      setRowStatus(row.querySelector('[data-status]'), '', '');
+      updateSaveAllButton();
+    }
+  };
   const blurSave = (input) => {
     if (input.dataset.original === input.value) return;     // no change → skip
     if (!dirtyRows.has(slug)) return;                       // status reset
@@ -3603,9 +3696,7 @@ function wireDriverConfigRow(row) {
   for (const input of [lpInput, wuInput]) {
     if (!input) continue;
     input.addEventListener('focus', () => { input.dataset.original = input.value; });
-    input.addEventListener('input', () => {
-      if (input.dataset.original !== input.value) markUnsaved();
-    });
+    input.addEventListener('input', syncDirty);
     input.addEventListener('blur', () => blurSave(input));
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
@@ -3805,6 +3896,20 @@ document.getElementById('refDetailModal').addEventListener('click', (ev) => {
 document.getElementById('reportModal').addEventListener('click', (ev) => {
   // Backdrop tap closes the printable report card.
   if (ev.target === ev.currentTarget) closeDriverReportCard();
+});
+// E4: Settings now closes on backdrop tap too (was X-only), and every modal
+// closes on ESC, for keyboard/AT parity with the tap-to-dismiss behavior.
+document.getElementById('settingsModal').addEventListener('click', (ev) => {
+  if (ev.target === ev.currentTarget) document.getElementById('settingsModal').classList.remove('open');
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape') return;
+  const report = document.getElementById('reportModal');
+  if (report.classList.contains('open')) { closeDriverReportCard(); return; }
+  const ref = document.getElementById('refDetailModal');
+  if (ref.classList.contains('open')) { closeReferenceDetailModal(); return; }
+  const settings = document.getElementById('settingsModal');
+  if (settings.classList.contains('open')) settings.classList.remove('open');
 });
 async function runMaintenance(endpoint, statusId, btnId, doneLabel) {
   const statusEl = document.getElementById(statusId);
