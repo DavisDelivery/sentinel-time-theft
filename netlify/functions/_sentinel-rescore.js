@@ -27,7 +27,7 @@
 // output. Math is unchanged; rescore restamps every record so historical
 // evidence picks up the new format.
 
-export const ENGINE_VERSION = 'v4.7.0-motive-integrity';
+export const ENGINE_VERSION = 'v4.9.0-risk-band-floor';
 
 // Operator-facing duration formatter — matches the dashboard's fmtDur.
 //   null/undefined/NaN → "—"
@@ -286,6 +286,13 @@ export function rescoreOne(record, baseline, defaults, employee = null) {
   if (score > 100) score = 100;
   next.riskScore = score;
   next.riskLevel = riskLevelOf(score);
+  // D1: floor the band by the worst single component so one critical vector
+  // reaches 'high' and two reach 'critical' (see _sentinel-engine.js).
+  {
+    const nCrit = [morningFlag, afternoonFlag, inRouteFlag].filter(f => f === 'critical').length;
+    if (nCrit >= 2) next.riskLevel = 'critical';
+    else if (nCrit === 1 && (next.riskLevel === 'clean' || next.riskLevel === 'low' || next.riskLevel === 'medium')) next.riskLevel = 'high';
+  }
 
   next.stolenMinutes = stolen;
   const wage = (defaults.wageRates[next.truckType] != null)
