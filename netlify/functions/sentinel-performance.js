@@ -12,8 +12,6 @@ const CORS = {
   'Content-Type': 'application/json'
 };
 
-const HUB_FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/davismarginiq/databases/(default)/documents';
-
 // ─── helpers ───────────────────────────────────────────────────────────────
 function median(nums){
   const s = nums.filter(n=>typeof n==='number' && !isNaN(n)).sort((a,b)=>a-b);

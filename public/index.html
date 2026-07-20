@@ -1145,7 +1145,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.8.5-frontend-fixes';
+const APP_VERSION = 'v4.8.6-wiring';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -1183,6 +1183,11 @@ const DASH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour soft cap
 const dashCacheKey = (days) => `sentinel-cache-dashboard-${days}-${APP_VERSION}`;
 let dashFetchGen = 0;
 
+// Keys the Overview render relies on. If a cached payload is missing any of
+// them, its shape predates a backend change (the cache keys on the hand-edited
+// APP_VERSION, which a backend-only deploy can outrun) — treat it as a miss and
+// re-fetch rather than render an old-shape payload against new code (audit W4).
+const DASH_REQUIRED_KEYS = ['dist', 'totalStolen', 'feedHealth', 'referenceMetrics', 'offendersRanked', 'rangeMeta'];
 function readDashCache(days) {
   try {
     const raw = localStorage.getItem(dashCacheKey(days));
@@ -1190,6 +1195,7 @@ function readDashCache(days) {
     const { payload, cachedAt } = JSON.parse(raw);
     if (!payload || !cachedAt) return null;
     if (Date.now() - cachedAt > DASH_CACHE_TTL_MS) return null; // expired
+    if (!DASH_REQUIRED_KEYS.every(k => k in payload)) return null; // stale shape
     return { payload, cachedAt };
   } catch (_) { return null; }
 }
