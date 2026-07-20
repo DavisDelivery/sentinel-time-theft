@@ -17,7 +17,7 @@
 
 import { getDb } from './_firebase-admin.js';
 
-const VERSION = 'v4.5.0-review-band';
+const VERSION = 'v4.6.0-offroute-record';
 
 // Per-driver listDocs cap. Each driver has at most one record per day; after
 // the 17-month backfill ~374 working days exist per driver. 1500 is ~7 years
@@ -937,7 +937,8 @@ async function anomalies(db, days) {
 
   const pauses = [];
   const deviations = [];
-  const placeMap = {};           // `${slug}|${zip}` → pattern accumulator
+  const placeMap = {};           // `${slug}|${zip}` → pause-pattern accumulator
+  const offRouteMap = {};        // `${slug}|${zip}` → off-route destination accumulator
   let daysWithMotive = 0;
   const driversWithMotive = new Set();
   let scannedInRange = 0;
@@ -976,13 +977,32 @@ async function anomalies(db, days) {
       if (!pm.sampleAddr && p.atAddr) pm.sampleAddr = p.atAddr;
     }
 
+    // Every off-route visit is a record of "where the truck went that wasn't
+    // a customer or the yard" — all three windows, not just in-route. Pre-
+    // route/post-route visits fall inside the morning/afternoon gap windows
+    // (time already charged there); in-route ones feed the in-route flag.
     for (const v of (m.offRouteVisits || [])) {
-      if (!v || v.window !== 'in_route') continue;
+      if (!v) continue;
+      const visitMin = (v.stationaryMin || 0) + (v.driveMinToReach || 0);
       deviations.push({
         slug: r.driverSlug, displayName: r.displayName || r.driverSlug, date: r.date,
+        window: v.window || 'unknown',
         destZip: v.destZip || null, destAddr: v.destAddr || null,
+        arrivedAt: v.arrivedAt || null, leftAt: v.leftAt || null,
+        driveMi: (typeof v.driveMi === 'number') ? v.driveMi : null,
         stationaryMin: v.stationaryMin || 0, driveMinToReach: v.driveMinToReach || 0
       });
+      // Repeat-destination record: same driver returning to the same off-route
+      // ZIP across days is the "where do they keep going?" question.
+      const okey = `${r.driverSlug}|${v.destZip || 'noZip'}`;
+      const om = offRouteMap[okey] || (offRouteMap[okey] = {
+        slug: r.driverSlug, displayName: r.displayName || r.driverSlug, destZip: v.destZip || null,
+        sampleAddr: v.destAddr || null, count: 0, totalMin: 0, dates: [], windows: {}
+      });
+      om.count++; om.totalMin += visitMin;
+      om.windows[v.window || 'unknown'] = (om.windows[v.window || 'unknown'] || 0) + 1;
+      if (om.dates.length < 30 && r.date && om.dates[om.dates.length - 1] !== r.date) om.dates.push(r.date);
+      if (!om.sampleAddr && v.destAddr) om.sampleAddr = v.destAddr;
     }
   }
 
@@ -992,14 +1012,20 @@ async function anomalies(db, days) {
     .map(p => ({ ...p, avgMin: Math.round(p.totalMin / p.count) }))
     .filter(p => p.count >= 2)            // "repeated" = 2+ days at the same place
     .sort((a, b) => (b.count - a.count) || (b.avgMin - a.avgMin));
+  // Repeat off-route destinations: 2+ visits to the same (driver, ZIP).
+  const offRoutePlaces = Object.values(offRouteMap)
+    .map(p => ({ ...p, avgMin: Math.round(p.totalMin / p.count) }))
+    .filter(p => p.count >= 2)
+    .sort((a, b) => (b.count - a.count) || (b.totalMin - a.totalMin));
 
   return {
     rangeDays: typeof days === 'number' ? days : 'all',
     startDate, endDate: today.toISOString().slice(0, 10),
     coverage: { scannedInRange, daysWithMotive, driversWithMotive: driversWithMotive.size },
-    counts: { flaggedPauses: pauses.length, deviations: deviations.length, places: placePatterns.length },
+    counts: { flaggedPauses: pauses.length, deviations: deviations.length, places: placePatterns.length, offRoutePlaces: offRoutePlaces.length },
     topPauses: pauses.slice(0, 200),
-    deviations: deviations.slice(0, 200),
+    deviations: deviations.slice(0, 300),
+    offRoutePlaces: offRoutePlaces.slice(0, 100),
     placePatterns: placePatterns.slice(0, 100)
   };
 }
