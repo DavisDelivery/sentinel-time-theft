@@ -41,7 +41,7 @@ export default async (req) => {
   console.log(`[weekly-baselines] firing ${targetUrl}`);
 
   try {
-    const res = await fetch(targetUrl, { method: 'GET' });
+    const res = await fetch(targetUrl, { method: 'POST' });
     const text = await res.text();
     let payload = null;
     try { payload = JSON.parse(text); } catch (_) { payload = { raw: text.slice(0, 500) }; }

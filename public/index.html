@@ -1133,7 +1133,7 @@ body {
 <script>
 // NOTE: APP_VERSION is part of the dashboard cache key — bump it on EVERY
 // dashboard payload shape change or stale-shaped cached payloads survive.
-const APP_VERSION = 'v4.8.3-chart-titles-favicon';
+const APP_VERSION = 'v4.8.4-security';
 document.getElementById('versionTag').textContent = APP_VERSION.split('-')[0];
 document.getElementById('versionDisplay').textContent = APP_VERSION;
 
@@ -3813,8 +3813,7 @@ async function runMaintenance(endpoint, statusId, btnId, doneLabel) {
   statusEl.textContent = 'Working…';
   btn.disabled = true;
   try {
-    const qs = new URLSearchParams();
-    const res = await fetch(`/api/${endpoint}?` + qs);
+    const res = await fetch(`/api/${endpoint}`, { method: 'POST' });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
     statusEl.style.color = 'var(--clean)';
@@ -3852,9 +3851,8 @@ async function runRescoreAll() {
   statusEl.textContent = 'Starting…';
   btn.disabled = true;
   try {
-    const qs = new URLSearchParams();
-    // Kickoff (GET on the trigger URL — starts a run if none in flight)
-    const kickRes = await fetch('/api/sentinel-rescore-all?' + qs);
+    // Kickoff (POST on the trigger URL — starts a run if none in flight)
+    const kickRes = await fetch('/api/sentinel-rescore-all', { method: 'POST' });
     const kickBody = await kickRes.json();
     if (!kickRes.ok && kickRes.status !== 202 && kickRes.status !== 409) {
       throw new Error(kickBody.error || ('HTTP ' + kickRes.status));

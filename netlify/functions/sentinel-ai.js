@@ -20,7 +20,7 @@ export default async (req) => {
 
   try {
     const body = await req.json();
-    const { driverName, driverType, driverCo, kpis, clockToFirst, dailyRows, topCustomers, topCities, fleetBench, typeBench, _rawPrompt } = body;
+    const { driverName, driverType, driverCo, kpis, clockToFirst, dailyRows, topCustomers, topCities, fleetBench, typeBench } = body;
 
     const systemPrompt = `You are SENTINEL, an AI time theft detection system for Davis Delivery Service, a fleet carrier based in Buford, GA. You analyze driver behavior data to identify potential time theft, unauthorized stops, route deviations, and productivity issues.
 
@@ -89,9 +89,9 @@ Provide your SENTINEL analysis. Be specific with dates and patterns.`;
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: _rawPrompt ? 3000 : 1500,
+          max_tokens: 1500,
           system: systemPrompt,
-          messages: [{ role: 'user', content: _rawPrompt || userPrompt }]
+          messages: [{ role: 'user', content: userPrompt }]
         }),
         signal: controller.signal
       });
