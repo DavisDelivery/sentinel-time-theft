@@ -581,6 +581,13 @@ export async function scanOneDriverDay({
     else if (result.riskScore >= 25) result.riskLevel = 'medium';
     else if (result.riskScore >= 10) result.riskLevel = 'low';
     else result.riskLevel = 'clean';
+    // D1: floor the band by the worst single component so one critical vector
+    // reaches 'high' and two reach 'critical' (see _sentinel-engine.js).
+    {
+      const nCrit = [result.morningFlag, result.afternoonFlag, inRouteFlag].filter(f => f === 'critical').length;
+      if (nCrit >= 2) result.riskLevel = 'critical';
+      else if (nCrit === 1 && (result.riskLevel === 'clean' || result.riskLevel === 'low' || result.riskLevel === 'medium')) result.riskLevel = 'high';
+    }
 
     const stolenFromInRoute = Math.max(0, inRouteOffRouteMin - t.ok);
     result.stolenMinutes = (result.stolenMinutes || 0) + stolenFromInRoute;

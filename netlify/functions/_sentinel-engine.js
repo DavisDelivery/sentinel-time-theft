@@ -13,7 +13,7 @@
 //   minutesBetween(a, b)          → number
 //   classifyGap(gapMin, t)        → 'ok' | 'warn' | 'flag' | 'critical'
 
-const VERSION = 'v4.7.0-motive-integrity';
+const VERSION = 'v4.9.0-risk-band-floor';
 
 // Per-driver load-prep / wrap-up overrides land on /employees/{slug} and flow
 // through scoreDriverDay via the optional `loadPrepMin` / `wrapUpMin` input
@@ -310,6 +310,15 @@ export function scoreDriverDay(input) {
   score += FLAG_TO_SCORE[out.afternoonFlag] || 0;
   out.riskScore = score;
   out.riskLevel = riskLevelOf(score);
+  // D1: a single component maxes at 40 ('critical' flag), but 'high' needs 45
+  // and 'critical' 70 - so one critical vector (e.g. a 3h+ morning gap) was
+  // capped at 'medium' and hid from high/critical triage. Floor the band by the
+  // worst component: one critical -> at least 'high', two -> 'critical'.
+  {
+    const nCrit = [out.morningFlag, out.afternoonFlag].filter(f => f === 'critical').length;
+    if (nCrit >= 2) out.riskLevel = 'critical';
+    else if (nCrit === 1 && (out.riskLevel === 'clean' || out.riskLevel === 'low' || out.riskLevel === 'medium')) out.riskLevel = 'high';
+  }
 
   // Stolen minutes: portion of each gap above the "ok" threshold (the static floor)
   const stolenFromMorning = (out.morningGapMin != null)
