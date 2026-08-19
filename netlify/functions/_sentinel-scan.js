@@ -412,12 +412,13 @@ export async function scanOneDriverDay({
         const idxInAll = classified.indexOf(p);
         const next = classified[idxInAll + 1];
         const stationarySec = next?.startDt && p.endDt ? Math.max(0, (next.startDt - p.endDt) / 1000) : 0;
+        // Deliberately no destAddr/destZip — see _motive.summarizePeriods.
+        // We record that a driver was off-route, for how long, and how far
+        // they drove to get there; we do not record where.
         const visit = {
           _startDt: p.startDt,
           arrivedAt: p.endDt ? p.endDt.toISOString().slice(11, 16) : null,
           leftAt: next?.startDt ? next.startDt.toISOString().slice(11, 16) : null,
-          destAddr: p.destAddr,
-          destZip: p.destZip,
           stationaryMin: Math.round(stationarySec / 60),
           driveMinToReach: p.durationMin,
           driveMi: p.distanceMi
@@ -451,8 +452,6 @@ export async function scanOneDriverDay({
         const awayFromStops = cls !== 'customer' && cls !== 'yard';
         pauses.push({
           durationMin: durMin,
-          atZip: cur.destZip || null,
-          atAddr: cur.destAddr ? String(cur.destAddr).slice(0, 90) : null,
           class: cls,
           startET: cur.endDt.toISOString().slice(11, 16),
           endET: nxt.startDt.toISOString().slice(11, 16),
@@ -468,7 +467,6 @@ export async function scanOneDriverDay({
         totalMi: summary.totalMi,
         totalDriveMin: summary.totalDriveMin,
         offRouteVisits,
-        offRouteZips: summary.offRouteZips,
         customerZips: [...customerZipSet],
         yardZips,
         inRouteOffRouteMin,
@@ -496,14 +494,13 @@ export async function scanOneDriverDay({
         routeMatch,
         morningDriveMin: morning.min,
         afternoonDriveMin: afternoon.min,
+        // destClass (yard / customer / off_route / unknown) is kept because it
+        // explains the classification; the addresses and ZIPs behind it are not.
         periodsClassified: classified.map(p => ({
           startET: p.startDt?.toISOString().slice(11, 16),
           endET: p.endDt?.toISOString().slice(11, 16),
           durMin: p.durationMin,
           mi: p.distanceMi,
-          origin: p.originAddr?.slice(0, 45),
-          dest: p.destAddr?.slice(0, 45),
-          destZip: p.destZip,
           destClass: p.destClass
         })),
         summary,
@@ -608,7 +605,6 @@ export async function scanOneDriverDay({
       totalMi: motiveState.totalMi,
       totalDriveMin: motiveState.totalDriveMin,
       offRouteVisits,
-      offRouteZips: motiveState.offRouteZips,
       customerZips: motiveState.customerZips,
       yardZips: motiveState.yardZips,
       inRouteOffRouteMin,
@@ -665,13 +661,16 @@ export async function scanOneDriverDay({
 
     if (inRouteFlag !== 'ok' && inRouteFlag !== 'no_data') {
       const inRouteVisits = offRouteVisits.filter(v => v.window === 'in_route');
-      const evidenceLocations = inRouteVisits
-        .map(v => `${v.destZip}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}`)
+      // Durations only — the destinations themselves are not recorded.
+      const evidenceStops = inRouteVisits
+        .filter(v => v.stationaryMin > 0)
+        .map(v => `${v.stationaryMin}min`)
         .join(', ');
+      const stopStr = evidenceStops ? ` Stops: ${evidenceStops}.` : '';
       result.flags.push({
         kind: 'in_route_off_route',
         severity: inRouteFlag,
-        evidence: `${inRouteOffRouteMin} min of off-route activity between first and last delivery. Locations: ${evidenceLocations}.`,
+        evidence: `${inRouteOffRouteMin} min of off-route activity between first and last delivery.${stopStr}`,
         deltaMin: inRouteOffRouteMin
       });
     }
@@ -679,10 +678,11 @@ export async function scanOneDriverDay({
     const postRouteVisits = offRouteVisits.filter(v => v.window === 'post_route');
     if (postRouteVisits.length > 0) {
       const afternoonFlag = result.flags.find(f => f.kind === 'afternoon_gap');
+      // "How long and how far", never "where".
       const detourSummary = postRouteVisits
-        .map(v => `${v.destZip}${v.stationaryMin > 0 ? ` (${v.stationaryMin}min stop)` : ''}${v.driveMi > 1 ? ` via ${v.driveMi}mi detour` : ''}`)
+        .map(v => `${v.stationaryMin > 0 ? `${v.stationaryMin}min stop` : 'stop'}${v.driveMi > 1 ? ` via ${v.driveMi}mi detour` : ''}`)
         .join(', ');
-      if (afternoonFlag) afternoonFlag.evidence += ` Motive shows detour to: ${detourSummary}.`;
+      if (afternoonFlag) afternoonFlag.evidence += ` Motive shows an off-route detour: ${detourSummary}.`;
       result.dataHealth.push(`motive_post_route_detour:${postRouteVisits.length}`);
     }
 
