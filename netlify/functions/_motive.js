@@ -76,6 +76,11 @@ export function parseZipFromAddress(addr) {
  *     vehicleId, vehicleNumber,
  *     type, status
  *   }
+ *
+ * NOTE: the address/lat/lon/ZIP fields here are in-flight only. They feed
+ * classifyDestinations (which needs the ZIP to tell a customer stop from an
+ * off-route one) and are then dropped by summarizePeriods — nothing
+ * location-identifying is persisted to a record or served by the API.
  */
 export async function getDrivingPeriods(driverMotiveId, date) {
   const apiKey = readEnv('MOTIVE_API_KEY');
@@ -182,7 +187,6 @@ export function summarizePeriods(periods) {
   const totalMi = periods.reduce((s, p) => s + p.distanceMi, 0);
   const totalDriveMin = periods.reduce((s, p) => s + p.durationMin, 0);
   const offRoute = periods.filter(p => p.destClass === 'off_route');
-  const offRouteZips = [...new Set(offRoute.map(p => p.destZip))];
   const offRouteMin = offRoute.reduce((s, p) => s + p.durationMin, 0);
   // Compute time "spent at" each off-route location: drive time to it + stationary time
   // before the next driving period
@@ -190,11 +194,13 @@ export function summarizePeriods(periods) {
     const idxInAll = periods.indexOf(p);
     const next = periods[idxInAll + 1];
     const stationarySec = next?.startDt && p.endDt ? Math.max(0, (next.startDt - p.endDt) / 1000) : 0;
+    // No destAddr/destZip: where a driver went off-route is deliberately not
+    // recorded (operator privacy decision). The ZIP is still used in-flight by
+    // classifyDestinations to decide *whether* a stop is off-route; it is
+    // dropped here so it never reaches a stored record or an API response.
     return {
       arrivedAt: p.endDt ? p.endDt.toISOString().slice(11, 16) : null,
       leftAt: next?.startDt ? next.startDt.toISOString().slice(11, 16) : null,
-      destAddr: p.destAddr,
-      destZip: p.destZip,
       stationaryMin: Math.round(stationarySec / 60),
       driveMinToReach: p.durationMin,
       driveMi: p.distanceMi
@@ -204,7 +210,6 @@ export function summarizePeriods(periods) {
     totalMi: +totalMi.toFixed(2),
     totalDriveMin,
     offRouteCount: offRoute.length,
-    offRouteZips,
     offRouteMin,
     offRouteVisits
   };

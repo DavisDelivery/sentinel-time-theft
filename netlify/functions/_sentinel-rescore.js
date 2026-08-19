@@ -27,6 +27,8 @@
 // output. Math is unchanged; rescore restamps every record so historical
 // evidence picks up the new format.
 
+import { scrubEvidenceText } from './_privacy.js';
+
 export const ENGINE_VERSION = 'v5.0.0-detection-integrity';
 
 // Dual-source travel gating + prep credit — keep in sync with
@@ -110,11 +112,14 @@ function fmtTime(input) {
 
 // Preserve any "Motive shows detour ... ." sentence from the prior
 // afternoon-gap evidence so the operator doesn't lose that context after rescore.
+// Historical records carry the pre-#41 wording with a ZIP in it; scrub before
+// carrying it forward, otherwise a rescore would write locations back into a
+// record the read path is busy stripping them out of.
 function extractDetourNote(record) {
   const prior = (record.flags || []).find(f => f.kind === 'afternoon_gap');
   if (!prior || !prior.evidence) return null;
-  const m = String(prior.evidence).match(/Motive shows detour[^.]*\./);
-  return m ? m[0] : null;
+  const m = String(prior.evidence).match(/Motive shows (?:detour|an off-route detour)[^.]*\./);
+  return m ? scrubEvidenceText(m[0]) : null;
 }
 
 // Label for which source set the expected travel time on a stored record.
@@ -204,11 +209,13 @@ function buildEvidenceAfternoon({ record, wrap, gap }) {
 function buildEvidenceInRoute({ record, value }) {
   const visits = record?.motive?.offRouteVisits || [];
   const inRouteVisits = visits.filter(v => v.window === 'in_route');
-  const locations = inRouteVisits
-    .map(v => `${v.destZip || '?'}${v.stationaryMin > 0 ? ` (${fmtDur(v.stationaryMin)} stop)` : ''}`)
+  // Dwell durations only — off-route destinations are not recorded (_privacy.js).
+  const stops = inRouteVisits
+    .filter(v => v.stationaryMin > 0)
+    .map(v => fmtDur(v.stationaryMin))
     .join(', ');
-  const locStr = locations ? ` Locations: ${locations}.` : '';
-  return `${fmtDur(value)} of off-route activity between first and last delivery.${locStr} (static threshold)`;
+  const stopStr = stops ? ` Stops: ${stops}.` : '';
+  return `${fmtDur(value)} of off-route activity between first and last delivery.${stopStr} (static threshold)`;
 }
 
 // Resolve a per-driver override against defaults. Numeric, non-negative,

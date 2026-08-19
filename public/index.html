@@ -436,6 +436,16 @@ body {
 .or-window.post_route { background: var(--brand-2); color: var(--brand); }
 .or-window.unknown    { background: var(--bg-3); color: var(--text-3); }
 .or-group-n { color: var(--text-3); font-weight: 600; }
+/* Travel-time legs: headline (used figure + source badge) over a sub-line
+ * comparing both candidate sources, with the one the engine picked emphasized. */
+.leg { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.leg:last-child { border-bottom: 0; padding-bottom: 0; }
+.leg-h { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); font-size: var(--fs-md); }
+.leg-label { color: var(--text-3); }
+.leg-val { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.leg-sub { margin-top: 3px; color: var(--text-4); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.leg-sub .src-used { color: var(--text-3); font-weight: 600; }
+.leg-dot { margin: 0 6px; color: var(--line); }
 .dh { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--s-2); }
 .dd-sec { margin-bottom: var(--s-4); }
 .dd-sec:last-child { margin-bottom: 0; }
@@ -464,11 +474,12 @@ body {
 .flag-card .src.src-baseline { background: var(--brand-2); color: var(--brand); }
 .flag-card .src.src-static { background: var(--bg-3); color: var(--text-3); }
 .visit-row {
-  display: grid; grid-template-columns: 50px 1fr auto; gap: var(--s-3);
+  display: grid; grid-template-columns: auto 1fr auto; gap: var(--s-3);
   font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px solid var(--line);
 }
 .visit-row:last-child { border-bottom: 0; }
-.visit-row .t { color: var(--text-3); }
+/* nowrap: a 50px column used to break "10:11–10:25" across two lines */
+.visit-row .t { color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .visit-row .a { color: var(--text); }
 .visit-row .a .w { display: inline-block; font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px; background: var(--bg-3); color: var(--text-3); letter-spacing: 0.06em; }
 .visit-row .a .w.in_route { background: var(--med-bg); color: var(--med); }
@@ -2833,7 +2844,7 @@ function renderDriverDayRow(r, context) {
     // location this day (all windows). The count is the "where did they go"
     // signal — details live in the expanded day view.
     const orCount = r.motive?.offRouteVisits?.length || 0;
-    const orChip = orCount > 0 ? `<span class="chip flag" title="${orCount} off-route location${orCount === 1 ? '' : 's'} recorded by GPS — expand for addresses">OFF-RTE ×${orCount}</span>` : '';
+    const orChip = orCount > 0 ? `<span class="chip flag" title="${orCount} off-route stop${orCount === 1 ? '' : 's'} recorded by GPS — expand for times and duration">OFF-RTE ×${orCount}</span>` : '';
     right = `
         <div class="dd-amount num ${stolenCls}">${fmt$(r.stolenDollars)}</div>
         <div class="dd-chips">
@@ -2889,7 +2900,7 @@ function renderDetail(r) {
           : 'No deliveries and no clock punch logged this day.')
       : 'Missing first/last delivery anchor.';
     const offRoute = (r.motive && r.motive.offRouteVisits && r.motive.offRouteVisits.length)
-      ? ` Off-route activity recorded (${r.motive.offRouteVisits.length} location${r.motive.offRouteVisits.length === 1 ? '' : 's'}) — review below.`
+      ? ` Off-route activity recorded (${r.motive.offRouteVisits.length} stop${r.motive.offRouteVisits.length === 1 ? '' : 's'}) — review below.`
       : '';
     const isReview = r.riskLevel === 'review';
     parts.push(`
@@ -2931,19 +2942,36 @@ function renderDetail(r) {
     if (s === 'google' || s === 'cache' || s === 'api') return '<span style="font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--text-3);background:var(--bg-3);padding:1px 5px;border-radius:3px">GOOGLE</span>';
     return '';
   };
+  // One block per leg: the figure the engine used (with its source badge) on
+  // the headline, both candidate sources on a single sub-line underneath. The
+  // previous 3-row-per-leg grid restated the used value as its own source
+  // ("used 1h 27m GOOGLE" / "Google typical 1h 27m") and wrapped every label
+  // in an 80px column.
   const legRows = [];
   const addLeg = (label, used, src, g, m) => {
     if (used == null && g == null && m == null) return;
-    legRows.push(
-      `<span class="k">${label}</span><span class="v">${fmtDur(used)} ${tsrcBadge(src)}</span>` +
-      `<span class="k">· Google typical</span><span class="v dim">${g != null ? fmtDur(g) : '—'}</span>` +
-      `<span class="k">· Motive actual</span><span class="v dim">${m != null ? fmtDur(m) : '— (no GPS match)'}</span>`
-    );
+    const usedGoogle = src === 'google' || src === 'cache' || src === 'api';
+    const usedMotive = src === 'motive' || src === 'motive_capped';
+    const srcPart = (name, val, isUsed) =>
+      `<span class="${isUsed ? 'src-used' : ''}">${name} ${val != null ? fmtDur(val) : '—'}</span>`;
+    legRows.push(`
+      <div class="leg">
+        <div class="leg-h">
+          <span class="leg-label">${label}</span>
+          <span class="leg-val">${fmtDur(used)} ${tsrcBadge(src)}</span>
+        </div>
+        <div class="leg-sub">
+          ${srcPart('Google typical', g, usedGoogle)}
+          <span class="leg-dot">·</span>
+          ${m != null ? srcPart('Motive actual', m, usedMotive) : '<span>Motive actual — no GPS match</span>'}
+        </div>
+      </div>
+    `);
   };
-  addLeg('Drive to 1st (used)', r.expectedTravelMinToFirst, r.travelSourceToFirst, r.googleTravelMinToFirst, r.motiveDriveMinToFirst);
-  addLeg('Drive from last (used)', r.expectedTravelMinFromLast, r.travelSourceFromLast, r.googleTravelMinFromLast, r.motiveDriveMinFromLast);
+  addLeg('Drive to first delivery', r.expectedTravelMinToFirst, r.travelSourceToFirst, r.googleTravelMinToFirst, r.motiveDriveMinToFirst);
+  addLeg('Drive from last delivery', r.expectedTravelMinFromLast, r.travelSourceFromLast, r.googleTravelMinFromLast, r.motiveDriveMinFromLast);
   if (legRows.length) {
-    parts.push(`<div class="dd-sec"><div class="dh">Travel times</div><div class="kv-grid">${legRows.join('')}</div></div>`);
+    parts.push(`<div class="dd-sec"><div class="dh">Travel times</div>${legRows.join('')}</div>`);
   }
 
   // Flags
@@ -2980,11 +3008,13 @@ function renderDetail(r) {
     const groupsHtml = windowOrder
       .filter(w => windows[w].length)
       .map(w => {
+        // Destination deliberately absent — we show when the truck was off
+        // route and for how long, never where it was (see _privacy.js).
         const rows = windows[w].map(v => `
           <div class="visit-row">
             <div class="t">${escapeHtml(v.arrivedAt || '—')}${v.leftAt ? '–' + escapeHtml(v.leftAt) : ''}</div>
-            <div class="a">${v.destAddr ? escapeHtml(v.destAddr) : 'ZIP ' + escapeHtml(v.destZip)}${v.destAddr && v.destZip ? ` <span style="color:var(--text-4)">· ${escapeHtml(v.destZip)}</span>` : ''}</div>
-            <div class="m">${fmtDur(v.stationaryMin)} · ${escapeHtml(v.driveMi)}mi${(w === 'in_route' && typeof v.chargedMin === 'number') ? ` · ${fmtDur(v.chargedMin)} charged` : ''}</div>
+            <div class="a">${fmtDur(v.stationaryMin)} stopped${v.driveMinToReach ? ` · ${fmtDur(v.driveMinToReach)} drive to reach` : ''}</div>
+            <div class="m">${escapeHtml(v.driveMi)}mi${(w === 'in_route' && typeof v.chargedMin === 'number') ? ` · ${fmtDur(v.chargedMin)} charged` : ''}</div>
           </div>
         `).join('');
         const groupMin = windows[w].reduce((s, v) => s + (v.stationaryMin || 0) + (v.driveMinToReach || 0), 0);
@@ -3001,7 +3031,7 @@ function renderDetail(r) {
     parts.push(`
       <div class="dd-sec">
         <div class="dh">Motive — Off-route activity</div>
-        <div class="or-total mono">Total: ${r.motive.totalMi}mi driven · ${fmtDur(r.motive.totalDriveMin)} on the road · ${r.motive.offRouteVisits.length} off-route locations</div>
+        <div class="or-total mono">Total: ${r.motive.totalMi}mi driven · ${fmtDur(r.motive.totalDriveMin)} on the road · ${r.motive.offRouteVisits.length} off-route stops</div>
         ${groupsHtml}
       </div>
     `);
@@ -3593,29 +3623,20 @@ function renderAnomalies(d) {
     const rows = (d.topPauses || []).slice().sort((a, b) => (b.durationMin || 0) - (a.durationMin || 0));
     list = paginate(rows, p => row(p.slug, fmtDur(p.durationMin),
       `${escapeHtml(p.displayName || p.slug)} · ${dayOfWeek(p.date)} ${fmtDate(p.date)}`,
-      `${escapeHtml(p.class || '?')} · ${p.atZip ? 'ZIP ' + escapeHtml(p.atZip) : 'no ZIP'}${p.atAddr ? ' · ' + escapeHtml(p.atAddr) : ''} · ${escapeHtml(p.startET || '')}–${escapeHtml(p.endET || '')}`
+      `${escapeHtml(p.class || '?')} · ${escapeHtml(p.startET || '')}–${escapeHtml(p.endET || '')}`
     ), 'No flagged pauses (≥30m away from stops) in this window.');
-  } else if (anomalyState.view === 'deviations') {
+  } else {
+    // Any non-'pauses' view renders deviations — the two location-keyed views
+    // ('offroutePlaces', 'places') were removed in #41, so a stale chip value
+    // lands here rather than rendering an empty list.
     const winLbl = { in_route: 'ON-ROUTE', pre_route: 'PRE-ROUTE', post_route: 'AFTER ROUTE', unknown: '?' };
     const winCls = { in_route: 'flag', pre_route: 'warn', post_route: 'warn', unknown: '' };
     const rows = (d.deviations || []).slice().sort((a, b) =>
       ((b.stationaryMin || 0) + (b.driveMinToReach || 0)) - ((a.stationaryMin || 0) + (a.driveMinToReach || 0)));
     list = paginate(rows, v => row(v.slug, fmtDur((v.stationaryMin || 0) + (v.driveMinToReach || 0)),
       `${escapeHtml(v.displayName || v.slug)} · ${dayOfWeek(v.date)} ${fmtDate(v.date)} <span class="chip ${winCls[v.window] || ''}">${winLbl[v.window] || 'OFF-RTE'}</span>`,
-      `${v.destZip ? 'ZIP ' + escapeHtml(v.destZip) : 'no ZIP'}${v.destAddr ? ' · ' + escapeHtml(v.destAddr) : ''}${v.arrivedAt ? ` · there ${escapeHtml(v.arrivedAt)}${v.leftAt ? '–' + escapeHtml(v.leftAt) : ''}` : ''} · ${v.stationaryMin || 0}m stopped + ${v.driveMinToReach || 0}m drive${(typeof v.driveMi === 'number' && v.driveMi > 0) ? ` (${v.driveMi}mi)` : ''}`
+      `${v.arrivedAt ? `there ${escapeHtml(v.arrivedAt)}${v.leftAt ? '–' + escapeHtml(v.leftAt) : ''} · ` : ''}${v.stationaryMin || 0}m stopped + ${v.driveMinToReach || 0}m drive${(typeof v.driveMi === 'number' && v.driveMi > 0) ? ` (${v.driveMi}mi)` : ''}`
     ), 'No off-route visits in this window.');
-  } else if (anomalyState.view === 'offroutePlaces') {
-    const rows = (d.offRoutePlaces || []).slice().sort((a, b) => (b.count || 0) - (a.count || 0));
-    list = paginate(rows, p => row(p.slug, `${p.count}×`,
-      `${escapeHtml(p.displayName || p.slug)} · ${p.destZip ? 'ZIP ' + escapeHtml(p.destZip) : 'no ZIP'}`,
-      `${p.count} visits over ${(p.dates || []).length} day${(p.dates || []).length === 1 ? '' : 's'} · ${fmtDur(p.totalMin)} total · avg ${fmtDur(p.avgMin)}${p.sampleAddr ? ' · ' + escapeHtml(p.sampleAddr) : ''}`
-    ), 'No repeated off-route destinations (2+ visits to the same place) in this window.');
-  } else {
-    const rows = (d.placePatterns || []).slice().sort((a, b) => (b.count || 0) - (a.count || 0));
-    list = paginate(rows, p => row(p.slug, `${p.count}×`,
-      `${escapeHtml(p.displayName || p.slug)} · ${p.atZip ? 'ZIP ' + escapeHtml(p.atZip) : 'no ZIP'}`,
-      `${p.count} days · avg ${fmtDur(p.avgMin)}${p.sampleAddr ? ' · ' + escapeHtml(p.sampleAddr) : ''}`
-    ), 'No repeated pause locations (2+ days) in this window.');
   }
 
   c.innerHTML = `
@@ -3627,10 +3648,8 @@ function renderAnomalies(d) {
     <div class="range-chips" style="margin-top:var(--s-2)">
       ${viewChip('pauses', 'Long pauses', cnt.flaggedPauses)}
       ${viewChip('deviations', 'Off-route stops', cnt.deviations)}
-      ${viewChip('offroutePlaces', 'Repeat destinations', cnt.offRoutePlaces)}
-      ${viewChip('places', 'Repeat pause spots', cnt.places)}
     </div>
-    <div class="aux" style="margin:var(--s-2) 0;color:var(--text-3);font-size:var(--fs-xs)">Off-route stops between first and last delivery feed the in-route flag; pre/post-route ones fall inside the morning/afternoon gaps. Pauses are observation only. Tap a row to open the driver.</div>
+    <div class="aux" style="margin:var(--s-2) 0;color:var(--text-3);font-size:var(--fs-xs)">Off-route stops between first and last delivery feed the in-route flag; pre/post-route ones fall inside the morning/afternoon gaps. Pauses are observation only. Duration and distance are recorded; destinations are not. Tap a row to open the driver.</div>
     <div class="card card-flush">${list}</div>
   `;
   c.querySelectorAll('[data-anom-range]').forEach(b => b.addEventListener('click', () => { anomalyState.days = +b.dataset.anomRange; anomalyState.showAll = false; loadAnomalies(); }));

@@ -1,7 +1,9 @@
 // netlify/functions/_sentinel-engine.js
 // Pure scoring logic for SENTINEL v4. No I/O. No fetch. No Firestore.
 // Caller (sentinel-day-scan.js) does all data gathering, then calls scoreDriverDay()
-// with already-prepared inputs.
+// with already-prepared inputs. (The single import below is likewise pure —
+// string/object helpers runSelfTest uses to assert the off-route privacy
+// guarantees.)
 //
 // Phase 1 scope: flag class 1 (morning), 2 (afternoon), 4 (data integrity).
 // Flag class 3 (in-route Motive) is deferred — written as inRouteFlag: "deferred".
@@ -12,6 +14,8 @@
 //   parseNuvizzDeliveryEnd(str)   → Date (naive ET, treated as UTC for math)
 //   minutesBetween(a, b)          → number
 //   classifyGap(gapMin, t)        → 'ok' | 'warn' | 'flag' | 'critical'
+
+import { scrubEvidenceText, scrubRecordLocations } from './_privacy.js';
 
 const VERSION = 'v5.0.0-detection-integrity';
 
@@ -558,5 +562,76 @@ export function runSelfTest() {
     return { name: c.name, pass: fails.length === 0, fails, out };
   });
 
-  return { passed: results.every(r => r.pass), results };
+  // Privacy guard (#41): nothing served may carry an off-route location. This
+  // runs against the scrubber the read path depends on for the ~17.7k records
+  // that still hold addresses at rest — a regression here silently re-exposes
+  // them, so it fails the self-test rather than just logging.
+  const BARE_ZIP = /(?<![\w.$])\d{5}(?![\w.])/;
+  const privacyCases = [
+    {
+      name: 'privacy: in-route evidence keeps durations, drops ZIPs',
+      got: scrubEvidenceText('110 min of off-route activity between first and last delivery. Locations: 30366 (14min stop), 30366 (32min stop). (static threshold)'),
+      want: '110 min of off-route activity between first and last delivery. Stops: 14min, 32min. (static threshold)'
+    },
+    {
+      name: 'privacy: detour note keeps distance, drops ZIP',
+      got: scrubEvidenceText('Unexplained: 6h 16m. Motive shows detour to: 30336 (50min stop) via 11mi detour.'),
+      want: 'Unexplained: 6h 16m. Motive shows an off-route detour: 50min stop via 11mi detour.'
+    },
+    {
+      name: 'privacy: dollar amounts survive ZIP stripping',
+      got: scrubEvidenceText('Driver cost $12840.16 today.'),
+      want: 'Driver cost $12840.16 today.'
+    }
+  ];
+  const privacyResults = privacyCases.map(c => ({
+    name: c.name,
+    pass: c.got === c.want && !BARE_ZIP.test(c.got),
+    fails: c.got === c.want ? [] : [`expected "${c.want}", got "${c.got}"`],
+    out: c.got
+  }));
+
+  const scrubbed = scrubRecordLocations({
+    flags: [{ kind: 'in_route_off_route', evidence: 'x. Locations: 30366 (14min stop).' }],
+    motive: {
+      offRouteVisits: [{ arrivedAt: '16:31', destAddr: 'N Bogan Rd, Buford, GA 30519', destZip: '30519', stationaryMin: 13 }],
+      pauses: [{ durationMin: 650, atZip: '30542', atAddr: '100 Gainesville Hwy', class: 'yard' }],
+      offRouteZips: ['30519']
+    }
+  });
+  const leaked = BARE_ZIP.test(JSON.stringify(scrubbed)) || /Bogan|Gainesville Hwy/.test(JSON.stringify(scrubbed));
+  privacyResults.push({
+    name: 'privacy: record scrub removes addresses, ZIPs and offRouteZips',
+    pass: !leaked && scrubbed.motive.offRouteVisits[0].stationaryMin === 13,
+    fails: leaked ? [`location data survived scrub: ${JSON.stringify(scrubbed)}`] : [],
+    out: scrubbed
+  });
+
+  // Ordering guard (#41): NuVizz emits a zero-padded 12-hour clock, so a
+  // lexicographic sort on the raw string orders by clock digits and ignores
+  // AM/PM — "02:15 PM" sorts ahead of "09:21 AM", putting the whole afternoon
+  // before the morning. Anything displaying stops in time order must sort on
+  // parseNuvizzDeliveryEnd, not on the string.
+  const rawTimes = [
+    '08/11/26 02:15 PM', '08/11/26 09:21 AM', '08/11/26 11:14 AM',
+    '08/11/26 04:14 PM', '08/11/26 10:24 AM', '08/11/26 03:03 PM'
+  ];
+  const chronological = rawTimes.slice().sort((a, b) => {
+    const at = parseNuvizzDeliveryEnd(a), bt = parseNuvizzDeliveryEnd(b);
+    return (at ? at.getTime() : 0) - (bt ? bt.getTime() : 0);
+  });
+  const wantOrder = [
+    '08/11/26 09:21 AM', '08/11/26 10:24 AM', '08/11/26 11:14 AM',
+    '08/11/26 02:15 PM', '08/11/26 03:03 PM', '08/11/26 04:14 PM'
+  ];
+  const orderOk = JSON.stringify(chronological) === JSON.stringify(wantOrder);
+  const orderResult = {
+    name: 'ordering: zero-padded 12-hour stop times sort chronologically',
+    pass: orderOk,
+    fails: orderOk ? [] : [`expected ${JSON.stringify(wantOrder)}, got ${JSON.stringify(chronological)}`],
+    out: chronological
+  };
+
+  const allResults = [...results, ...privacyResults, orderResult];
+  return { passed: allResults.every(r => r.pass), results: allResults };
 }
