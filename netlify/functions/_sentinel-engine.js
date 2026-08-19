@@ -607,6 +607,31 @@ export function runSelfTest() {
     out: scrubbed
   });
 
-  const allResults = [...results, ...privacyResults];
+  // Ordering guard (#41): NuVizz emits a zero-padded 12-hour clock, so a
+  // lexicographic sort on the raw string orders by clock digits and ignores
+  // AM/PM — "02:15 PM" sorts ahead of "09:21 AM", putting the whole afternoon
+  // before the morning. Anything displaying stops in time order must sort on
+  // parseNuvizzDeliveryEnd, not on the string.
+  const rawTimes = [
+    '08/11/26 02:15 PM', '08/11/26 09:21 AM', '08/11/26 11:14 AM',
+    '08/11/26 04:14 PM', '08/11/26 10:24 AM', '08/11/26 03:03 PM'
+  ];
+  const chronological = rawTimes.slice().sort((a, b) => {
+    const at = parseNuvizzDeliveryEnd(a), bt = parseNuvizzDeliveryEnd(b);
+    return (at ? at.getTime() : 0) - (bt ? bt.getTime() : 0);
+  });
+  const wantOrder = [
+    '08/11/26 09:21 AM', '08/11/26 10:24 AM', '08/11/26 11:14 AM',
+    '08/11/26 02:15 PM', '08/11/26 03:03 PM', '08/11/26 04:14 PM'
+  ];
+  const orderOk = JSON.stringify(chronological) === JSON.stringify(wantOrder);
+  const orderResult = {
+    name: 'ordering: zero-padded 12-hour stop times sort chronologically',
+    pass: orderOk,
+    fails: orderOk ? [] : [`expected ${JSON.stringify(wantOrder)}, got ${JSON.stringify(chronological)}`],
+    out: chronological
+  };
+
+  const allResults = [...results, ...privacyResults, orderResult];
   return { passed: allResults.every(r => r.pass), results: allResults };
 }

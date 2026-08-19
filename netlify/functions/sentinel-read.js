@@ -17,6 +17,7 @@
 
 import { getDb } from './_firebase-admin.js';
 import { scrubRecordLocations, scrubRecords } from './_privacy.js';
+import { parseNuvizzDeliveryEnd } from './_sentinel-engine.js';
 
 const VERSION = 'v4.7.0-offroute-no-location';
 
@@ -308,14 +309,25 @@ async function stops(db, driverSlug, date) {
       weight: raw['weight'] || null
     });
   }
-  // Sort by deliveryEnd (lex on the raw "MM/DD/YYYY HH:MM AM" string is fine
-  // within a single day — fall back to PRO order when time is missing).
+  // Sort by parsed deliveryEnd. A lexicographic compare on the raw string is
+  // NOT safe here: NuVizz emits a zero-padded 12-hour clock ("08/11/26 02:15
+  // PM"), so string order sorts by clock digits and ignores AM/PM entirely —
+  // 02:15 PM, 03:03 PM, 04:14 PM all sorted ahead of 09:21 AM, putting the
+  // afternoon before the morning. Parse to a real timestamp instead.
+  // (The scan engine always did this correctly, so scoring was never affected —
+  // this list is a read-side diagnostic.)
+  const endMs = (s) => {
+    const d = parseNuvizzDeliveryEnd(s);
+    return d ? d.getTime() : null;
+  };
   out.sort((a, b) => {
-    const at = a.deliveryEnd || '';
-    const bt = b.deliveryEnd || '';
-    if (at && bt) return at.localeCompare(bt);
-    if (at) return -1;
-    if (bt) return 1;
+    const at = endMs(a.deliveryEnd);
+    const bt = endMs(b.deliveryEnd);
+    if (at != null && bt != null) return at - bt;
+    // Rows with an unparseable/missing time sink to the bottom in PRO order
+    // rather than silently interleaving at an arbitrary position.
+    if (at != null) return -1;
+    if (bt != null) return 1;
     return String(a.pro || '').localeCompare(String(b.pro || ''));
   });
   console.log(`[sentinel-read] stops ${driverSlug} ${date} → ${out.length} matched of ${rows.length} scanned`);
