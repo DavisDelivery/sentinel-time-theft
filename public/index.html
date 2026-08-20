@@ -413,6 +413,17 @@ body {
 .typical-vals { display: flex; gap: var(--s-4); align-items: baseline; }
 .typical-vals .t-k { font-size: 9px; color: var(--text-4); text-transform: uppercase; letter-spacing: 0.06em; }
 .typical-vals .t-v { font-size: var(--fs-sm); font-weight: 600; color: var(--text-3); }
+/* Peer-comparison additions. Fixed-width value columns so "him" and "peer
+ * median" line up down the block instead of jittering with digit count. */
+.typical-vals > div { min-width: 74px; text-align: right; }
+.typical-vals > div:first-child { text-align: right; }
+.typical-qual {
+  font-weight: 400; color: var(--text-4); text-transform: none; letter-spacing: 0;
+  font-size: 9px; margin-left: 4px;
+}
+.typical-vals .t-v.dim { color: var(--text-4); font-weight: 500; }
+.typical-vals .t-v.peer-good { color: var(--clean); }
+.typical-vals .t-v.peer-bad { color: var(--high); }
 .typical-foot { font-size: 10px; color: var(--text-4); margin-top: var(--s-2); font-style: italic; }
 .typical-caption { font-size: 10px; color: var(--text-3); margin-top: var(--s-2); }
 
@@ -3496,6 +3507,69 @@ function initDriverCombo() {
 }
 
 let currentBaseline = null;
+// ---------- Peer comparison ----------
+// Peer figures come from the dashboard's referenceMetrics, which already
+// computes, per driver and per peer bucket, the median on-route stops/hour,
+// morning gap and afternoon gap. Fetched once per session and shared.
+//
+// Deliberately NOT routed through cachedFetchDashboard(): that helper bumps a
+// generation counter to cancel superseded fetches, and calling it from the
+// driver view would discard an Overview fetch still in flight. We reuse its
+// localStorage entry when one is warm, otherwise fetch plainly.
+let peerMetricsPromise = null;
+function loadPeerMetrics() {
+  if (peerMetricsPromise) return peerMetricsPromise;
+  const cached = readDashCache('all');
+  if (cached?.payload?.referenceMetrics) {
+    peerMetricsPromise = Promise.resolve(cached.payload);
+    return peerMetricsPromise;
+  }
+  peerMetricsPromise = api('dashboard', { days: 'all' })
+    .then(d => { writeDashCache('all', d); return d; })
+    .catch(e => { peerMetricsPromise = null; throw e; });
+  return peerMetricsPromise;
+}
+
+// Which drivers this one is measured against: same truck type and the same
+// load-prep class (a self-loader's route shape isn't comparable to a
+// pre-loaded driver's). Owner-ops fall back to the contractor pool when they
+// carry no company truck type.
+function peerGroupFor(slug, dash) {
+  if (!dash?.referenceMetrics) return null;
+  const roster = [...(dash.offendersRanked || []), ...(dash.restRoster || [])];
+  const me = roster.find(o => o.slug === slug);
+  if (!me) return null;
+  if (me.truckType && me.truckType !== 'unknown') {
+    const key = `${me.truckType}_${me.isSelfLoader ? 'selfload' : 'preload'}`;
+    const bucket = dash.referenceMetrics[key];
+    if (bucket?.perDriverBreakdown?.length) {
+      return { bucket, label: `${me.truckType} · ${me.isSelfLoader ? 'self-load' : 'pre-load'}` };
+    }
+  }
+  if (me.role === 'owner_op' && dash.contractorMetrics?.perDriverBreakdown?.length) {
+    return { bucket: dash.contractorMetrics, label: 'owner-operators' };
+  }
+  return null;
+}
+
+// Rank this driver within the peer group on one metric. `higherIsBetter`
+// flips the ordering: more stops/hour is better throughput, a longer gap is
+// worse. Returns null when the driver has no value for the metric.
+function peerRank(group, slug, field, higherIsBetter) {
+  const rows = (group.bucket.perDriverBreakdown || []).filter(p => p[field] != null);
+  const mine = rows.find(p => p.slug === slug);
+  if (!mine) return null;
+  const sorted = [...rows].sort((a, b) => higherIsBetter
+    ? b[field] - a[field]
+    : a[field] - b[field]);
+  return { mine: mine[field], rank: sorted.findIndex(p => p.slug === slug) + 1, of: rows.length, n_days: mine.n_days };
+}
+
+const ordinal = (n) => {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+};
+
 async function loadDriver(slug) {
   const container = document.getElementById('investContent');
   if (!slug) {
@@ -3504,8 +3578,14 @@ async function loadDriver(slug) {
   }
   container.innerHTML = '<div class="loading">Loading driver history</div>';
   try {
-    const r = await api('byDriver', { driverSlug: slug });
+    // Peer metrics are supporting context — a failure there must not take the
+    // driver view down with it.
+    const [r, peerDash] = await Promise.all([
+      api('byDriver', { driverSlug: slug }),
+      loadPeerMetrics().catch(() => null)
+    ]);
     currentBaseline = r.baseline || null;
+    const peerGroup = peerDash ? peerGroupFor(slug, peerDash) : null;
     const records = (r.records || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
     if (!records.length) {
       container.innerHTML = `<div class="empty"><h3>No data</h3><p>No records found for this driver</p></div>`;
@@ -3634,7 +3714,7 @@ async function loadDriver(slug) {
               </div>
             </div>
             <div class="typical-row">
-              <div class="typical-label">Stops / hour</div>
+              <div class="typical-label">Stops / hour <span class="typical-qual">whole shift</span></div>
               <div class="typical-vals">
                 <div><div class="t-k">typical day</div><div class="t-v num">${fmtSph(m.stopsPerHour?.p50)}</div></div>
                 <div><div class="t-k">normal range</div><div class="t-v num">${fmtRange(m.stopsPerHour?.p25, m.stopsPerHour?.p75, fmtSph)}</div></div>
@@ -3645,6 +3725,53 @@ async function loadDriver(slug) {
           <div class="typical-foot">Fraud signals (today's gap vs static threshold) are independent of these numbers.</div>
         </div>
       `;
+    }
+
+    // Peer comparison. Every figure here — his and theirs — comes from the same
+    // referenceMetrics pass, so they are like-for-like. That is why his number
+    // in this block can differ from the "typical day" figures above, which come
+    // from his own baseline over a different record filter.
+    //
+    // Note the two stops/hour figures measure different things: the row above
+    // is stops across the whole paid shift, this one is stops across the route
+    // itself (first delivery → last delivery), which is what peer throughput is
+    // measured on.
+    let peerHtml = '';
+    if (peerGroup) {
+      const sph = peerRank(peerGroup, slug, 'medianStopsPerHourOnRoute', true);
+      const mg = peerRank(peerGroup, slug, 'medianMorningGap', false);
+      const ag = peerRank(peerGroup, slug, 'medianAfternoonGap', false);
+      const b = peerGroup.bucket;
+      const fmtSph2 = v => (v == null ? '—' : Number(v).toFixed(2));
+      // Rank is only meaningful against a real group; 1-of-1 is not a comparison.
+      const rankCell = (res) => {
+        if (!res || res.of < 3) return '<div class="t-v num dim">—</div>';
+        const half = res.rank <= Math.ceil(res.of / 2);
+        return `<div class="t-v num ${half ? 'peer-good' : 'peer-bad'}">${ordinal(res.rank)} of ${res.of}</div>`;
+      };
+      const row = (label, res, peerVal, f) => res ? `
+        <div class="typical-row">
+          <div class="typical-label">${label}</div>
+          <div class="typical-vals">
+            <div><div class="t-k">him</div><div class="t-v num">${f(res.mine)}</div></div>
+            <div><div class="t-k">peer median</div><div class="t-v num">${f(peerVal)}</div></div>
+            <div><div class="t-k">rank</div>${rankCell(res)}</div>
+          </div>
+        </div>` : '';
+      const rows = [
+        row('On-route stops / hour', sph, b.medianStopsPerHourOnRoute, fmtSph2),
+        row('Morning gap', mg, b.medianMorningGap, fmtDur),
+        row('Afternoon gap', ag, b.medianAfternoonGap, fmtDur)
+      ].filter(Boolean).join('');
+      if (rows) {
+        peerHtml = `
+          <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
+            <div class="dh" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-3)">Compared with peers <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${escapeHtml(peerGroup.label)} · ${b.n_drivers} driver${b.n_drivers === 1 ? '' : 's'}, ${b.n_days.toLocaleString()} days</span></div>
+            <div class="typical-grid">${rows}</div>
+            <div class="typical-caption">On-route stops / hour = completed stops ÷ time from first to last delivery. Rank 1 = most stops per hour, shortest gap.</div>
+          </div>
+        `;
+      }
     }
 
     container.innerHTML = `
@@ -3670,6 +3797,7 @@ async function loadDriver(slug) {
         </div>
         <div style="margin-top:var(--s-4)">${renderDistBar(dist, scoredWorkdays, { noDataCount: noDataWorkdays })}</div>
         ${typicalHtml}
+        ${peerHtml}
       </div>
 
       <div class="section">
