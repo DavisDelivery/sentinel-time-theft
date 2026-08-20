@@ -540,6 +540,41 @@ body {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M3 4.5L6 7.5L9 4.5' stroke='%23a8aeba' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px;
 }
+/* Searchable driver picker. Replaces a plain <select>: 66 drivers is past the
+ * point where scrolling a native dropdown beats typing three letters. */
+.combo { position: relative; flex: 1; min-width: 0; }
+.combo input {
+  width: 100%; background: var(--bg-1); border: 1px solid var(--line);
+  color: var(--text); font-family: inherit; font-size: var(--fs-base);
+  padding: 10px 36px 10px 12px; min-height: 44px; border-radius: 10px;
+  -webkit-appearance: none; appearance: none;
+}
+.combo input:focus { outline: none; border-color: var(--brand); }
+.combo input::placeholder { color: var(--text-4); }
+.combo-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border: 0; border-radius: 7px; cursor: pointer;
+  background: transparent; color: var(--text-3);
+  display: flex; align-items: center; justify-content: center;
+}
+.combo-clear:hover { background: var(--bg-3); color: var(--text); }
+.combo-list {
+  position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; right: 0;
+  max-height: 320px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+}
+.combo-opt {
+  padding: 10px 12px; cursor: pointer; font-size: var(--fs-base);
+  display: flex; align-items: baseline; gap: var(--s-2);
+  border-bottom: 1px solid var(--line);
+}
+.combo-opt:last-child { border-bottom: 0; }
+.combo-opt:hover, .combo-opt.active { background: var(--bg-3); }
+.combo-opt[aria-selected="true"] { font-weight: 600; }
+.combo-opt .truck { color: var(--text-4); font-size: var(--fs-sm); margin-left: auto; }
+.combo-opt mark { background: var(--brand-2); color: var(--brand); border-radius: 2px; padding: 0 1px; }
+.combo-empty { padding: 14px 12px; color: var(--text-3); font-size: var(--fs-sm); }
 .picker .refresh {
   background: var(--bg-1); border: 1px solid var(--line); color: var(--text-2);
   width: 44px; height: 44px; border-radius: 10px; cursor: pointer;
@@ -1039,7 +1074,16 @@ body {
 
 <div class="page" id="page-investigate">
   <div class="picker">
-    <select id="driverSelect" aria-label="Driver"></select>
+    <div class="combo" id="driverCombo">
+      <input type="text" id="driverSearch" role="combobox" aria-expanded="false"
+             aria-controls="driverOptions" aria-autocomplete="list" aria-label="Driver"
+             placeholder="Search drivers…" autocapitalize="off" autocorrect="off"
+             autocomplete="off" spellcheck="false">
+      <button type="button" class="combo-clear" id="driverClear" aria-label="Clear driver" hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+      <div class="combo-list" id="driverOptions" role="listbox" aria-label="Drivers" hidden></div>
+    </div>
     <button class="refresh" id="refreshDriver" aria-label="Refresh">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
     </button>
@@ -2722,8 +2766,7 @@ function navigateToDriver(slug) {
   // Wait for the driver dropdown to populate before selecting — a fixed
   // setTimeout raced the async driverList fetch and left the dropdown desynced.
   Promise.resolve(loadInvestigateInit()).then(() => {
-    const sel = document.getElementById('driverSelect');
-    sel.value = slug;
+    setDriverSelection(slug);
     loadDriver(slug);
   });
 }
@@ -3290,13 +3333,166 @@ function loadInvestigateInit() {
     try {
       const r = await api('driverList');
       cachedDrivers = r.drivers || [];
-      const sel = document.getElementById('driverSelect');
-      sel.innerHTML = '<option value="">— select driver —</option>' +
-        cachedDrivers.map(d => `<option value="${escapeHtml(d.slug)}">${escapeHtml(d.fullName)}${d.defaultTruck ? ' · #' + escapeHtml(d.defaultTruck) : ''}</option>`).join('');
-      sel.addEventListener('change', () => loadDriver(sel.value));
+      initDriverCombo();
     } catch (e) { investigateInitPromise = null; }
   })();
   return investigateInitPromise;
+}
+
+// ---------- Searchable driver picker ----------
+// The old <select> listed 66 drivers with no way to jump to one. This is a
+// standard combobox: type to filter, arrows to move, Enter to pick, Esc to
+// close. Matching is per-token and case-insensitive across the whole name plus
+// the truck number, so "cepeda", "rodriguez", "darvin" and "5042" all find
+// their driver — which also means the surname convention chosen for sorting
+// never hides anyone.
+const driverCombo = { open: false, active: -1, filtered: [], selected: '' };
+
+function driverLabel(d) {
+  return d.fullName + (d.defaultTruck ? ' · #' + d.defaultTruck : '');
+}
+
+// Every token must appear somewhere in the haystack, so "rob coun" matches
+// "Robert Alan Council" regardless of word order.
+function driverMatches(d, query) {
+  if (!query) return true;
+  const hay = `${d.fullName || ''} ${d.slug || ''} ${d.defaultTruck || ''}`.toLowerCase();
+  return query.split(/\s+/).filter(Boolean).every(t => hay.includes(t));
+}
+
+// Highlight matched runs. Escapes first, then wraps matches, so the highlight
+// can never introduce markup from a driver name.
+function highlight(text, query) {
+  const safe = escapeHtml(text);
+  const terms = (query || '').split(/\s+/).filter(Boolean);
+  if (!terms.length) return safe;
+  const pattern = terms
+    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .sort((a, b) => b.length - a.length)
+    .join('|');
+  return safe.replace(new RegExp(`(${pattern})`, 'gi'), '<mark>$1</mark>');
+}
+
+function renderDriverOptions(query) {
+  const list = document.getElementById('driverOptions');
+  driverCombo.filtered = cachedDrivers.filter(d => driverMatches(d, query));
+  if (!driverCombo.filtered.length) {
+    list.innerHTML = `<div class="combo-empty">No driver matches “${escapeHtml(query)}”</div>`;
+    return;
+  }
+  list.innerHTML = driverCombo.filtered.map((d, i) => `
+    <div class="combo-opt${i === driverCombo.active ? ' active' : ''}" role="option"
+         id="driverOpt${i}" data-slug="${escapeHtml(d.slug)}"
+         aria-selected="${d.slug === driverCombo.selected ? 'true' : 'false'}">
+      <span>${highlight(d.fullName || d.slug, query)}</span>
+      ${d.defaultTruck ? `<span class="truck">#${escapeHtml(d.defaultTruck)}</span>` : ''}
+    </div>
+  `).join('');
+}
+
+function openDriverCombo(query) {
+  const input = document.getElementById('driverSearch');
+  const list = document.getElementById('driverOptions');
+  driverCombo.open = true;
+  driverCombo.active = -1;
+  renderDriverOptions(query != null ? query : '');
+  list.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function closeDriverCombo() {
+  const input = document.getElementById('driverSearch');
+  const list = document.getElementById('driverOptions');
+  driverCombo.open = false;
+  driverCombo.active = -1;
+  list.hidden = true;
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-activedescendant');
+}
+
+// Restores the input to the selected driver's label — used on blur/Escape so
+// an abandoned half-typed query never leaves the box showing something the
+// view isn't actually displaying.
+function syncDriverInput() {
+  const input = document.getElementById('driverSearch');
+  const clear = document.getElementById('driverClear');
+  const d = cachedDrivers.find(x => x.slug === driverCombo.selected);
+  input.value = d ? driverLabel(d) : '';
+  clear.hidden = !d;
+}
+
+function setDriverSelection(slug) {
+  driverCombo.selected = slug || '';
+  syncDriverInput();
+}
+
+function moveDriverActive(delta) {
+  const list = document.getElementById('driverOptions');
+  const n = driverCombo.filtered.length;
+  if (!n) return;
+  driverCombo.active = (driverCombo.active + delta + n) % n;
+  [...list.querySelectorAll('.combo-opt')].forEach((el, i) => {
+    el.classList.toggle('active', i === driverCombo.active);
+    if (i === driverCombo.active) {
+      el.scrollIntoView({ block: 'nearest' });
+      document.getElementById('driverSearch').setAttribute('aria-activedescendant', el.id);
+    }
+  });
+}
+
+function chooseDriver(slug) {
+  if (!slug) return;
+  setDriverSelection(slug);
+  closeDriverCombo();
+  loadDriver(slug);
+}
+
+function initDriverCombo() {
+  const input = document.getElementById('driverSearch');
+  const list = document.getElementById('driverOptions');
+  const clear = document.getElementById('driverClear');
+  if (!input || input.dataset.wired === '1') return;
+  input.dataset.wired = '1';
+
+  input.addEventListener('input', () => openDriverCombo(input.value.trim()));
+  // Focus/click opens the full list rather than filtering by the label text
+  // currently sitting in the box.
+  input.addEventListener('focus', () => { input.select(); openDriverCombo(''); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (!driverCombo.open) openDriverCombo(input.value.trim()); else moveDriverActive(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveDriverActive(-1); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      // Enter with nothing highlighted takes the only match, if there is
+      // exactly one — typing a full name then Enter should just work.
+      const pick = driverCombo.active >= 0 ? driverCombo.filtered[driverCombo.active]
+                 : (driverCombo.filtered.length === 1 ? driverCombo.filtered[0] : null);
+      if (pick) chooseDriver(pick.slug);
+    }
+    else if (e.key === 'Escape') { closeDriverCombo(); syncDriverInput(); input.blur(); }
+  });
+
+  // mousedown, not click: blur fires first on click and would close the list
+  // before the option registered the press.
+  list.addEventListener('mousedown', (e) => {
+    const opt = e.target.closest('.combo-opt');
+    if (opt) { e.preventDefault(); chooseDriver(opt.dataset.slug); }
+  });
+
+  clear.addEventListener('click', () => {
+    setDriverSelection('');
+    closeDriverCombo();
+    input.focus();
+  });
+
+  document.addEventListener('mousedown', (e) => {
+    if (driverCombo.open && !document.getElementById('driverCombo').contains(e.target)) {
+      closeDriverCombo();
+      syncDriverInput();
+    }
+  });
+
+  syncDriverInput();
 }
 
 let currentBaseline = null;
@@ -3496,8 +3692,7 @@ async function loadDriver(slug) {
   }
 }
 document.getElementById('refreshDriver').addEventListener('click', () => {
-  const sel = document.getElementById('driverSelect');
-  if (sel.value) loadDriver(sel.value);
+  if (driverCombo.selected) loadDriver(driverCombo.selected);
 });
 
 // ============ Profile ============

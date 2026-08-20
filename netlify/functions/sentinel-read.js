@@ -163,6 +163,43 @@ async function getBaseline(db, driverSlug) {
   }
 }
 
+// Surname used for alphabetical ordering.
+//
+// The MarginIQ roster stores lastName as "everything after the first token",
+// so any driver with a middle name or initial gets a lastName like "A Bennett",
+// "Alan Council" or "Juan Mccrary" — and sorting on that field files them under
+// the middle name ("James A Bennett" landed between Akyea and Best). 6 of 66
+// active drivers are affected. We don't own the employees collection, so derive
+// the surname here instead of correcting their data: take the final token of
+// the full name, which is the convention this roster follows in practice.
+//
+// Compound surnames ("Rodriguez Cepeda") therefore file under the final token.
+// That's a judgement call, not a certainty — the driver picker's search matches
+// every token of the name, so either half still finds them.
+function surnameOf(r) {
+  const full = String(r.fullName || '').trim();
+  if (full) {
+    const tokens = full.split(/\s+/);
+    return tokens[tokens.length - 1];
+  }
+  const last = String(r.lastName || '').trim();
+  if (last) {
+    const tokens = last.split(/\s+/);
+    return tokens[tokens.length - 1];
+  }
+  return String(r.slug || r.id || '');
+}
+
+// Surname, then given name so same-surname drivers (David/Rasheed Davis) hold a
+// stable, sensible order rather than whatever the query returned.
+function byName(a, b) {
+  const s = surnameOf(a).localeCompare(surnameOf(b), undefined, { sensitivity: 'base' });
+  if (s !== 0) return s;
+  const af = String(a.firstName || a.fullName || '');
+  const bf = String(b.firstName || b.fullName || '');
+  return af.localeCompare(bf, undefined, { sensitivity: 'base' });
+}
+
 async function driverList(db) {
   const rows = await db.listDocs('employees', {
     where: [{ field: 'status', op: '==', value: 'active' }],
@@ -179,7 +216,7 @@ async function driverList(db) {
       defaultTruck: r.defaultTruck || null,
       role: r.role
     }))
-    .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
+    .sort(byName);
 }
 
 // Active drivers' load-prep / wrap-up / truck-type config + current defaults.
