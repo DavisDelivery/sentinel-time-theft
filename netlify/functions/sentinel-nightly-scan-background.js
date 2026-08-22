@@ -107,6 +107,15 @@ export default async (req) => {
     wallMs,
     version: VERSION
   };
+  // Per-date status doc. The rolling window fires several of these
+  // concurrently, so a single shared doc would have each run clobbering the
+  // last and leaving only whichever finished newest. `nightlyScanStatus`
+  // itself is still written (it's the doc the runbook points at) but now
+  // means "the most recently completed date in the window", which is why the
+  // per-date docs exist alongside it.
+  try { await db.setDoc(STATUS_COLLECTION, `${STATUS_DOC}_${date}`, summary); } catch (e) {
+    console.error(`[nightly-bg] per-date status write failed for ${date}:`, e.message);
+  }
   try { await db.setDoc(STATUS_COLLECTION, STATUS_DOC, summary); } catch (e) {
     console.error('[nightly-bg] status write failed:', e.message);
   }
