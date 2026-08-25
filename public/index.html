@@ -3559,16 +3559,26 @@ function peerContextFor(slug, dash) {
         // Throughput: both load-prep classes of this truck type.
         throughputKeys: [`${me.truckType}_preload`, `${me.truckType}_selfload`],
         throughputLabel: `${me.truckType} trucks`,
-        // Gaps: only the driver's own load-prep class.
-        gapKeys: [loadKey],
-        gapLabel: `${me.truckType} · ${me.isSelfLoader ? 'self-load' : 'pre-load'}`
+        // Morning gap: clock-in to first delivery — the one window load-prep
+        // class actually models, so it compares within that class.
+        morningKeys: [loadKey],
+        morningLabel: `${me.truckType} · ${me.isSelfLoader ? 'self-load' : 'pre-load'}`,
+        // Afternoon gap: last delivery to clock-out. Load prep is measured
+        // from clock in and is spent before the first delivery, so it cannot
+        // bear on this window — compare across the whole truck type.
+        // (Self-loaders do show a much shorter afternoon gap in the data, 2m
+        // median vs 33m on straight trucks, but load-prep class is not the
+        // mechanism for it, so it is not the right axis to rank on.)
+        afternoonKeys: [`${me.truckType}_preload`, `${me.truckType}_selfload`],
+        afternoonLabel: `${me.truckType} trucks`
       };
     }
   }
   if (me.role === 'owner_op' && dash.contractorMetrics?.perDriverBreakdown?.length) {
     return {
       throughputKeys: ['__contractors'], throughputLabel: 'owner-operators',
-      gapKeys: ['__contractors'], gapLabel: 'owner-operators'
+      morningKeys: ['__contractors'], morningLabel: 'owner-operators',
+      afternoonKeys: ['__contractors'], afternoonLabel: 'owner-operators'
     };
   }
   return null;
@@ -3796,8 +3806,8 @@ async function loadDriver(slug) {
     let peerHtml = '';
     if (peerCtx) {
       const sph = peerRank(peerDash, peerCtx.throughputKeys, slug, 'medianStopsPerHourOnRoute', true);
-      const mg  = peerRank(peerDash, peerCtx.gapKeys, slug, 'medianMorningGap', false);
-      const ag  = peerRank(peerDash, peerCtx.gapKeys, slug, 'medianAfternoonGap', false);
+      const mg  = peerRank(peerDash, peerCtx.morningKeys, slug, 'medianMorningGap', false);
+      const ag  = peerRank(peerDash, peerCtx.afternoonKeys, slug, 'medianAfternoonGap', false);
       const fmtSph2 = v => (v == null ? '\u2014' : Number(v).toFixed(2));
       // Rank is only meaningful against a real group; 1-of-1 is not a comparison.
       const rankCell = (res) => {
@@ -3818,17 +3828,16 @@ async function loadDriver(slug) {
         </div>` : '';
       const rows = [
         row('On-route stops / hour', `vs all ${peerCtx.throughputLabel}`, sph, fmtSph2),
-        row('Morning gap', `vs ${peerCtx.gapLabel}`, mg, fmtDur),
-        row('Afternoon gap', `vs ${peerCtx.gapLabel}`, ag, fmtDur)
+        row('Morning gap', `vs ${peerCtx.morningLabel}`, mg, fmtDur),
+        row('Afternoon gap', `vs ${peerCtx.afternoonLabel}`, ag, fmtDur)
       ].filter(Boolean).join('');
       // Why the two comparison sets differ, and why the gap denominator is
       // smaller still (gaps need a clock punch; owner-operators never punch).
       const notes = [];
       if (sph) notes.push(`Throughput compares against all ${sph.of} ${peerCtx.throughputLabel} \u2014 load-prep class only affects the clock-in-to-first-delivery window, not how fast a driver works on route.`);
-      const gapRes = mg || ag;
-      if (gapRes) {
-        notes.push(`Gaps compare against the ${gapRes.of} ${peerCtx.gapLabel} driver${gapRes.of === 1 ? '' : 's'} who punch a clock${sph && gapRes.of < sph.of ? ` \u2014 the rest are owner-operators or have no punch data` : ''}.`);
-      }
+      if (mg) notes.push(`Morning gap compares within ${peerCtx.morningLabel} (${mg.of} driver${mg.of === 1 ? '' : 's'}) because load prep is the clock-in-to-first-delivery allowance.`);
+      if (ag) notes.push(`Afternoon gap compares across ${peerCtx.afternoonLabel} (${ag.of} driver${ag.of === 1 ? '' : 's'}) \u2014 load prep is spent before the first delivery, so it cannot affect this window.`);
+      if (sph && mg && mg.of < sph.of) notes.push(`Gap counts are lower than ${sph.of} because they need a clock punch; owner-operators never punch one.`);
       if (rows) {
         peerHtml = `
           <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
