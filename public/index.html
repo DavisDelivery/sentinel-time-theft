@@ -3763,12 +3763,21 @@ async function loadDriver(slug) {
         row('Morning gap', mg, b.medianMorningGap, fmtDur),
         row('Afternoon gap', ag, b.medianAfternoonGap, fmtDur)
       ].filter(Boolean).join('');
+      // The rank denominator is per-metric, not the bucket size: gap metrics
+      // need a clock punch, and owner-operators in the bucket never punch one.
+      // Without this note the header ("20 drivers") reads as the denominator
+      // while the row says "4 of 6", which looks like a bug rather than a
+      // deliberately narrower comparison.
+      const gapN = (mg || ag) ? (mg ? mg.of : ag.of) : null;
+      const gapNote = (gapN != null && gapN < b.n_drivers)
+        ? ` Gap ranks cover only the ${gapN} driver${gapN === 1 ? '' : 's'} in this group who punch a clock — the other ${b.n_drivers - gapN} are owner-operators or have no punch data. Stops / hour ranks cover all ${sph ? sph.of : b.n_drivers}.`
+        : '';
       if (rows) {
         peerHtml = `
           <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
             <div class="dh" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-3)">Compared with peers <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${escapeHtml(peerGroup.label)} · ${b.n_drivers} driver${b.n_drivers === 1 ? '' : 's'}, ${b.n_days.toLocaleString()} days</span></div>
             <div class="typical-grid">${rows}</div>
-            <div class="typical-caption">On-route stops / hour = completed stops ÷ time from first to last delivery. Rank 1 = most stops per hour, shortest gap.</div>
+            <div class="typical-caption">On-route stops / hour = completed stops ÷ time from first to last delivery. Rank 1 = most stops per hour, shortest gap.${gapNote}</div>
           </div>
         `;
       }
