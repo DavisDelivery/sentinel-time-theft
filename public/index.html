@@ -3530,39 +3530,96 @@ function loadPeerMetrics() {
   return peerMetricsPromise;
 }
 
-// Which drivers this one is measured against: same truck type and the same
-// load-prep class (a self-loader's route shape isn't comparable to a
-// pre-loaded driver's). Owner-ops fall back to the contractor pool when they
-// carry no company truck type.
-function peerGroupFor(slug, dash) {
+// Which drivers this one is measured against — and it differs BY METRIC.
+//
+// `isSelfLoader` is derived from loadPrepMin, which models one thing: how long
+// a driver spends between clocking in and reaching the first delivery. It has
+// no bearing on how fast they work once they're on route. The fleet data says
+// the same — across straight trucks, median on-route stops/hour is 2.71 for
+// pre-loaded drivers and 2.75 for self-loaders, a 0.04 difference on n=20 vs
+// n=13, while the same split moves the morning gap by 18m and the afternoon
+// gap by 31m.
+//
+// So throughput compares against everyone on the same truck type, and only the
+// gaps split by load-prep class. Splitting stops/hour too just halved the
+// comparison group for no reason — and produced a tractor/self-load bucket of
+// two drivers, where a "median" is meaningless.
+//
+// Owner-ops fall back to the contractor pool when they carry no truck type.
+function peerContextFor(slug, dash) {
   if (!dash?.referenceMetrics) return null;
   const roster = [...(dash.offendersRanked || []), ...(dash.restRoster || [])];
   const me = roster.find(o => o.slug === slug);
   if (!me) return null;
+  const R = dash.referenceMetrics;
   if (me.truckType && me.truckType !== 'unknown') {
-    const key = `${me.truckType}_${me.isSelfLoader ? 'selfload' : 'preload'}`;
-    const bucket = dash.referenceMetrics[key];
-    if (bucket?.perDriverBreakdown?.length) {
-      return { bucket, label: `${me.truckType} · ${me.isSelfLoader ? 'self-load' : 'pre-load'}` };
+    const loadKey = `${me.truckType}_${me.isSelfLoader ? 'selfload' : 'preload'}`;
+    if (R[loadKey]?.perDriverBreakdown?.length) {
+      return {
+        // Throughput: both load-prep classes of this truck type.
+        throughputKeys: [`${me.truckType}_preload`, `${me.truckType}_selfload`],
+        throughputLabel: `${me.truckType} trucks`,
+        // Gaps: only the driver's own load-prep class.
+        gapKeys: [loadKey],
+        gapLabel: `${me.truckType} · ${me.isSelfLoader ? 'self-load' : 'pre-load'}`
+      };
     }
   }
   if (me.role === 'owner_op' && dash.contractorMetrics?.perDriverBreakdown?.length) {
-    return { bucket: dash.contractorMetrics, label: 'owner-operators' };
+    return {
+      throughputKeys: ['__contractors'], throughputLabel: 'owner-operators',
+      gapKeys: ['__contractors'], gapLabel: 'owner-operators'
+    };
   }
   return null;
 }
 
-// Rank this driver within the peer group on one metric. `higherIsBetter`
+// Collect the per-driver rows across one or more buckets, de-duplicated by
+// slug (a driver appears in exactly one truck×load bucket, but the contractor
+// pool overlaps the grid, so guard anyway).
+function peerRows(dash, keys, field) {
+  const seen = new Set();
+  const out = [];
+  for (const k of keys) {
+    const bucket = k === '__contractors' ? dash.contractorMetrics : dash.referenceMetrics?.[k];
+    for (const p of (bucket?.perDriverBreakdown || [])) {
+      if (p[field] == null || seen.has(p.slug)) continue;
+      seen.add(p.slug);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+const medianOf = (nums) => {
+  if (!nums.length) return null;
+  const s = [...nums].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+// Rank this driver within the comparison set for one metric. `higherIsBetter`
 // flips the ordering: more stops/hour is better throughput, a longer gap is
-// worse. Returns null when the driver has no value for the metric.
-function peerRank(group, slug, field, higherIsBetter) {
-  const rows = (group.bucket.perDriverBreakdown || []).filter(p => p[field] != null);
+// worse.
+//
+// The peer median is the median of the per-driver medians in the same set the
+// rank is computed over — so "peer median" is literally the midpoint of the
+// ranked list. The bucket's own median*, by contrast, is a median over every
+// day in the bucket, which weights drivers by how many days they worked and
+// wouldn't line up with the rank shown beside it.
+function peerRank(dash, keys, slug, field, higherIsBetter) {
+  const rows = peerRows(dash, keys, field);
   const mine = rows.find(p => p.slug === slug);
   if (!mine) return null;
   const sorted = [...rows].sort((a, b) => higherIsBetter
     ? b[field] - a[field]
     : a[field] - b[field]);
-  return { mine: mine[field], rank: sorted.findIndex(p => p.slug === slug) + 1, of: rows.length, n_days: mine.n_days };
+  return {
+    mine: mine[field],
+    peerMedian: medianOf(rows.map(p => p[field])),
+    rank: sorted.findIndex(p => p.slug === slug) + 1,
+    of: rows.length
+  };
 }
 
 const ordinal = (n) => {
@@ -3585,7 +3642,7 @@ async function loadDriver(slug) {
       loadPeerMetrics().catch(() => null)
     ]);
     currentBaseline = r.baseline || null;
-    const peerGroup = peerDash ? peerGroupFor(slug, peerDash) : null;
+    const peerCtx = peerDash ? peerContextFor(slug, peerDash) : null;
     const records = (r.records || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
     if (!records.length) {
       container.innerHTML = `<div class="empty"><h3>No data</h3><p>No records found for this driver</p></div>`;
@@ -3737,47 +3794,47 @@ async function loadDriver(slug) {
     // itself (first delivery → last delivery), which is what peer throughput is
     // measured on.
     let peerHtml = '';
-    if (peerGroup) {
-      const sph = peerRank(peerGroup, slug, 'medianStopsPerHourOnRoute', true);
-      const mg = peerRank(peerGroup, slug, 'medianMorningGap', false);
-      const ag = peerRank(peerGroup, slug, 'medianAfternoonGap', false);
-      const b = peerGroup.bucket;
-      const fmtSph2 = v => (v == null ? '—' : Number(v).toFixed(2));
+    if (peerCtx) {
+      const sph = peerRank(peerDash, peerCtx.throughputKeys, slug, 'medianStopsPerHourOnRoute', true);
+      const mg  = peerRank(peerDash, peerCtx.gapKeys, slug, 'medianMorningGap', false);
+      const ag  = peerRank(peerDash, peerCtx.gapKeys, slug, 'medianAfternoonGap', false);
+      const fmtSph2 = v => (v == null ? '\u2014' : Number(v).toFixed(2));
       // Rank is only meaningful against a real group; 1-of-1 is not a comparison.
       const rankCell = (res) => {
-        if (!res || res.of < 3) return '<div class="t-v num dim">—</div>';
+        if (!res || res.of < 3) return '<div class="t-v num dim">\u2014</div>';
         const half = res.rank <= Math.ceil(res.of / 2);
         return `<div class="t-v num ${half ? 'peer-good' : 'peer-bad'}">${ordinal(res.rank)} of ${res.of}</div>`;
       };
-      const row = (label, res, peerVal, f) => res ? `
+      // Each row carries its own comparison set, because throughput and the
+      // gaps are measured against different groups.
+      const row = (label, sub, res, f) => res ? `
         <div class="typical-row">
-          <div class="typical-label">${label}</div>
+          <div class="typical-label">${label}<span class="typical-qual">${escapeHtml(sub)}</span></div>
           <div class="typical-vals">
             <div><div class="t-k">him</div><div class="t-v num">${f(res.mine)}</div></div>
-            <div><div class="t-k">peer median</div><div class="t-v num">${f(peerVal)}</div></div>
+            <div><div class="t-k">peer median</div><div class="t-v num">${f(res.peerMedian)}</div></div>
             <div><div class="t-k">rank</div>${rankCell(res)}</div>
           </div>
         </div>` : '';
       const rows = [
-        row('On-route stops / hour', sph, b.medianStopsPerHourOnRoute, fmtSph2),
-        row('Morning gap', mg, b.medianMorningGap, fmtDur),
-        row('Afternoon gap', ag, b.medianAfternoonGap, fmtDur)
+        row('On-route stops / hour', `vs all ${peerCtx.throughputLabel}`, sph, fmtSph2),
+        row('Morning gap', `vs ${peerCtx.gapLabel}`, mg, fmtDur),
+        row('Afternoon gap', `vs ${peerCtx.gapLabel}`, ag, fmtDur)
       ].filter(Boolean).join('');
-      // The rank denominator is per-metric, not the bucket size: gap metrics
-      // need a clock punch, and owner-operators in the bucket never punch one.
-      // Without this note the header ("20 drivers") reads as the denominator
-      // while the row says "4 of 6", which looks like a bug rather than a
-      // deliberately narrower comparison.
-      const gapN = (mg || ag) ? (mg ? mg.of : ag.of) : null;
-      const gapNote = (gapN != null && gapN < b.n_drivers)
-        ? ` Gap ranks cover only the ${gapN} driver${gapN === 1 ? '' : 's'} in this group who punch a clock — the other ${b.n_drivers - gapN} are owner-operators or have no punch data. Stops / hour ranks cover all ${sph ? sph.of : b.n_drivers}.`
-        : '';
+      // Why the two comparison sets differ, and why the gap denominator is
+      // smaller still (gaps need a clock punch; owner-operators never punch).
+      const notes = [];
+      if (sph) notes.push(`Throughput compares against all ${sph.of} ${peerCtx.throughputLabel} \u2014 load-prep class only affects the clock-in-to-first-delivery window, not how fast a driver works on route.`);
+      const gapRes = mg || ag;
+      if (gapRes) {
+        notes.push(`Gaps compare against the ${gapRes.of} ${peerCtx.gapLabel} driver${gapRes.of === 1 ? '' : 's'} who punch a clock${sph && gapRes.of < sph.of ? ` \u2014 the rest are owner-operators or have no punch data` : ''}.`);
+      }
       if (rows) {
         peerHtml = `
           <div style="margin-top:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)">
-            <div class="dh" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-3)">Compared with peers <span style="color:var(--text-4);font-weight:500;text-transform:none;letter-spacing:0">· ${escapeHtml(peerGroup.label)} · ${b.n_drivers} driver${b.n_drivers === 1 ? '' : 's'}, ${b.n_days.toLocaleString()} days</span></div>
+            <div class="dh" style="margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-3)">Compared with peers</div>
             <div class="typical-grid">${rows}</div>
-            <div class="typical-caption">On-route stops / hour = completed stops ÷ time from first to last delivery. Rank 1 = most stops per hour, shortest gap.${gapNote}</div>
+            <div class="typical-caption">On-route stops / hour = completed stops \u00f7 time from first to last delivery. Rank 1 = most stops per hour, shortest gap. ${escapeHtml(notes.join(' '))}</div>
           </div>
         `;
       }
