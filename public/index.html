@@ -3513,6 +3513,7 @@ function initDriverCombo() {
     setDriverSelection('');
     closeDriverCombo();
     currentDriverRecords = [];
+    currentDriverRecordsSlug = '';
     const st = document.getElementById('rescanStatus');
     if (st) { delete st.dataset.sticky; st.hidden = true; }
     updateRescanButton();
@@ -3542,6 +3543,18 @@ let currentBaseline = null;
 // already on each record and never re-reads the time clock. Only a re-scan goes
 // back to B600 / NuVizz / Motive and rebuilds the record.
 let currentDriverRecords = [];
+// The slug those records belong to. driverCombo.selected updates synchronously
+// on pick, while currentDriverRecords only updates after loadDriver's await
+// resolves — and not at all if it throws. Without pairing the two, a failed or
+// raced load leaves the button showing driver A's day count while selected is
+// driver B, and clicking it POSTs B's slug against A's dates. sentinel-day-scan
+// is the one caller that omits skipWriteIfNoData, so those writes land as
+// fabricated no-data records under B.
+let currentDriverRecordsSlug = '';
+// Guards against two loops running at once: updateRescanButton() re-enables the
+// button unconditionally, and it fires on every load — including the reload a
+// run itself triggers.
+let rescanInFlight = false;
 
 // Only days a re-scan could actually change.
 //
@@ -3579,14 +3592,16 @@ function updateRescanButton() {
   const btn = document.getElementById('rescanDriver');
   const status = document.getElementById('rescanStatus');
   if (!btn) return;
-  const dates = rescanCandidates(currentDriverRecords);
+  const dates = (currentDriverRecordsSlug && currentDriverRecordsSlug === driverCombo.selected)
+    ? rescanCandidates(currentDriverRecords)
+    : [];
   if (!driverCombo.selected || dates.length === 0) {
     btn.hidden = true;
     if (status && !status.dataset.sticky) status.hidden = true;
     return;
   }
   btn.hidden = false;
-  btn.disabled = false;
+  btn.disabled = rescanInFlight;
   const n = Math.min(dates.length, RESCAN_MAX);
   btn.textContent = `Re-scan ${n} day${n === 1 ? '' : 's'}`;
   btn.title = `Re-read the time clock, deliveries and GPS for ${n} day${n === 1 ? '' : 's'} where a feed is missing or the day is unscoreable`
@@ -3597,18 +3612,27 @@ async function runRescanDriver() {
   const btn = document.getElementById('rescanDriver');
   const status = document.getElementById('rescanStatus');
   const slug = driverCombo.selected;
-  if (!slug) return;
+  if (!slug || rescanInFlight) return;
+  // Only act on records we know belong to the selected driver.
+  if (currentDriverRecordsSlug !== slug) return;
   const all = rescanCandidates(currentDriverRecords);
   const dates = all.slice(0, RESCAN_MAX);
   if (!dates.length) return;
 
+  // Which days already had a punch, so the summary can report what actually
+  // changed rather than restating the post-scan state. A 'punch_without_
+  // deliveries' candidate already has one; counting it as "now has a clock
+  // punch" would tell the operator their upload worked when it did nothing.
+  const hadPunch = new Map(currentDriverRecords.map(r => [r.date, !!r.b600Matched]));
+
+  rescanInFlight = true;
   btn.disabled = true;
   status.hidden = false;
   status.dataset.sticky = '1';
   status.className = 'rescan-status';
 
   try {
-  let changed = 0, failed = 0;
+  let gained = 0, scanned = 0, failed = 0;
   const failures = [];
   // Sequential on purpose: each scan calls Motive and Google Distance, so
   // firing the whole set at once risks upstream rate limits and gives the
@@ -3618,19 +3642,29 @@ async function runRescanDriver() {
     status.textContent = `Re-scanning ${date} — ${i + 1} of ${dates.length}…`;
     try {
       const res = await fetch(`/api/sentinel-day-scan?${new URLSearchParams({ driverSlug: slug, date })}`, { method: 'POST' });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      // A punch that matched this time is the thing the operator is waiting on.
-      if (body.result?.b600Matched) changed++;
+      let body = null;
+      try { body = await res.json(); } catch (_) { body = null; }
+      if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+      // A 200 whose body didn't parse tells us nothing about what happened, so
+      // don't report it as a completed scan.
+      if (!body || !body.result) throw new Error('unreadable response');
+      scanned++;
+      // The delta the operator is waiting on: a punch that wasn't there before.
+      if (body.result.b600Matched && !hadPunch.get(date)) gained++;
     } catch (e) {
       failed++;
       if (failures.length < 3) failures.push(`${date}: ${e.message}`);
     }
   }
 
-  const parts = [`Re-scanned ${dates.length} day${dates.length === 1 ? '' : 's'}`];
-  if (changed) parts.push(`${changed} now have a clock punch`);
-  if (all.length > dates.length) parts.push(`${all.length - dates.length} still queued — run again`);
+  const parts = [`Re-scanned ${scanned} of ${dates.length} day${dates.length === 1 ? '' : 's'}`];
+  parts.push(gained
+    ? `${gained} gained a clock punch`
+    : 'no new clock punches — the time clock has nothing for these dates yet');
+  // Only invite another run when this one actually moved something; otherwise
+  // the remaining days are ones no re-scan can currently fix and "run again"
+  // would loop forever.
+  if (all.length > dates.length && gained) parts.push(`${all.length - dates.length} still queued — run again`);
   if (failed) parts.push(`${failed} failed (${failures.join('; ')})`);
   status.className = 'rescan-status ' + (failed ? 'err' : 'ok');
   status.textContent = parts.join(' · ') + '.';
@@ -3659,6 +3693,7 @@ async function runRescanDriver() {
     status.className = 'rescan-status err';
     status.textContent = 'Re-scan failed: ' + e.message;
   } finally {
+    rescanInFlight = false;
     // updateRescanButton re-enables on the happy path, but only if the reload
     // ran. Without this a throw anywhere after the loop leaves the button dead
     // until the operator switches drivers.
@@ -3800,6 +3835,7 @@ async function loadDriver(slug) {
   const container = document.getElementById('investContent');
   if (!slug) {
     currentDriverRecords = [];
+    currentDriverRecordsSlug = '';
     updateRescanButton();
     container.innerHTML = `<div class="empty"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><h3>Pick a driver</h3><p>Select someone from the menu above to see their 12-day pattern</p></div>`;
     return;
@@ -3816,6 +3852,7 @@ async function loadDriver(slug) {
     ]);
     currentBaseline = r.baseline || null;
     currentDriverRecords = r.records || [];
+    currentDriverRecordsSlug = slug;
     updateRescanButton();
     const peerCtx = peerDash ? peerContextFor(slug, peerDash) : null;
     const records = (r.records || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
@@ -4056,6 +4093,12 @@ async function loadDriver(slug) {
     const desc = records.slice().reverse();
     for (const rec of desc) list.appendChild(renderDriverDayRow(rec, 'investigate'));
   } catch (e) {
+    // The card failed to load, so the records in hand describe some other
+    // driver. Drop them and hide the button rather than leave it live with a
+    // stale count next to an error banner.
+    currentDriverRecords = [];
+    currentDriverRecordsSlug = '';
+    updateRescanButton();
     if (e.message !== 'unauthorized') container.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
   }
 }
