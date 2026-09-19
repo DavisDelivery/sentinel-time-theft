@@ -586,6 +586,23 @@ body {
 .combo-opt .truck { color: var(--text-4); font-size: var(--fs-sm); margin-left: auto; }
 .combo-opt mark { background: var(--brand-2); color: var(--brand); border-radius: 2px; padding: 0 1px; }
 .combo-empty { padding: 14px 12px; color: var(--text-3); font-size: var(--fs-sm); }
+/* Re-scan control: re-reads B600 / NuVizz / Motive for the days a record
+ * couldn't be built from. Distinct from Settings → Re-score All, which only
+ * recomputes from what is already stored. */
+.rescan-btn {
+  background: var(--bg-1); border: 1px solid var(--line); color: var(--text-2);
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 600;
+  min-height: 44px; padding: 0 14px; border-radius: 10px; cursor: pointer;
+  white-space: nowrap;
+}
+.rescan-btn:hover:not(:disabled) { background: var(--bg-3); color: var(--text); }
+.rescan-btn:disabled { opacity: 0.55; cursor: default; }
+.rescan-status {
+  margin: calc(var(--s-2) * -1 + 2px) 0 var(--s-3); font-size: var(--fs-xs);
+  color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+.rescan-status.ok { color: var(--clean); }
+.rescan-status.err { color: var(--crit); }
 .picker .refresh {
   background: var(--bg-1); border: 1px solid var(--line); color: var(--text-2);
   width: 44px; height: 44px; border-radius: 10px; cursor: pointer;
@@ -1095,10 +1112,12 @@ body {
       </button>
       <div class="combo-list" id="driverOptions" role="listbox" aria-label="Drivers" hidden></div>
     </div>
+    <button class="rescan-btn" id="rescanDriver" hidden></button>
     <button class="refresh" id="refreshDriver" aria-label="Refresh">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
     </button>
   </div>
+  <div id="rescanStatus" class="rescan-status" hidden></div>
   <div id="investContent">
     <div class="empty">
       <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -3493,6 +3512,10 @@ function initDriverCombo() {
   clear.addEventListener('click', () => {
     setDriverSelection('');
     closeDriverCombo();
+    currentDriverRecords = [];
+    const st = document.getElementById('rescanStatus');
+    if (st) { delete st.dataset.sticky; st.hidden = true; }
+    updateRescanButton();
     input.focus();
   });
 
@@ -3507,6 +3530,142 @@ function initDriverCombo() {
 }
 
 let currentBaseline = null;
+
+// ---------- Re-scan a driver ----------
+// A record is written from whatever the feeds held at scan time. Upload a
+// driver's punches after their days were already scored and those records stay
+// frozen at "no clock punch" — the data is there, the record just predates it.
+// The nightly job re-scans the last 7 weekdays, so recent days self-heal, but a
+// backfilled new hire sits outside that window and needs an explicit re-scan.
+//
+// Settings → Re-score All does NOT do this: re-score recomputes from the fields
+// already on each record and never re-reads the time clock. Only a re-scan goes
+// back to B600 / NuVizz / Motive and rebuilds the record.
+let currentDriverRecords = [];
+
+// Only days a re-scan could actually change.
+//
+// Keyed on the engine's own reviewReasons, not on the raw feed flags. Testing
+// !b600Matched directly looks equivalent and is not: owner-operators never
+// punch a B600 at all, so every one of their days would qualify forever — 401
+// of 401 for one contractor on the current roster — and re-scanning could never
+// change any of them. applyReviewBand already encodes that distinction, passing
+// expectPunch: false for owner-ops so a missing punch isn't held against them.
+//
+// reviewReasons is set whenever a day isn't fully scoreable (no punch with
+// deliveries, punch without deliveries, broken anchors, no travel data) and is
+// empty once the day scores cleanly — which is exactly "more data would change
+// this". It is independent of riskLevel: a day can carry a reason and still
+// earn a level from in-route activity, and those days need re-scanning too.
+//
+// The feed check is redundant (every reason requires a matched feed) but kept
+// as a guard so a malformed record can't queue a pointless scan.
+function rescanCandidates(records) {
+  return records
+    .filter(r => (r.b600Matched || r.nuvizzMatched)
+              && Array.isArray(r.reviewReasons) && r.reviewReasons.length > 0)
+    .map(r => r.date)
+    .filter(Boolean)
+    .sort()
+    .reverse();
+}
+
+// Bound on one click. A long-tenured driver with a broken feed could otherwise
+// queue hundreds of scans; the newest are the ones worth having first, and the
+// message says plainly what was left.
+const RESCAN_MAX = 40;
+
+function updateRescanButton() {
+  const btn = document.getElementById('rescanDriver');
+  const status = document.getElementById('rescanStatus');
+  if (!btn) return;
+  const dates = rescanCandidates(currentDriverRecords);
+  if (!driverCombo.selected || dates.length === 0) {
+    btn.hidden = true;
+    if (status && !status.dataset.sticky) status.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.disabled = false;
+  const n = Math.min(dates.length, RESCAN_MAX);
+  btn.textContent = `Re-scan ${n} day${n === 1 ? '' : 's'}`;
+  btn.title = `Re-read the time clock, deliveries and GPS for ${n} day${n === 1 ? '' : 's'} where a feed is missing or the day is unscoreable`
+    + (dates.length > RESCAN_MAX ? ` (${dates.length} qualify; newest ${RESCAN_MAX} this run)` : '');
+}
+
+async function runRescanDriver() {
+  const btn = document.getElementById('rescanDriver');
+  const status = document.getElementById('rescanStatus');
+  const slug = driverCombo.selected;
+  if (!slug) return;
+  const all = rescanCandidates(currentDriverRecords);
+  const dates = all.slice(0, RESCAN_MAX);
+  if (!dates.length) return;
+
+  btn.disabled = true;
+  status.hidden = false;
+  status.dataset.sticky = '1';
+  status.className = 'rescan-status';
+
+  try {
+  let changed = 0, failed = 0;
+  const failures = [];
+  // Sequential on purpose: each scan calls Motive and Google Distance, so
+  // firing the whole set at once risks upstream rate limits and gives the
+  // operator no usable progress.
+  for (let i = 0; i < dates.length; i++) {
+    const date = dates[i];
+    status.textContent = `Re-scanning ${date} — ${i + 1} of ${dates.length}…`;
+    try {
+      const res = await fetch(`/api/sentinel-day-scan?${new URLSearchParams({ driverSlug: slug, date })}`, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      // A punch that matched this time is the thing the operator is waiting on.
+      if (body.result?.b600Matched) changed++;
+    } catch (e) {
+      failed++;
+      if (failures.length < 3) failures.push(`${date}: ${e.message}`);
+    }
+  }
+
+  const parts = [`Re-scanned ${dates.length} day${dates.length === 1 ? '' : 's'}`];
+  if (changed) parts.push(`${changed} now have a clock punch`);
+  if (all.length > dates.length) parts.push(`${all.length - dates.length} still queued — run again`);
+  if (failed) parts.push(`${failed} failed (${failures.join('; ')})`);
+  status.className = 'rescan-status ' + (failed ? 'err' : 'ok');
+  status.textContent = parts.join(' · ') + '.';
+
+  // Stolen $ moved, so every cached view is stale.
+  invalidateDashCache();
+  Object.values(pages).forEach(p => { p.loaded = false; });
+  peerMetricsPromise = null;
+
+  // The operator may have moved to another driver while this ran. Reloading
+  // unconditionally would yank them back to the one they left. Their current
+  // card is already correct — only this driver's needs refreshing.
+  if (driverCombo.selected !== slug) return;
+
+  // Keep this run's result line through the reload it triggers; any later
+  // driver load clears it.
+  status.dataset.clearOnLoad = 'keep';
+  const summary = status.textContent, cls = status.className;
+  await loadDriver(slug);
+  delete status.dataset.clearOnLoad;
+  status.dataset.sticky = '1';
+  status.className = cls;
+  status.textContent = summary;
+  status.hidden = false;
+  } catch (e) {
+    status.className = 'rescan-status err';
+    status.textContent = 'Re-scan failed: ' + e.message;
+  } finally {
+    // updateRescanButton re-enables on the happy path, but only if the reload
+    // ran. Without this a throw anywhere after the loop leaves the button dead
+    // until the operator switches drivers.
+    const b = document.getElementById('rescanDriver');
+    if (b) b.disabled = false;
+  }
+}
 // ---------- Peer comparison ----------
 // Peer figures come from the dashboard's referenceMetrics, which already
 // computes, per driver and per peer bucket, the median on-route stops/hour,
@@ -3640,10 +3799,14 @@ const ordinal = (n) => {
 async function loadDriver(slug) {
   const container = document.getElementById('investContent');
   if (!slug) {
+    currentDriverRecords = [];
+    updateRescanButton();
     container.innerHTML = `<div class="empty"><svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><h3>Pick a driver</h3><p>Select someone from the menu above to see their 12-day pattern</p></div>`;
     return;
   }
   container.innerHTML = '<div class="loading">Loading driver history</div>';
+  const stEl = document.getElementById('rescanStatus');
+  if (stEl && stEl.dataset.clearOnLoad !== 'keep') { delete stEl.dataset.sticky; stEl.hidden = true; }
   try {
     // Peer metrics are supporting context — a failure there must not take the
     // driver view down with it.
@@ -3652,6 +3815,8 @@ async function loadDriver(slug) {
       loadPeerMetrics().catch(() => null)
     ]);
     currentBaseline = r.baseline || null;
+    currentDriverRecords = r.records || [];
+    updateRescanButton();
     const peerCtx = peerDash ? peerContextFor(slug, peerDash) : null;
     const records = (r.records || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')); // ascending for heatmap
     if (!records.length) {
@@ -3897,6 +4062,7 @@ async function loadDriver(slug) {
 document.getElementById('refreshDriver').addEventListener('click', () => {
   if (driverCombo.selected) loadDriver(driverCombo.selected);
 });
+document.getElementById('rescanDriver').addEventListener('click', runRescanDriver);
 
 // ============ Profile ============
 // Profiles tab is the roster directory: alphabetical list + search. Tapping
