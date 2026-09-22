@@ -79,15 +79,21 @@ const hhmmToMin = (hhmm) => {
  * Fetch the vehicle's raw location history for the calendar day.
  *
  * Motive's v2 vehicle_locations takes whole dates, not instants, and returns
- * them in UTC — asking for a single ET day therefore spans two of its dates.
- * We over-fetch by a day on each side and clamp afterwards, which is also what
- * keeps a night shift that crosses midnight intact.
+ * them in UTC — an ET day (UTC-4/-5) therefore spans two of its dates, D and
+ * D+1, and we clamp to the shift window afterwards. D+1 is what keeps a late
+ * finish or a night shift crossing midnight intact.
+ *
+ * D-1 is deliberately NOT fetched: it covers UTC [D-1 00:00Z, D-1 23:59Z],
+ * entirely before an ET day D begins at D 04:00Z, so it cannot contribute a
+ * point inside the window — even a 90-minute pad on a midnight start reaches
+ * only D 02:30Z. Including it was a third of the payload and a third of the
+ * latency for nothing (12.2s to 8s on a real tractor-day).
  */
 async function fetchVehicleHistory(vehicleId, date) {
   const apiKey = readEnv('MOTIVE_API_KEY');
   if (!apiKey) throw new Error('MOTIVE_API_KEY not set');
   const url = `${MOTIVE_BASE_V2}/vehicle_locations/${encodeURIComponent(vehicleId)}`
-    + `?start_date=${addDays(date, -1)}&end_date=${addDays(date, 1)}&per_page=1000`;
+    + `?start_date=${date}&end_date=${addDays(date, 1)}&per_page=1000`;
   const res = await fetch(url, { headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' } });
   if (!res.ok) throw new Error(`Motive vehicle_locations HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
