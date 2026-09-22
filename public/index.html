@@ -588,7 +588,10 @@ body {
 .combo-empty { padding: 14px 12px; color: var(--text-3); font-size: var(--fs-sm); }
 
 /* GPS trail: the day as Motive draws it, rendered on demand. */
-.trail-body { display: none; }
+.trail-body:empty { display: none; }  /* NOT a bare `display:none`: the toggle
+   shows this by clearing the inline style, which falls back to the stylesheet
+   — so an unconditional rule left the rendered map in a permanently hidden
+   box. Matches how .stops-list does it. */
 .trail-meta { color: var(--text-3); font-size: var(--fs-xs); margin: var(--s-2) 0; }
 .trail-map {
   height: 380px; width: 100%; border-radius: 10px; overflow: hidden;
