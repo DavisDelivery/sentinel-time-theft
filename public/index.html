@@ -586,6 +586,44 @@ body {
 .combo-opt .truck { color: var(--text-4); font-size: var(--fs-sm); margin-left: auto; }
 .combo-opt mark { background: var(--brand-2); color: var(--brand); border-radius: 2px; padding: 0 1px; }
 .combo-empty { padding: 14px 12px; color: var(--text-3); font-size: var(--fs-sm); }
+
+/* GPS trail: the day as Motive draws it, rendered on demand. */
+.trail-body { display: none; }
+.trail-meta { color: var(--text-3); font-size: var(--fs-xs); margin: var(--s-2) 0; }
+.trail-map {
+  height: 380px; width: 100%; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--bg-3);
+}
+.trail-stops { margin-top: var(--s-2); }
+.trail-stop {
+  display: grid; grid-template-columns: 22px auto auto 1fr; gap: var(--s-3);
+  align-items: baseline; padding: 6px 4px; font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--line); cursor: pointer;
+}
+.trail-stop:last-child { border-bottom: 0; }
+.trail-stop:hover { background: var(--bg-3); }
+.trail-stop .n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--crit); color: #fff; font-size: 10px; font-weight: 700;
+}
+.trail-stop .t { color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trail-stop .d { font-weight: 600; white-space: nowrap; }
+.trail-stop .p { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trail-stop.off-shift { opacity: 0.62; }
+.trail-stop.off-shift .n { background: var(--text-4); }
+.trail-stop .on-clock {
+  font-size: 10px; color: var(--med); font-weight: 600; margin-left: 4px;
+}
+.off-shift-tag {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em;
+  background: var(--bg-3); color: var(--text-4); padding: 1px 5px; border-radius: 3px;
+}
+.trail-pin {
+  background: transparent; border: 0; box-shadow: none;
+  color: #fff; font-weight: 700; font-size: 10px;
+}
+.trail-pin::before { display: none; }
 /* Re-scan control: re-reads B600 / NuVizz / Motive for the days a record
  * couldn't be built from. Distinct from Settings → Re-score All, which only
  * recomputes from what is already stored. */
@@ -3146,8 +3184,154 @@ function renderDetail(r) {
     </div>
   `);
 
+  // GPS trail drill-down — the day as Motive would draw it, fetched live on
+  // click. Nothing here is stored; see netlify/functions/sentinel-day-trail.js.
+  parts.push(`
+    <div class="dd-sec" data-trail-section>
+      <button class="stops-btn" data-trail-toggle data-driver-slug="${escapeHtml(r.driverSlug)}" data-date="${escapeHtml(r.date)}">
+        Show GPS trail for this day →
+      </button>
+      <div class="trail-body" data-trail-body></div>
+    </div>
+  `);
+
   return parts.join('');
 }
+
+// ---------- GPS trail ----------
+// Leaflet is loaded from a CDN the first time an operator opens a trail, not
+// at page load. The rest of SENTINEL is a single self-contained file that
+// works with no third-party scripts, and this keeps it that way for everyone
+// who never opens a map. OpenStreetMap tiles need no API key — the Google key
+// this app already holds is a server-side Distance Matrix key and must not be
+// shipped to the browser.
+let leafletPromise = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  if (leafletPromise) return leafletPromise;
+  leafletPromise = new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+    document.head.appendChild(css);
+    const js = document.createElement('script');
+    js.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+    js.onload = () => resolve(window.L);
+    js.onerror = () => { leafletPromise = null; reject(new Error('could not load the map library')); };
+    document.head.appendChild(js);
+  });
+  return leafletPromise;
+}
+
+const minToClock = (m) => {
+  if (m == null) return '—';
+  const wrapped = ((m % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60), mm = wrapped % 60;
+  const suf = h < 12 ? 'am' : 'pm';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(mm).padStart(2, '0')}${suf}`;
+};
+
+function renderTrail(container, data) {
+  const route = data.route || [];
+  if (!route.length) {
+    container.innerHTML = '<div class="stops-err">No GPS points for this driver on this day.</div>';
+    return;
+  }
+  const stops = data.stops || [];
+  const src = data.window?.source;
+  const srcLabel = src === 'punch' ? 'clock-in to clock-out'
+    : src === 'deliveries' ? 'first to last delivery'
+    : 'whole day';
+  container.innerHTML = `
+    <div class="trail-meta mono">Truck #${escapeHtml(String(data.vehicle?.number ?? '?'))} · ${route.length} points drawn from ${data.counts?.inWindow ?? 0} · ${stops.length} stop${stops.length === 1 ? '' : 's'} · window: ${escapeHtml(srcLabel)} ±${data.window?.padMin ?? 0}m</div>
+    <div class="trail-map" data-trail-map></div>
+    <div class="trail-stops">${stops.map((s, i) => `
+      <div class="trail-stop${s.onShiftMinutes === 0 ? ' off-shift' : ''}" data-stop-idx="${i}"${s.onShiftMinutes === 0 ? ' title="Entirely outside the clocked shift"' : ''}>
+        <span class="n">${i + 1}</span>
+        <span class="t mono">${minToClock(s.fromMin)}–${minToClock(s.toMin)}</span>
+        <span class="d">${fmtDur(s.minutes)}${(s.onShiftMinutes != null && s.onShiftMinutes < s.minutes) ? ` <span class="on-clock">${s.onShiftMinutes === 0 ? 'none on the clock' : fmtDur(s.onShiftMinutes) + ' on the clock'}</span>` : ''}</span>
+        <span class="p">${s.description ? escapeHtml(s.description) : ''}${s.onShiftMinutes === 0 ? ' <span class="off-shift-tag">off shift</span>' : ''}</span>
+      </div>`).join('')}</div>
+  `;
+
+  const el = container.querySelector('[data-trail-map]');
+  const L = window.L;
+  const map = L.map(el, { scrollWheelZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  const latlngs = route.map(p => [p[0], p[1]]);
+  const line = L.polyline(latlngs, { color: '#2563eb', weight: 3, opacity: 0.85 }).addTo(map);
+  map.fitBounds(line.getBounds(), { padding: [24, 24] });
+
+  // Numbered stop markers, keyed to the list below so clicking a row flies to it.
+  const markers = stops.map((s, i) => {
+    const m = L.circleMarker([s.lat, s.lon], {
+      radius: 9, color: '#fff', weight: 2,
+      // Off-shift stops are the truck parked at the yard, not dwell on the
+      // clock — drawn grey so they can't be mistaken for a finding.
+      fillColor: s.onShiftMinutes === 0 ? '#94a3b8' : '#b91c1c', fillOpacity: 0.95
+    }).addTo(map);
+    m.bindTooltip(String(i + 1), { permanent: true, direction: 'center', className: 'trail-pin' });
+    m.bindPopup(`<b>Stop ${i + 1}</b><br>${minToClock(s.fromMin)}–${minToClock(s.toMin)} (${fmtDur(s.minutes)})`
+      + ((s.onShiftMinutes != null && s.onShiftMinutes < s.minutes) ? `<br>${s.onShiftMinutes === 0 ? 'none' : fmtDur(s.onShiftMinutes)} on the clock` : '')
+      + (s.description ? '<br>' + escapeHtml(s.description) : ''));
+    return m;
+  });
+  container.querySelectorAll('.trail-stop').forEach(row => {
+    row.addEventListener('click', () => {
+      const m = markers[+row.dataset.stopIdx];
+      if (m) { map.setView(m.getLatLng(), 15); m.openPopup(); }
+    });
+  });
+  // The container is sized by CSS after innerHTML, so Leaflet's initial
+  // measurement can be short by a frame.
+  setTimeout(() => map.invalidateSize(), 60);
+}
+
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest && ev.target.closest('[data-trail-toggle]');
+  if (!btn) return;
+  const section = btn.closest('[data-trail-section]');
+  const body = section.querySelector('[data-trail-body]');
+  if (body.dataset.loaded === '1' && body.style.display !== 'none') {
+    body.style.display = 'none';
+    btn.textContent = 'Show GPS trail for this day →';
+    return;
+  }
+  if (body.dataset.loaded === '1') {
+    body.style.display = '';
+    btn.textContent = 'Hide GPS trail ↑';
+    return;
+  }
+  const slug = btn.dataset.driverSlug, date = btn.dataset.date;
+  btn.disabled = true;
+  btn.textContent = 'Loading GPS trail…';
+  try {
+    const [data] = await Promise.all([
+      fetch('/api/sentinel-day-trail?' + new URLSearchParams({ driverSlug: slug, date }))
+        .then(async res => {
+          const b = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(b.error || ('HTTP ' + res.status));
+          return b;
+        }),
+      loadLeaflet()
+    ]);
+    body.style.display = '';
+    renderTrail(body, data);
+    body.dataset.loaded = '1';
+    btn.textContent = 'Hide GPS trail ↑';
+  } catch (e) {
+    body.style.display = '';
+    body.innerHTML = `<div class="stops-err">Couldn't load the GPS trail: ${escapeHtml(e.message)}</div>`;
+    btn.textContent = 'Show GPS trail for this day →';
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // Lazy stops loader — wired up via event delegation on the page container so
 // it survives every re-render of dd-detail without re-binding.
